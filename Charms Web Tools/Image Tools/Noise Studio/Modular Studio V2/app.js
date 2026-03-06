@@ -1,0 +1,3913 @@
+﻿(() => {
+    "use strict";
+    const APP_VERSION = '22.1'; // [QUALITY UPDATE] Rec.709, Linear sRGB, True Median
+    // --- GLOBAL STATE ---
+    /** 
+     * The 'state' object holds the single source of truth for the application.
+     * It manages WebGL resources (gl, programs, textures, fbos), 
+     * render stack configuration (renderOrder), and persistent user settings.
+     */
+    const state = {
+        gl: null,             // The WebGL2RenderingContext instance
+        canvas: null,         // The main #displayCanvas DOM element
+        programs: {},         // Map of compiled Shader Programs (id -> WebGLProgram)
+        textures: {},         // Map of reusable WebGL textures (e.g. 'base', 'noise')
+        fbos: {},             // Map of Framebuffer Objects for intermediate render steps
+        pingPong: [null, null], // Double-buffer for iterative effects like Bilateral Filter
+        thumbnailFBO: null,
+        baseImage: null,      // The original HTMLImageElement uploaded by the user
+        imageFiles: [],       // Array of image file handles for multi-image mode
+        currentImageIndex: 0, // Index for the imageFiles array
+        isMultiImageMode: false, // Are we editing a single image or a folder?
+        isExporting: false,   // Is a batch export in progress?
+        playInterval: null,   // Interval ID for the play feature
+        isPlaying: false,     // Is the animation playing?
+        lastFrameTime: 0,     // Timestamp of the last rendered frame
+        realtimeFps: 0,       // Calculated real-time FPS
+        frameRenderCount: 0,  // Counter to periodically update FPS display
+        width: 1,             // Original image width
+        height: 1,            // Original image height
+        renderWidth: 1,       // Scaled viewport width
+        renderHeight: 1,      // Scaled viewport height
+        fboWidth: 0,          // Actual pixel width of offscreen buffers
+        fboHeight: 0,         // Actual pixel height of offscreen buffers
+        busy: false,          // Mutex to prevent overlapping render calls
+        upscaleFactor: 1,     // Multiplier for export-quality rendering (1x-10x)
+        // The pipeline order: processed from first to last
+        // Starting with an empty renderOrder allows users to dynamically add layers.
+        renderOrder: [],
+        activeLayerPreview: null,
+        activeSection: 'adjust', // Currently open UI section (used for 'Isolated' previews)
+        caCenter: { x: 0.5, y: 0.5 }, // UV coordinates for Chromatic Aberration center
+        isDraggingPin: false,
+        layerTextures: {},    // Stores the results of each layer for the 'Breakdown' view
+        layerVisibility: {},
+        palette: [],          // Current list of Hex colors for Palette Reconstructor
+        lastExtractionImage: null,
+        pinIdleTimer: null,
+        isPreviewLocked: false, // Prevents the original-hover-compare overlay
+        clampPreview: true,     // Default safety: limit preview to 2048px
+        isZoomLocked: false,    // Tab key toggle to stay at a specific spot
+        lastMousePos: { x: 0, y: 0 },
+        isZooming: false,       // Current active zoom operation
+        isLensMode: false,      // Toggle between FULL and LENS zoom
+        keepFolderStructure: false, // Toggle to preserve folder structure on export
+        allFiles: []            // Array of all files (including non-images) for full replica export
+    };
+
+    /** 'UI' is a cache of DOM element references. 
+     *  Populated automatically during init to avoid redundant document.getElementById calls.
+     *  [MULTI-INSTANCE] Declared as 'let' to allow Proxy swapping for duplicate layer instances. */
+    let UI = {};
+    const _UI_BASE = UI; // Keep reference to the real UI object
+    let eyedropperTarget = null;
+
+    /** 'LAYERS' provides user-facing metadata for each pipeline step. */
+    const LAYERS = {
+        'scale': { name: 'Resolution Scale', color: '#fff' },
+        'noise': { name: 'Noise Group', color: '#fff' },
+        'adjust': { name: 'Adjustments', color: '#fff' },
+        'hdr': { name: 'HDR Emulation', color: '#fff' },
+        'ca': { name: 'Chromatic Aberration', color: '#fff' },
+        'blur': { name: 'Blur', color: '#fff' },
+        'cell': { name: 'Cell Shading', color: '#fff' },
+        'halftone': { name: 'Halftoning', color: '#fff' },
+        'bilateral': { name: 'Bilateral Filter', color: '#fff' },
+        'denoise': { name: 'Denoising', color: '#fff' },
+        'dither': { name: 'Dithering', color: '#fff' },
+        'palette': { name: 'Palette Reconstructor', color: '#fff' },
+        'edge': { name: 'Edge Effects', color: '#fff' },
+        'corruption': { name: 'Corruption', color: '#fff' },
+        'compression': { name: 'Compression', color: '#fff' },
+        'airyBloom': { name: 'Airy Disk Bloom', color: '#fff' },
+        'glareRays': { name: 'Glare Rays', color: '#fff' },
+        'hankelBlur': { name: 'Radial Hankel Blur', color: '#fff' },
+        'vignette': { name: 'Vignette & Focus', color: '#fff' },
+        'analogVideo': { name: 'Analog Video (VHS/CRT)', color: '#fff' },
+        'lensDistort': { name: 'Lens Distortion (Optics)', color: '#fff' },
+        'heatwave': { name: 'Heatwave & Ripples', color: '#fff' },
+        'lightLeaks': { name: 'Light Leaks', color: '#fff' },
+        'shadows': { name: 'Shadows Mask', color: '#fff' },
+        'highlights': { name: 'Highlights Mask', color: '#fff' }
+    };
+
+    const _hexCache = {};
+    function hexToRgb(hex) {
+        if (!hex) return { r: 0, g: 0, b: 0 };
+        if (_hexCache[hex]) return _hexCache[hex];
+        let result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        const res = result ? {
+            r: parseInt(result[1], 16) / 255,
+            g: parseInt(result[2], 16) / 255,
+            b: parseInt(result[3], 16) / 255
+        } : { r: 0, g: 0, b: 0 };
+        _hexCache[hex] = res;
+        return res;
+    }
+
+    // --- MULTI-INSTANCE SUPPORT ---
+    /**
+     * Parses an instance ID like 'noise__1' into { baseType: 'noise', index: 1 }.
+     * Default instances (no suffix) return index 0.
+     */
+    const _instanceIdCache = {};
+    function parseInstanceId(instanceId) {
+        if (_instanceIdCache[instanceId]) return _instanceIdCache[instanceId];
+        const splitIdx = instanceId.lastIndexOf('__');
+        const res = splitIdx === -1
+            ? { baseType: instanceId, index: 0 }
+            : { baseType: instanceId.substring(0, splitIdx), index: parseInt(instanceId.substring(splitIdx + 2)) };
+        _instanceIdCache[instanceId] = res;
+        return res;
+    }
+
+    /**
+     * Creates a Proxy that redirects UI property reads to instance-suffixed elements.
+     * For instance index 2, reading proxy.brightness returns _UI_BASE['brightness__2'] if it exists.
+     */
+    const _uiProxyCache = {};
+    function createInstanceUIProxy(instanceIndex) {
+        if (_uiProxyCache[instanceIndex]) return _uiProxyCache[instanceIndex];
+        const proxy = new Proxy(_UI_BASE, {
+            get(target, prop) {
+                if (typeof prop === 'symbol') return target[prop];
+                const suffixed = prop + '__' + instanceIndex;
+                return (suffixed in target) ? target[suffixed] : target[prop];
+            }
+        });
+        _uiProxyCache[instanceIndex] = proxy;
+        return proxy;
+    }
+
+    /**
+     * Computes the uniforms object for the current render pass.
+     * Uses whatever 'UI' is currently pointing at (may be a Proxy for instances).
+     */
+    function computeUniforms(w, h) {
+        try {
+            return {
+                u_bright: parseFloat(UI.brightness?.value || 0),
+                u_cont: parseFloat(UI.contrast?.value || 0),
+                u_sat: parseFloat(UI.saturationAdj?.value || 0) / 100.0,
+                u_warmth: parseFloat(UI.warmth?.value || 0),
+                u_sharp: parseFloat(UI.sharpen?.value || 0),
+                u_sharpThresh: parseFloat(UI.sharpenThreshold?.value || 5),
+                u_step: [1.0 / w, 1.0 / h],
+                u_hdrTol: parseFloat(UI.hdrTolerance?.value || 0),
+                u_hdrAmt: parseFloat(UI.hdrAmount?.value || 0),
+                u_ca_amt: calcCurve(parseFloat(UI.aberrationAmount?.value || 0), 300, 300),
+                u_ca_blur: calcCurve(parseFloat(UI.aberrationBlur?.value || 0), 100, 100.0),
+                u_ca_center: [state.caCenter.x, state.caCenter.y],
+                u_ca_rad: parseFloat(UI.caRadius?.value || 0) / 1000.0,
+                u_ca_fall: parseFloat(UI.caFalloff?.value || 0) / 1000.0,
+                u_airy_intensity: parseFloat(UI.airyBloomIntensity?.value ?? 0.5),
+                u_airy_aperture: parseFloat(UI.airyBloomAperture?.value ?? 3.0),
+                u_airy_threshold: parseFloat(UI.airyBloomThreshold?.value ?? 0.7),
+                u_glare_intensity: parseFloat(UI.glareRaysIntensity?.value ?? 0.4),
+                u_glare_rays: parseFloat(UI.glareRaysRays?.value ?? 6),
+                u_glare_length: parseFloat(UI.glareRaysLength?.value ?? 0.3),
+                u_glare_blur: parseFloat(UI.glareRaysBlur?.value ?? 0.2),
+                u_hankel_intensity: parseFloat(UI.hankelBlurIntensity?.value ?? 0.5),
+                u_hankel_radius: parseFloat(UI.hankelBlurRadius?.value ?? 5.0),
+                u_hankel_quality: parseFloat(UI.hankelBlurQuality?.value ?? 16),
+                u_vignette_intensity: parseFloat(UI.vignetteIntensity?.value ?? 50) / 100.0,
+                u_vignette_radius: parseFloat(UI.vignetteRadius?.value ?? 75) / 100.0,
+                u_vignette_softness: parseFloat(UI.vignetteSoftness?.value ?? 50) / 100.0,
+                u_vignette_color: hexToRgb(UI.vignetteColor?.value ?? '#000000'),
+                u_analog_wobble: parseFloat(UI.analogWobble?.value ?? 30) / 100.0,
+                u_analog_bleed: parseFloat(UI.analogBleed?.value ?? 50) / 100.0,
+                u_analog_curve: parseFloat(UI.analogCurve?.value ?? 20) / 100.0,
+                u_analog_noise: parseFloat(UI.analogNoise?.value ?? 40) / 100.0,
+                u_lens_amount: parseFloat(UI.lensAmount?.value ?? 0) / 100.0,
+                u_lens_scale: parseFloat(UI.lensScale?.value ?? 100) / 100.0,
+                u_heatwave_intensity: parseFloat(UI.heatwaveIntensity?.value ?? 30) / 100.0,
+                u_heatwave_speed: parseFloat(UI.heatwaveSpeed?.value ?? 50) / 100.0,
+                u_heatwave_scale: parseFloat(UI.heatwaveScale?.value ?? 20),
+                u_heatwave_direction: parseInt(UI.heatwaveDirection?.value ?? 0),
+                u_lightleaks_intensity: parseFloat(UI.lightLeaksIntensity?.value ?? 50) / 100.0,
+                u_lightleaks_color1: hexToRgb(UI.lightLeaksColor1?.value ?? '#ff5500'),
+                u_lightleaks_color2: hexToRgb(UI.lightLeaksColor2?.value ?? '#0055ff'),
+                u_time: (performance.now() % 100000) / 1000.0
+            };
+        } catch (e) {
+            console.warn('[Engine] Error computing uniforms:', e.message);
+            return { u_step: [1 / w, 1 / h], u_time: 0 };
+        }
+    }
+
+    // --- INIT ---
+    /** Entry point: Initializes WebGL, UI bindings, and default state. */
+    window.addEventListener('DOMContentLoaded', async () => {
+        // [MODULAR] Generate all layer UI panels from JSON definitions
+        if (typeof generateLayerUI === 'function') {
+            try {
+                await generateLayerUI();
+            } catch (e) {
+                console.error('[UI-Gen] Failed during startup, continuing with partial UI:', e);
+            }
+        } else {
+            console.warn('[UI-Gen] generateLayerUI() is unavailable; continuing.');
+        }
+
+        // [DOM COLLECTION] Auto-populate UI object for fast reference
+        document.querySelectorAll('input, select, button, canvas').forEach(el => {
+            if (el.id) UI[el.id] = el;
+        });
+        // Additional containers
+        UI.layerGrid = document.getElementById('layerGrid');
+        UI.previewContainer = document.getElementById('previewContainer');
+        UI.overlayOriginal = document.getElementById('overlayOriginal');
+        UI.loading = document.getElementById('loading');
+        UI.hoverZoomValue = document.getElementById('hoverZoomValue');
+        UI.hoverZoomSlider = document.getElementById('hoverZoomSlider'); // Fix: Targeted input directly
+        UI.zoomResIndicator = document.getElementById('zoomResIndicator');
+        UI.loadFolderBtn = document.getElementById('loadFolderBtn');
+        UI.prevImageBtn = document.getElementById('prevImageBtn');
+        UI.nextImageBtn = document.getElementById('nextImageBtn');
+        UI.imageCounter = document.getElementById('imageCounter');
+        UI.imageScrubber = document.getElementById('imageScrubber');
+        UI.playBtn = document.getElementById('playBtn');
+        UI.playFps = document.getElementById('playFps');
+        UI.actualFps = document.getElementById('actualFps');
+        UI['export-overlay'] = document.getElementById('export-overlay');
+        UI['export-status'] = document.getElementById('export-status');
+        UI.stopExportBtn = document.getElementById('stopExportBtn');
+
+        // Critical interactive elements (might not be input/button tags)
+        UI.caPin = document.getElementById('caPin');
+        UI.previewLock = document.getElementById('previewLock');
+        UI.resetCenterBtn = document.getElementById('resetCenterBtn');
+        UI.clampPreviewToggle = document.getElementById('clampPreviewToggle');
+        UI.gpuMaxRes = document.getElementById('gpuMaxRes');
+        UI.exportInfo = document.getElementById('exportInfo');
+        UI.zoomLens = document.getElementById('zoomLens');
+        UI.lensToggleBtn = document.getElementById('lensToggleBtn');
+        UI.lensCanvas = document.getElementById('lensCanvas');
+
+        // Histogram elements
+        UI.histogramCanvas = document.getElementById('histogramCanvas');
+        UI.avgBrightnessVal = document.getElementById('avgBrightnessVal');
+        UI.renderResVal = document.getElementById('renderResVal');
+
+        // Vectorscope elements
+        UI.vectorscopeCanvas = document.getElementById('vectorscopeCanvas');
+        UI.paradeCanvas = document.getElementById('paradeCanvas');
+        UI.avgSaturationVal = document.getElementById('avgSaturationVal');
+
+        // Explicitly collect Blur/Dither controls to ensure no initialization race conditions
+        const manualIds = [
+            'blurEnable', 'blurAmount', 'blurType',
+            'blurColorExclude', 'blurTargetColor', 'blurColorTolerance', 'blurColorFade',
+            'blurLumaMask', 'blurShadowThreshold', 'blurShadowFade', 'blurHighlightThreshold', 'blurHighlightFade',
+            'ditherEnable', 'ditherBitDepth', 'ditherPaletteSize', 'ditherStrength', 'ditherScale', 'ditherType', 'ditherUsePalette', 'ditherGamma',
+            'ditherColorExclude', 'ditherExcludeColor', 'ditherColorTolerance', 'ditherColorFade',
+            'ditherLumaMask', 'ditherShadowThreshold', 'ditherShadowFade', 'ditherHighlightThreshold', 'ditherHighlightFade',
+            'paletteEnable', 'paletteBlend', 'paletteSmoothing', 'paletteSmoothingType', 'paletteList', 'extractCount',
+            'edgeEnable', 'edgeBlend', 'edgeMode', 'edgeStrength', 'edgeTolerance', 'edgeFgSat', 'edgeBgSat', 'edgeBloom', 'edgeSmooth', 'edgeSatControls',
+            'denoiseEnable', 'denoiseMode', 'denoiseSearchRadius', 'denoisePatchRadius', 'denoiseH', 'denoiseBlend',
+            'denoiseColorExclude', 'denoiseExcludeColor', 'denoiseColorTolerance', 'denoiseColorFade',
+            'denoiseLumaMask', 'denoiseShadowThreshold', 'denoiseShadowFade', 'denoiseHighlightThreshold', 'denoiseHighlightFade', 'denoiseInvertMask',
+            'airyBloomEnable', 'airyBloomIntensity', 'airyBloomAperture', 'airyBloomThreshold', 'airyBloomThresholdFade', 'airyBloomCutoff',
+            'airyBloomColorExclude', 'airyBloomExcludeColor', 'airyBloomColorTolerance', 'airyBloomColorFade',
+            'airyBloomLumaMask', 'airyBloomShadowThreshold', 'airyBloomShadowFade', 'airyBloomHighlightThreshold', 'airyBloomHighlightFade', 'airyBloomInvertMask',
+            'hankelBlurEnable', 'hankelBlurIntensity', 'hankelBlurRadius', 'hankelBlurQuality',
+            'hankelColorExclude', 'hankelExcludeColor', 'hankelColorTolerance', 'hankelColorFade',
+            'hankelLumaMask', 'hankelShadowThreshold', 'hankelShadowFade', 'hankelHighlightThreshold', 'hankelHighlightFade', 'hankelInvertMask',
+            'compressionEnable', 'compressionMethod', 'compressionQuality', 'compressionBlockSize', 'compressionBlend', 'compressionIterations'
+        ];
+        manualIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) UI[id] = el;
+        });
+
+        // [TABS] Handle navigation between 'Controls' and 'Render Layer Order'
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                e.target.classList.add('active');
+                document.getElementById(e.target.dataset.tab).classList.add('active');
+            });
+        });
+
+        // [SIDEBAR] Only one section open at a time logic
+        // Now handled by bindDynamicControls
+        setupDragLayerList();
+
+        // [VALUE BINDING] Sync range sliders with their adjacent text indicators
+        // Now handled by bindDynamicControls
+
+        // Keep hover-zoom label and state in sync with the actual slider input
+        if (UI.hoverZoomSlider) {
+            const syncHoverZoomUI = (rawVal) => {
+                const val = parseFloat(rawVal);
+                if (isNaN(val)) return;
+                state.zoomLevel = val;
+                if (UI.hoverZoomValue) UI.hoverZoomValue.textContent = `${val.toFixed(1).replace(/\.0$/, '')}x`;
+            };
+            UI.hoverZoomSlider.addEventListener('input', (e) => syncHoverZoomUI(e.target.value));
+            syncHoverZoomUI(UI.hoverZoomSlider.value);
+        }
+        // Generic input triggers
+        // Now handled by bindDynamicControls
+        bindDynamicControls(document);
+
+
+        // [DELEGATED EVENTS] Handle layer-specific inputs without crashing on missing elements
+        document.addEventListener('change', (e) => {
+            if (!e.target.id) return;
+
+            // Edge Mode Saturation Toggle
+            if (e.target.id.startsWith('edgeMode')) {
+                const suffix = e.target.id.substring('edgeMode'.length);
+                const satControls = document.getElementById('edgeSatControls' + suffix);
+                if (satControls) {
+                    satControls.style.display = e.target.value === '1' ? 'block' : 'none';
+                }
+            }
+            // Palette Extraction Upload
+            else if (e.target.id.startsWith('paletteImageUpload')) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        state.lastExtractionImage = img;
+                        const countEl = document.getElementById('extractCount' + e.target.id.substring('paletteImageUpload'.length));
+                        const count = parseInt(countEl?.value || 8);
+                        extractPaletteFromImage(img, count);
+                    };
+                    img.src = evt.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        document.addEventListener('input', (e) => {
+            if (!e.target.id) return;
+            if (e.target.id.startsWith('extractCount')) {
+                if (state.lastExtractionImage) {
+                    const count = parseInt(e.target.value);
+                    extractPaletteFromImage(state.lastExtractionImage, count);
+                }
+            }
+        });
+
+        // Palette buttons
+        const getRandomHex = () => '#' + Math.floor(Math.random() * 16777215).toString(16).padStart(6, '0');
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.id) return;
+
+            if (e.target.id.startsWith('addPaletteColor')) {
+                state.palette.push(getRandomHex());
+                updatePaletteUI();
+                requestRender();
+            } else if (e.target.id.startsWith('clearPalette')) {
+                state.palette = [];
+                updatePaletteUI();
+                requestRender();
+            } else if (e.target.id.startsWith('randomPalette')) {
+                const len = state.palette.length;
+                if (len === 0) {
+                    const count = Math.floor(Math.random() * 5) + 3;
+                    const newPalette = new Set();
+                    while (newPalette.size < count) newPalette.add(getRandomHex());
+                    state.palette = Array.from(newPalette);
+                } else {
+                    for (let i = 0; i < len; i++) {
+                        state.palette[i] = getRandomHex();
+                    }
+                }
+                updatePaletteUI();
+                requestRender();
+            } else if (e.target.id.startsWith('extractPalette')) {
+                const suffix = e.target.id.substring('extractPalette'.length);
+                const uploadInput = document.getElementById('paletteImageUpload' + suffix);
+                if (uploadInput) uploadInput.click();
+            }
+        });
+
+        // Palette Canvas Picker Logic
+        // Create a hidden input for the canvas picker to target
+        const palettePickerInput = document.createElement('input');
+        palettePickerInput.id = 'pickPaletteColor';
+        palettePickerInput.type = 'color';
+        palettePickerInput.style.display = 'none';
+        document.body.appendChild(palettePickerInput);
+        UI.pickPaletteColorInput = palettePickerInput;
+
+        palettePickerInput.addEventListener('change', (e) => {
+            state.palette.push(e.target.value);
+            updatePaletteUI();
+            requestRender();
+        });
+
+        // Lock Toggle Logic
+        UI.previewLock.addEventListener('change', (e) => {
+            state.isPreviewLocked = e.target.checked;
+            if (state.isPreviewLocked) {
+                UI.overlayOriginal.classList.remove('show');
+            }
+        });
+
+        // [PIN INTERACTIONS] Chromatic Aberration Center Control
+        // Purpose: Allows users to drag the center of the CA effect on the preview.
+        // Logic: Maps DOM mouse coordinates to normalized 0.0-1.0 UV space for the shader.
+        document.addEventListener('click', (e) => {
+            if (e.target.id && e.target.id.startsWith('resetCenterBtn')) {
+                state.caCenter = { x: 0.5, y: 0.5 };
+                updatePinPosition();
+                requestRender();
+            }
+        });
+
+        UI.caPin.addEventListener('mousedown', (e) => {
+            state.isDraggingPin = true;
+            // Lock logic: If globally locked, just keep preview. If not, hide overlay.
+            if (!state.isPreviewLocked) UI.overlayOriginal.classList.remove('show');
+            clearTimeout(state.pinIdleTimer);
+            e.preventDefault();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (state.isDraggingPin) {
+                state.isDraggingPin = false;
+                // Idle timer only matters if not locked
+                if (!state.isPreviewLocked) {
+                    state.pinIdleTimer = setTimeout(() => {
+                        UI.overlayOriginal.classList.add('show');
+                    }, 4000);
+                }
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!state.isDraggingPin) return;
+            const rect = UI.previewContainer.getBoundingClientRect();
+            let x = (e.clientX - rect.left) / rect.width;
+            let y = 1.0 - (e.clientY - rect.top) / rect.height;
+            x = Math.max(0, Math.min(1, x));
+            y = Math.max(0, Math.min(1, y));
+            state.caCenter = { x, y };
+            updatePinPosition();
+            requestRender();
+        });
+
+        // [HOVER ZOOM & LENS] High-Resolution Detail Viewer
+        // Purpose: Full-screen scaling OR circular lens magnification on hover.
+        // Logic: 
+        // 1. Temporarily upsizes rendering buffers to 'Full Res' on hover (to avoid blurriness).
+        // 2. Maps mouse coordinates to CSS transform-origin (FULL) or 2D context sample area (LENS).
+        let hoverTimeout;
+        const pContainer = UI.previewContainer;
+        const displayCanvas = UI.displayCanvas;
+
+        // Hover Zoom Slider Logic
+        const parseZoom = (val) => {
+            let v = parseFloat(val);
+            if (isNaN(v)) return 1.0;
+            return v;
+        };
+
+        // Lens toggle button
+        UI.lensToggleBtn.addEventListener('click', () => {
+            state.isLensMode = !state.isLensMode;
+            UI.lensToggleBtn.textContent = state.isLensMode ? 'LENS' : 'FULL';
+            UI.lensToggleBtn.style.background = state.isLensMode ? 'var(--accent)' : '';
+            UI.lensToggleBtn.style.color = state.isLensMode ? '#000' : '';
+            resetZoom();
+        });
+
+        // Setup lens canvas
+        const lensSize = 180;
+        UI.lensCanvas.width = lensSize;
+        UI.lensCanvas.height = lensSize;
+        const lensCtx = UI.lensCanvas.getContext('2d');
+
+        // Reset zoom transform when mouse leaves
+        const resetZoom = (force = false) => {
+            if (state.isZoomLocked && !force) return;
+
+            displayCanvas.style.transform = '';
+            displayCanvas.style.transformOrigin = '';
+            displayCanvas.style.zIndex = '';
+            UI.zoomResIndicator.style.display = 'none';
+            if (UI.zoomLens) UI.zoomLens.style.display = 'none';
+            if (state.isZooming) {
+                state.isZooming = false;
+                // Return to preview resolution (only if clamping is active)
+                if (state.clampPreview) {
+                    reallocateBuffers(false);
+                    requestRender();
+                }
+            }
+        };
+
+        // Apply zoom transform based on cursor position
+        const applyZoom = (e) => {
+            const zoomInput = UI.hoverZoomSlider;
+            const zoomLevel = parseZoom(zoomInput.value);
+
+            if (zoomLevel <= 1.0) {
+                resetZoom();
+                return;
+            }
+
+
+            // Hide the overlay when zooming
+            UI.overlayOriginal.classList.remove('show');
+
+            // Render at full resolution for zoom if not already
+            if (!state.isZooming) {
+                state.isZooming = true;
+                reallocateBuffers(true);
+                requestRender();
+            }
+
+            const rect = pContainer.getBoundingClientRect();
+
+            // Use cached mouse position if locked
+            if (!state.isZoomLocked && e) {
+                state.lastMousePos = { x: e.clientX, y: e.clientY };
+            }
+
+            const mouseX = state.lastMousePos.x - rect.left;
+            const mouseY = state.lastMousePos.y - rect.top;
+            const xPct = mouseX / rect.width;
+            const yPct = mouseY / rect.height;
+
+            if (state.isLensMode) {
+                // LENS MODE: Show circular magnifier following cursor
+                displayCanvas.style.transform = '';
+                displayCanvas.style.transformOrigin = '';
+                displayCanvas.style.zIndex = '';
+
+                // Position lens centered on cursor
+                if (UI.zoomLens) {
+                    UI.zoomLens.style.display = 'block';
+                    UI.zoomLens.style.left = (mouseX - lensSize / 2) + 'px';
+                    UI.zoomLens.style.top = (mouseY - lensSize / 2) + 'px';
+                }
+
+                // Calculate the actual displayed canvas size (object-fit: contain)
+                const canvasAspect = displayCanvas.width / displayCanvas.height;
+                const containerAspect = rect.width / rect.height;
+                let displayedW, displayedH, offsetX, offsetY;
+
+                if (canvasAspect > containerAspect) {
+                    displayedW = rect.width;
+                    displayedH = rect.width / canvasAspect;
+                    offsetX = 0;
+                    offsetY = (rect.height - displayedH) / 2;
+                } else {
+                    displayedH = rect.height;
+                    displayedW = rect.height * canvasAspect;
+                    offsetX = (rect.width - displayedW) / 2;
+                    offsetY = 0;
+                }
+
+                // Map mouse position to canvas pixel coordinates
+                const canvasX = ((mouseX - offsetX) / displayedW) * displayCanvas.width;
+                const canvasY = ((mouseY - offsetY) / displayedH) * displayCanvas.height;
+
+                // Calculate source region size based on zoom
+                const srcSize = lensSize / zoomLevel;
+                const srcX = canvasX - srcSize / 2;
+                const srcY = canvasY - srcSize / 2;
+
+                // Draw zoomed portion to lens canvas
+                if (lensCtx) {
+                    lensCtx.clearRect(0, 0, lensSize, lensSize);
+                    lensCtx.drawImage(
+                        displayCanvas,
+                        Math.max(0, Math.min(srcX, displayCanvas.width - srcSize)),
+                        Math.max(0, Math.min(srcY, displayCanvas.height - srcSize)),
+                        srcSize, srcSize,
+                        0, 0, lensSize, lensSize
+                    );
+                }
+            } else {
+                // FULL MODE: Scale entire canvas from cursor point
+                if (UI.zoomLens) UI.zoomLens.style.display = 'none';
+                displayCanvas.style.zIndex = '15';
+
+                // Correct mapping for object-fit: contain (centered canvas)
+                const canvasAspect = displayCanvas.width / displayCanvas.height;
+                const containerAspect = rect.width / rect.height;
+                let offsetX = 0, offsetY = 0, displayedW = rect.width, displayedH = rect.height;
+
+                if (canvasAspect > containerAspect) {
+                    displayedH = rect.width / canvasAspect;
+                    offsetY = (rect.height - displayedH) / 2;
+                } else {
+                    displayedW = rect.height * canvasAspect;
+                    offsetX = (rect.width - displayedW) / 2;
+                }
+
+                const localX = (mouseX - offsetX) / displayedW;
+                const localY = (mouseY - offsetY) / displayedH;
+
+                displayCanvas.style.transformOrigin = `${localX * 100}% ${localY * 100}%`;
+                displayCanvas.style.transform = `scale(${zoomLevel})`;
+            }
+
+            // Show resolution indicator
+            const srcW = state.width * state.upscaleFactor;
+            const srcH = state.height * state.upscaleFactor;
+            const bufW = displayCanvas.width;
+            const bufH = displayCanvas.height;
+            const match = (bufW >= srcW && bufH >= srcH) ? '✓ FULL RES' : '⚠ SCALED';
+            const modeLabel = state.isLensMode ? 'LENS' : 'FULL';
+            UI.zoomResIndicator.innerHTML = `Mode: ${modeLabel}<br>Source: ${srcW}×${srcH}<br>Canvas: ${bufW}×${bufH}<br>${match}`;
+            UI.zoomResIndicator.style.display = 'block';
+            UI.zoomResIndicator.style.color = (bufW >= srcW && bufH >= srcH) ? '#0f0' : '#f80';
+            UI.zoomResIndicator.style.borderColor = (bufW >= srcW && bufH >= srcH) ? '#0f0' : '#f80';
+        };
+
+        pContainer.addEventListener('mouseenter', (e) => {
+            const zoomLevel = parseFloat(UI.hoverZoomSlider.value);
+            if (zoomLevel <= 1 && !state.isPreviewLocked && !state.activeLayerPreview) {
+                UI.overlayOriginal.classList.add('show');
+            }
+            clearTimeout(hoverTimeout);
+            applyZoom(e);
+        });
+
+        pContainer.addEventListener('mouseleave', (e) => {
+            UI.overlayOriginal.classList.remove('show');
+            clearTimeout(hoverTimeout);
+
+            // If the mouse leaves but it's locked, we don't reset
+            if (!state.isZoomLocked) {
+                resetZoom();
+            }
+        });
+
+        pContainer.addEventListener('wheel', (e) => {
+            // If Ctrl/Meta is held, we cycle blend modes (legacy behavior)
+            // Otherwise, wheel controls zoom level
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                const sel = UI.blendMode;
+                const len = sel.options.length;
+                let idx = sel.selectedIndex;
+                const dir = Math.sign(e.deltaY);
+                idx = (idx + dir + len) % len;
+                sel.selectedIndex = idx;
+                requestRender();
+            } else {
+                // Standard Wheel to Zoom
+                e.preventDefault();
+                let val = parseFloat(UI.hoverZoomSlider.value);
+                const dir = -Math.sign(e.deltaY);
+                val += dir * 0.5;
+                val = Math.max(1, Math.min(8, val));
+                UI.hoverZoomSlider.value = val;
+
+                if (val > 1) {
+                    UI.overlayOriginal.classList.remove('show');
+                }
+
+                // Trigger input event manually to update text and state
+                UI.hoverZoomSlider.dispatchEvent(new Event('input'));
+                applyZoom(e);
+            }
+        }, { passive: false });
+
+        pContainer.addEventListener('mousemove', (e) => {
+            clearTimeout(hoverTimeout);
+            const zVal = parseFloat(UI.hoverZoomSlider.value);
+            if (!state.isPreviewLocked && !state.activeLayerPreview && zVal <= 1) {
+                UI.overlayOriginal.classList.add('show');
+            } else {
+                UI.overlayOriginal.classList.remove('show');
+            }
+            applyZoom(e);
+        });
+
+        // [ZOOM LOCK] Tab keybind
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Tab') {
+                // Only toggle if we are currently hovering or already locked
+                const isHovering = UI.previewContainer.matches(':hover');
+                if (isHovering || state.isZoomLocked) {
+                    e.preventDefault();
+                    state.isZoomLocked = !state.isZoomLocked;
+
+                    // If we just unlocked and aren't hovering, snap back
+                    if (!state.isZoomLocked && !isHovering) {
+                        resetZoom(true);
+                    } else if (state.isZoomLocked) {
+                        // Ensure zoom stays high-res
+                        applyZoom();
+                    }
+                }
+            }
+        });
+
+        // JSON Handlers
+        UI.downloadJsonBtn.addEventListener('click', downloadPreset);
+        UI.uploadJsonTrigger.addEventListener('click', () => UI.jsonUpload.click());
+        UI.jsonUpload.addEventListener('change', uploadPreset);
+
+        await initWebGL();
+
+        // Single image load
+        UI.imageUpload.addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            state.isMultiImageMode = false;
+            state.imageFiles = [file];
+            state.currentImageIndex = 0;
+            loadImageFromFile(file).then(updateUIMode);
+        });
+
+        // Folder load
+        UI.loadFolderBtn.addEventListener('click', loadFolder);
+
+        // Navigation
+        UI.prevImageBtn.addEventListener('click', () => changeImage(-1));
+        UI.nextImageBtn.addEventListener('click', () => changeImage(1));
+
+        // Scrubber
+        UI.imageScrubber.addEventListener('input', (e) => {
+            const newIndex = parseInt(e.target.value, 10);
+            if (newIndex !== state.currentImageIndex) {
+                state.currentImageIndex = newIndex;
+                // Don't wait for image to load, makes scrubber feel laggy
+                requestAnimationFrame(() => {
+                    loadImageFromFile(state.imageFiles[state.currentImageIndex]).then(updateUIMode);
+                });
+            }
+        });
+
+        // --- Playback Logic ---
+        const startPlay = () => {
+            if (state.playInterval) clearInterval(state.playInterval);
+            state.isPlaying = true;
+            UI.playBtn.textContent = 'STOP ■';
+            const fps = parseInt(UI.playFps.value, 10) || 10;
+
+            state.playInterval = setInterval(() => {
+                let newIndex = (state.currentImageIndex + 1) % state.imageFiles.length;
+                state.currentImageIndex = newIndex;
+                // Don't await, just fire and forget to keep timing consistent
+                loadImageFromFile(state.imageFiles[state.currentImageIndex]);
+                updateUIMode(); // Update scrubber and counter
+            }, 1000 / fps);
+        };
+
+        const stopPlay = () => {
+            if (state.playInterval) {
+                clearInterval(state.playInterval);
+                state.playInterval = null;
+            }
+            state.isPlaying = false;
+            UI.playBtn.textContent = 'PLAY ►';
+        };
+
+        UI.playBtn.addEventListener('click', () => {
+            if (state.isPlaying) {
+                stopPlay();
+            } else {
+                startPlay();
+            }
+        });
+
+        UI.keepFolderStructureToggle.addEventListener('change', (e) => {
+            state.keepFolderStructure = e.target.checked;
+        });
+
+        // Download button now handles both modes
+        UI.downloadBtn.addEventListener('click', () => {
+            if (state.isMultiImageMode && state.imageFiles.length > 1) {
+                downloadAllImages();
+            } else {
+                downloadSingleImage();
+            }
+        });
+
+        UI.downloadCurrentBtn = document.getElementById('downloadCurrentBtn');
+        UI.compareBtn.addEventListener('click', openCompare);
+        UI.downloadCurrentBtn.addEventListener('click', downloadSingleImage);
+        UI.closeCompare.addEventListener('click', () => document.getElementById('compareModal').classList.remove('show'));
+        UI.exportSideBySide.addEventListener('click', () => exportComparison('side'));
+        UI.exportStacked.addEventListener('click', () => exportComparison('stack'));
+
+        UI.manualBtn = document.getElementById('manualBtn');
+        if (UI.manualBtn) {
+            UI.manualBtn.addEventListener('click', () => {
+                document.getElementById('manualModal').classList.add('show');
+            });
+            document.getElementById('closeManualBtn').addEventListener('click', () => {
+                document.getElementById('manualModal').classList.remove('show');
+            });
+        }
+
+        // [EYEDROPPER TOOL] Localized Color Selection
+        // Purpose: Picks colors directly from the WebGL canvas for palette or exclusion masks.
+        // Logic: Reads pixel data from the 'null' framebuffer (screen) at the mapped click coordinate.
+        // Note: Uses WebGL's inverted Y-axis relative to DOM coordinates.
+        const style = document.createElement('style');
+        style.textContent = `
+                .eyedropper-btn { background: none; border: none; cursor: pointer; font-size: 1.2em; padding: 0 5px; opacity: 0.7; transition: opacity 0.2s; }
+                .eyedropper-btn:hover { opacity: 1; }
+                .eyedropper-active { cursor: crosshair !important; }
+            `;
+        document.head.appendChild(style);
+
+        // Eyedropper buttons handled by bindDynamicControls
+
+        UI.displayCanvas.addEventListener('click', (e) => {
+            if (!eyedropperTarget) return;
+
+            const rect = UI.displayCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const gl = state.gl;
+            const canvas = UI.displayCanvas;
+            const cw = canvas.width;
+            const ch = canvas.height;
+
+            // 1. Map DOM click to Relative UV (0-1) across the "Contain" rect
+            const imgAspect = state.width / state.height;
+            const rectAspect = rect.width / rect.height;
+
+            let drawW, drawH, ox, oy;
+            if (imgAspect > rectAspect) {
+                drawW = rect.width;
+                drawH = rect.width / imgAspect;
+                ox = 0;
+                oy = (rect.height - drawH) / 2;
+            } else {
+                drawH = rect.height;
+                drawW = rect.height * imgAspect;
+                ox = (rect.width - drawW) / 2;
+                oy = 0;
+            }
+
+            if (x < ox || x > ox + drawW || y < oy || y > oy + drawH) return;
+
+            const relX = (x - ox) / drawW;
+            const relY = (y - oy) / drawH;
+
+            // 2. Pick from Original Texture (state.textures.base)
+            // We use a temporary FBO to read from the base texture directly
+            const tempFbo = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, tempFbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.textures.base, 0);
+
+            // Map UV to base image dimensions
+            const pickX = Math.floor(relX * state.width);
+            const pickY = Math.floor((1.0 - relY) * state.height);
+
+            const pixel = new Uint8Array(4);
+            gl.readPixels(pickX, pickY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+
+            // Clean up
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.deleteFramebuffer(tempFbo);
+
+            const hex = "#" + ((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1);
+
+            const input = document.getElementById(eyedropperTarget);
+            if (input) {
+                input.value = hex;
+                input.dispatchEvent(new Event('input'));
+                input.dispatchEvent(new Event('change'));
+            }
+
+            eyedropperTarget = null;
+            UI.displayCanvas.classList.remove('eyedropper-active');
+        });
+
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && eyedropperTarget) {
+                eyedropperTarget = null;
+                UI.displayCanvas.classList.remove('eyedropper-active');
+            }
+        });
+    });
+
+    // --- JSON PRESETS ---
+    /** 
+     * Serializes the current 'state' and all UI input values into a JSON file.
+     * Purpose: Allows users to save and share their custom noise profiles.
+     */
+    function downloadPreset() {
+        const preset = {
+            metadata: {
+                version: APP_VERSION,
+                timestamp: new Date().toISOString(),
+                source: 'Noise Studio'
+            },
+            values: {},
+            checks: {},
+            selects: {},
+            renderOrder: state.renderOrder,
+            layerVisibility: state.layerVisibility,
+            caCenter: state.caCenter,
+            palette: state.palette,
+            imageData: null
+        };
+
+        // Collect inputs
+        document.querySelectorAll('input[type=range], input[type=color], input[type=number]').forEach(el => {
+            if (el.id) preset.values[el.id] = el.value;
+        });
+        document.querySelectorAll('input[type=checkbox]').forEach(el => {
+            if (!el.id.startsWith('drag-') && el.id !== 'jsonIncludeImage' && el.id !== 'previewLock') { // Skip non-setting toggles
+                preset.checks[el.id] = el.checked;
+            }
+        });
+        document.querySelectorAll('select').forEach(el => {
+            if (el.id !== 'jsonImportMode') {
+                preset.selects[el.id] = el.value;
+            }
+        });
+
+        // Save Image Data if checked
+        const includeImage = UI.jsonIncludeImage?.checked;
+        if (state.baseImage && includeImage) {
+            try {
+                const c = document.createElement('canvas');
+                c.width = state.baseImage.width;
+                c.height = state.baseImage.height;
+                const ctx = c.getContext('2d');
+                ctx.drawImage(state.baseImage, 0, 0);
+                preset.imageData = c.toDataURL('image/png');
+            } catch (e) {
+                console.warn("Could not save image data (likely tainted canvas or too large):", e);
+            }
+        }
+
+        // Filename generation
+        let filename = 'grain-settings.json';
+        if (state.isMultiImageMode && state.imageFiles[state.currentImageIndex]) {
+            const baseName = state.imageFiles[state.currentImageIndex].name.replace(/\.[^/.]+$/, "");
+            filename = `${baseName}-preset.json`;
+        } else if (state.baseImage && state.imageFiles[0]) {
+            const baseName = state.imageFiles[0].name.replace(/\.[^/.]+$/, "");
+            filename = `${baseName}-preset.json`;
+        }
+
+        const blob = new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+    }
+
+    /** 
+     * Parses a JSON file to restore app state.
+     * logic: Checks 'jsonImportMode' to decide what to load.
+     */
+    function uploadPreset(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = evt => {
+            try {
+                const preset = JSON.parse(evt.target.result);
+                if (!preset || (typeof preset !== 'object')) throw new Error("Invalid JSON format.");
+
+                const mode = document.getElementById('jsonImportMode').value; // 'both', 'settings', 'image'
+
+                const shouldLoadImage = (mode === 'both' || mode === 'image') && preset.imageData;
+                const shouldLoadSettings = (mode === 'both' || mode === 'settings');
+
+                if (shouldLoadImage) {
+                    const img = new Image();
+                    img.onload = () => {
+                        loadNewImage(img);
+                        if (shouldLoadSettings) {
+                            restoreSettings(preset);
+                            console.log(`Preset loaded successfully (Version: ${preset.metadata?.version || 'Unknown'})`);
+                        }
+                    };
+                    img.onerror = () => alert("Error loading image data from JSON.");
+                    img.src = preset.imageData;
+                } else if (shouldLoadSettings) {
+                    restoreSettings(preset);
+                    console.log(`Settings loaded successfully (Version: ${preset.metadata?.version || 'Unknown'})`);
+                }
+            } catch (err) {
+                console.error("Preset upload failed:", err);
+                alert("Error loading JSON: " + err.message);
+            }
+            // Reset input so the same file can be uploaded again if needed
+            e.target.value = '';
+        };
+        reader.readAsText(file);
+    }
+
+    function restoreSettings(preset) {
+        if (preset.metadata && preset.metadata.version !== APP_VERSION) {
+            console.warn(`Version mismatch: Preset is ${preset.metadata.version}, App is ${APP_VERSION}. Attempting to restore anyway.`);
+        }
+
+        // [MULTI-INSTANCE JSON FIX] 1. Rebuild Layer Structure First
+        // Clean up ALL currently existing layers
+        state.renderOrder.slice().forEach(id => {
+            removeLayerInstance(id);
+        });
+
+        // Generate any required layers from the preset
+        if (preset.renderOrder) {
+            preset.renderOrder.forEach(id => {
+                const { baseType, index } = parseInstanceId(id);
+                // Ensure UI elements are created before setting values
+                if (typeof createLayerInstance === 'function') {
+                    // Make sure we only add it if it doesn't already exist in the DOM
+                    const existingPanel = document.querySelector(`[data-layer-key="${baseType}"][data-instance-index="${index}"]`);
+                    if (!existingPanel) {
+                        const newPanel = createLayerInstance(baseType, index);
+                        if (newPanel) bindDynamicControls(newPanel);
+                    }
+                }
+            });
+
+            // Re-collect UI elements after generation
+            document.querySelectorAll('input, select, button, canvas').forEach(el => {
+                if (el.id) _UI_BASE[el.id] = el;
+            });
+        }
+
+        // [MULTI-INSTANCE JSON FIX] 2. Apply values (sliders/colors) after UI is guaranteed to exist
+        if (preset.values) {
+            Object.keys(preset.values).forEach(id => {
+                let el = document.getElementById(id);
+                if (!el) el = document.getElementById(id + '__0'); // Legacy compat
+                if (el) {
+                    el.value = preset.values[id];
+                    // Sync adjacent text indicator
+                    if (el.nextElementSibling && el.nextElementSibling.classList.contains('control-value')) {
+                        el.nextElementSibling.value = preset.values[id];
+                    }
+                    el.dispatchEvent(new Event('input'));
+                    el.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+        // Apply checkboxes
+        if (preset.checks) {
+            Object.keys(preset.checks).forEach(id => {
+                let el = document.getElementById(id);
+                if (!el) el = document.getElementById(id + '__0'); // Legacy compat
+                if (el) {
+                    el.checked = preset.checks[id];
+                    el.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+        // Apply selects
+        if (preset.selects) {
+            Object.keys(preset.selects).forEach(id => {
+                let el = document.getElementById(id);
+                if (!el) el = document.getElementById(id + '__0'); // Legacy compat
+                if (el) {
+                    el.value = preset.selects[id];
+                    el.dispatchEvent(new Event('change'));
+                }
+            });
+        }
+
+        // Apply Core State
+        if (preset.renderOrder) {
+            // Now safely inject the entire order back
+            state.renderOrder = preset.renderOrder;
+            setupDragLayerList();
+        }
+        if (preset.layerVisibility) {
+            state.layerVisibility = preset.layerVisibility;
+            setupDragLayerList();
+        }
+
+        // Apply legacy upscaleFactor as a Scale layer
+        if (preset.upscaleFactor && preset.upscaleFactor !== 1) {
+            let scaleLayerId = state.renderOrder.find(id => parseInstanceId(id).baseType === 'scale');
+            if (!scaleLayerId) {
+                // Add scale layer to the end
+                const instances = state.renderOrder.filter(id => parseInstanceId(id).baseType === 'scale');
+                const idx = instances.length;
+                const newId = idx === 0 ? 'scale' : `scale__${idx}`;
+
+                if (idx > 0 && typeof createLayerInstance === 'function') {
+                    createLayerInstance('scale', idx);
+                }
+
+                state.renderOrder.push(newId);
+                state.layerVisibility[newId] = true;
+                scaleLayerId = newId;
+            }
+            // Add to checks so it gets enabled
+            if (!preset.checks) preset.checks = {};
+            preset.checks[scaleLayerId === 'scale' ? 'scaleEnable' : `scaleEnable__${parseInstanceId(scaleLayerId).index}`] = true;
+
+            // Add to values so it gets set
+            if (!preset.values) preset.values = {};
+            preset.values[scaleLayerId === 'scale' ? 'scaleMultiplier' : `scaleMultiplier__${parseInstanceId(scaleLayerId).index}`] = preset.upscaleFactor;
+        }
+
+        if (preset.caCenter) {
+            state.caCenter = preset.caCenter;
+            updatePinPosition();
+        }
+        if (preset.palette) {
+            state.palette = preset.palette;
+            updatePaletteUI();
+        }
+
+        requestRender();
+    }
+
+    // --- MULTI-IMAGE FUNCTIONS ---
+
+    async function loadFolder() {
+        try {
+            const dirHandle = await window.showDirectoryPicker();
+            const imageFiles = [];
+            const allFiles = [];
+
+            async function scan(handle, path = "") {
+                for await (const entry of handle.values()) {
+                    if (entry.kind === 'file') {
+                        const file = await entry.getFile();
+                        file.relativePath = path; // Store for export
+                        allFiles.push(file);
+                        if (file.type.startsWith('image/')) {
+                            imageFiles.push(file);
+                        }
+                    } else if (entry.kind === 'directory') {
+                        await scan(entry, path + entry.name + "/");
+                    }
+                }
+            }
+
+            UI.loading.textContent = 'SCANNING FOLDER...';
+            UI.loading.style.display = 'block';
+            await scan(dirHandle);
+            UI.loading.style.display = 'none';
+
+            if (imageFiles.length > 0) {
+                state.imageFiles = imageFiles.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+                state.allFiles = allFiles; // Store all files for replica export
+                state.isMultiImageMode = true;
+                state.currentImageIndex = 0;
+                await loadImageFromFile(state.imageFiles[0]);
+                updateUIMode();
+            } else {
+                alert('No images found in the selected folder.');
+            }
+        } catch (err) {
+            console.error('Error loading folder:', err);
+            UI.loading.style.display = 'none';
+            if (err.name !== 'AbortError') {
+                alert('Could not load folder. Please ensure your browser supports the File System Access API and you have granted permission.');
+            }
+        }
+    }
+
+    async function changeImage(direction) {
+        if (!state.isMultiImageMode || state.imageFiles.length === 0) return;
+
+        let newIndex = state.currentImageIndex + direction;
+
+        if (newIndex < 0) return;
+        if (newIndex >= state.imageFiles.length) return;
+
+        state.currentImageIndex = newIndex;
+        await loadImageFromFile(state.imageFiles[state.currentImageIndex]);
+        updateUIMode();
+    }
+
+    async function loadImageFromFile(file) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.src = url;
+            img.onload = () => {
+                loadNewImage(img);
+                URL.revokeObjectURL(url);
+                resolve();
+            };
+            img.onerror = (err) => {
+                URL.revokeObjectURL(url);
+                reject(err);
+            };
+        });
+    }
+
+    function updateUIMode() {
+        const nav = document.getElementById('image-navigation');
+        const scrubber = UI.imageScrubber;
+        if (state.isMultiImageMode && state.imageFiles.length > 1) {
+            nav.style.display = 'flex';
+            UI.imageCounter.textContent = `Image ${state.currentImageIndex + 1} of ${state.imageFiles.length}`;
+            UI.downloadBtn.textContent = `DOWNLOAD ALL (${state.imageFiles.length})`;
+            scrubber.max = state.imageFiles.length - 1;
+            scrubber.value = state.currentImageIndex;
+            if (UI.downloadCurrentBtn) UI.downloadCurrentBtn.style.display = 'block';
+        } else {
+            nav.style.display = 'none';
+            UI.downloadBtn.textContent = 'DOWNLOAD FULL RES';
+            if (UI.downloadCurrentBtn) UI.downloadCurrentBtn.style.display = 'none';
+        }
+
+        if (state.imageFiles.length > 1) {
+            UI.prevImageBtn.disabled = state.currentImageIndex === 0;
+            UI.nextImageBtn.disabled = state.currentImageIndex === state.imageFiles.length - 1;
+        }
+    }
+
+    async function downloadSingleImage() {
+        UI.loading.textContent = 'PROCESSING GPU...';
+        UI.loading.style.display = 'block';
+        await new Promise(r => setTimeout(r, 50));
+
+        reallocateBuffers(true);
+        renderFrame(true);
+
+        const link = document.createElement('a');
+        const originalName = state.isMultiImageMode ? state.imageFiles[state.currentImageIndex].name.split('.')[0] : 'grain-export';
+        link.download = `${originalName}-processed.png`;
+        link.href = state.canvas.toDataURL('image/png', 1.0);
+        link.click();
+
+        reallocateBuffers(false);
+        requestRender();
+        UI.loading.style.display = 'none';
+    }
+
+    async function downloadAllImages() {
+        let dirHandle;
+        try {
+            dirHandle = await window.showDirectoryPicker();
+        } catch (err) {
+            if (err.name === 'AbortError') return;
+            alert('Could not open directory. Permission denied.');
+            return;
+        }
+
+        state.isExporting = true;
+        const overlay = UI['export-overlay'];
+        overlay.style.display = 'flex';
+
+        const stopExportHandler = () => {
+            state.isExporting = false;
+        };
+        UI.stopExportBtn.addEventListener('click', stopExportHandler);
+
+        const originalIndex = state.currentImageIndex;
+        const filesToExport = state.keepFolderStructure ? state.allFiles : state.imageFiles;
+
+        try {
+            for (let i = 0; i < filesToExport.length; i++) {
+                if (!state.isExporting) {
+                    alert('Export cancelled.');
+                    break;
+                }
+
+                const file = filesToExport[i];
+                UI['export-status'].textContent = `EXPORTING ${i + 1}/${filesToExport.length}...`;
+
+                try {
+                    let targetDir = dirHandle;
+                    if (state.keepFolderStructure && file.relativePath) {
+                        const parts = file.relativePath.split("/").filter(p => p !== "");
+                        for (const part of parts) {
+                            targetDir = await targetDir.getDirectoryHandle(part, { create: true });
+                        }
+                    }
+
+                    // Check if this file is one of the images we should process
+                    const isProcessableImage = state.imageFiles.includes(file);
+
+                    if (isProcessableImage) {
+                        await loadImageFromFile(file);
+                        reallocateBuffers(true);
+                        renderFrame(true);
+
+                        const blob = await new Promise(resolve => state.canvas.toBlob(resolve, 'image/png'));
+                        const exportName = state.keepFolderStructure ? file.name : `${i + 1}.png`;
+                        const fileHandle = await targetDir.getFileHandle(exportName, { create: true });
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                    } else if (state.keepFolderStructure) {
+                        // Non-image file or non-processable: Copy directly
+                        const fileHandle = await targetDir.getFileHandle(file.name, { create: true });
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(file);
+                        await writable.close();
+                    }
+                } catch (err) {
+                    console.error(`Error exporting ${file.name}:`, err);
+                }
+                await new Promise(r => setTimeout(r, 10)); // Yield to main thread
+            }
+            if (state.isExporting) {
+                alert(`Export Complete. Processed ${state.imageFiles.length} images and copied ${state.allFiles.length - state.imageFiles.length} other files.`);
+            }
+        } finally {
+            state.isExporting = false;
+            overlay.style.display = 'none';
+            UI.stopExportBtn.removeEventListener('click', stopExportHandler);
+
+            // Restore to the image that was active before downloading
+            await loadImageFromFile(state.imageFiles[originalIndex]);
+            state.currentImageIndex = originalIndex;
+            updateUIMode();
+            reallocateBuffers(false);
+            requestRender();
+        }
+    }
+
+
+    // --- DRAG LAYER LIST ---
+    /** 
+     * Manages the 'Render Layer Order' tab.
+     * logic: Uses native HTML5 Drag and Drop to reorder the 'state.renderOrder' array.
+     * UI Pointer: Referenced as 'tab-layers' in the HTML.
+     */
+    function setupDragLayerList() {
+        const list = document.getElementById('layer-drag-list');
+        list.innerHTML = '';
+
+        state.renderOrder.forEach((instanceId, index) => {
+            const { baseType, index: instIdx } = parseInstanceId(instanceId);
+            const div = document.createElement('div');
+            div.className = 'drag-layer';
+            div.draggable = true;
+            div.dataset.key = instanceId;
+
+            const isChecked = (state.layerVisibility[instanceId] ?? state.layerVisibility[baseType] ?? true) ? 'checked' : '';
+            const displayName = LAYERS[baseType]?.name || baseType;
+            const instanceLabel = instIdx > 1 ? ` (${instIdx})` : '';
+
+            div.innerHTML = `
+            <div style="display:flex; align-items:center;">
+                <span class="drag-handle">☰</span> 
+                <input type="checkbox" class="drag-toggle" data-key="${instanceId}" ${isChecked}>
+            </div>
+            <span>${displayName}${instanceLabel}</span>
+            <button class="remove-instance-btn" data-instance="${instanceId}" title="Remove this layer" style="margin-left:auto; background:none; border:none; color:#ff5555; cursor:pointer; font-size:14px; padding:2px 6px;">✕</button>
+        `;
+
+            div.querySelector('input').addEventListener('change', (e) => {
+                state.layerVisibility[instanceId] = e.target.checked;
+                if (baseType === 'scale' && state.baseImage) reallocateBuffers(false);
+                requestRender();
+            });
+
+            // Remove button for duplicates
+            const removeBtn = div.querySelector('.remove-instance-btn');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    removeLayerInstance(instanceId);
+                });
+            }
+
+            div.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', index);
+                div.classList.add('dragging');
+            });
+
+            div.addEventListener('dragend', () => div.classList.remove('dragging'));
+
+            div.addEventListener('dragover', (e) => e.preventDefault());
+
+            div.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const fromIndex = parseInt(e.dataTransfer.getData('text/plain'));
+                const toIndex = index;
+                if (fromIndex === toIndex) return;
+
+                const item = state.renderOrder.splice(fromIndex, 1)[0];
+                state.renderOrder.splice(toIndex, 0, item);
+
+                setupDragLayerList();
+                setupLayerGridDOM();
+                requestRender();
+            });
+
+            list.appendChild(div);
+        });
+
+        // [MULTI-INSTANCE] "Add Layer" dropdown at bottom
+        const addRow = document.createElement('div');
+        addRow.style.cssText = 'display:flex; gap:5px; margin-top:10px; align-items:center;';
+
+        const select = document.createElement('select');
+        select.style.cssText = 'flex:1; background:var(--bg-secondary); color:var(--text); border:1px solid var(--border); padding:4px; font-size:11px;';
+        select.innerHTML = '<option value="">— Select Layer to Add —</option>';
+        const cachedLayerKeys = Object.keys(window._layerDefCache || {});
+        const addableKeys = (cachedLayerKeys.length ? cachedLayerKeys : Object.keys(LAYERS))
+            .filter(k => k !== 'shadows' && k !== 'highlights');
+        addableKeys.forEach(key => {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = window._layerDefCache?.[key]?.layer?.name || LAYERS[key]?.name || key;
+            select.appendChild(opt);
+        });
+
+        const addBtn = document.createElement('button');
+        addBtn.textContent = '+ ADD';
+        addBtn.style.cssText = 'padding:4px 10px; font-size:11px; background:var(--accent); color:#000; border:none; cursor:pointer;';
+        addBtn.addEventListener('click', () => {
+            if (select.value) {
+                addLayerInstance(select.value);
+                select.value = '';
+            }
+        });
+
+        addRow.appendChild(select);
+        addRow.appendChild(addBtn);
+        list.appendChild(addRow);
+    }
+
+    /**
+     * [MULTI-INSTANCE] Adds a new instance of the specified layer type.
+     * Creates suffixed UI controls and inserts into render order.
+     */
+    function addLayerInstance(baseType) {
+        const cachedDef = window._layerDefCache?.[baseType];
+        if (!cachedDef) {
+            console.warn(`[Multi-Instance] Cannot add unknown layer type '${baseType}' (missing JSON definition).`);
+            return;
+        }
+
+        // Find next available index
+        const existingIndices = state.renderOrder
+            .filter(id => parseInstanceId(id).baseType === baseType)
+            .map(id => parseInstanceId(id).index);
+        const nextIndex = Math.max(...existingIndices, 0) + 1;
+        const instanceId = baseType + '__' + nextIndex;
+
+        // Generate UI panel with suffixed IDs
+        if (typeof createLayerInstance === 'function') {
+            const newPanel = createLayerInstance(baseType, nextIndex);
+            if (newPanel) {
+                bindDynamicControls(newPanel);
+            }
+        }
+
+        // Re-collect UI elements (new suffixed elements now in DOM)
+        document.querySelectorAll('input, select, button, canvas').forEach(el => {
+            if (el.id) _UI_BASE[el.id] = el;
+        });
+
+        // Add to render order (after the last instance of this type)
+        const lastIdx = state.renderOrder.reduce((acc, id, i) =>
+            parseInstanceId(id).baseType === baseType ? i : acc, -1);
+        state.renderOrder.splice(lastIdx + 1, 0, instanceId);
+        state.layerVisibility[instanceId] = true;
+
+        // Refresh UI
+        setupDragLayerList();
+        setupLayerGridDOM();
+        if (baseType === 'scale' && state.baseImage) reallocateBuffers(false);
+        requestRender();
+        console.log(`[Multi-Instance] Added ${instanceId}`);
+    }
+    window.addLayerInstance = addLayerInstance;
+
+    /**
+     * [MULTI-INSTANCE] Removes a layer instance and its UI controls.
+     */
+    function removeLayerInstance(instanceId) {
+        const { baseType, index } = parseInstanceId(instanceId);
+
+        // Clean up UI entries specific to this panel
+        const container = document.getElementById('dynamic-controls');
+        if (container) {
+            const panel = container.querySelector(`[data-layer-key="${baseType}"][data-instance-index="${index}"]`);
+            if (panel) {
+                panel.querySelectorAll('input, select, button, canvas').forEach(el => {
+                    if (el.id) delete _UI_BASE[el.id];
+                });
+            }
+        }
+
+        // Remove UI panel
+        if (typeof destroyLayerInstance === 'function') {
+            destroyLayerInstance(baseType, index);
+        }
+
+        // Remove from render order
+        state.renderOrder = state.renderOrder.filter(id => id !== instanceId);
+        delete state.layerVisibility[instanceId];
+        delete state.layerTextures[instanceId];
+
+        // Refresh UI
+        setupDragLayerList();
+        setupLayerGridDOM();
+        if (baseType === 'scale' && state.baseImage) reallocateBuffers(false);
+        requestRender();
+        console.log(`[Multi-Instance] Removed ${instanceId}`);
+    }
+    window.removeLayerInstance = removeLayerInstance;
+
+    // --- RENDER LOOP MANAGER ---
+    /** 
+     * Debounced rendering function.
+     */
+    let renderRequested = false;
+    function requestRender() {
+        if (!renderRequested && state.baseImage) {
+            renderRequested = true;
+            requestAnimationFrame(() => {
+                renderFrame();
+                renderRequested = false;
+            });
+        }
+    }
+
+    /**
+     * Real-time Histogram Calculation
+     * logic: Uses the current render output to calculate luminance distribution.
+     */
+    function updateHistogram(pixels, w, h) {
+        if (!state.gl || !state.baseImage || !UI.histogramCanvas || !pixels) return;
+
+        const totalPixels = w * h;
+        // Since it's already downsampled to 256x256, we can sample most/all pixels efficiently
+        const maxSamples = 10000;
+        const sampleRate = Math.max(1, Math.floor(totalPixels / maxSamples));
+
+        const hist = new Uint32Array(256);
+        let totalLum = 0;
+        let sampleCount = 0;
+
+        // Sample pixels with dynamic rate based on image size
+        const stride = sampleRate * 4;
+        for (let i = 0; i < pixels.length; i += stride) {
+            // Luminance (Rec. 709)
+            const lum = Math.round(pixels[i] * 0.2126 + pixels[i + 1] * 0.7152 + pixels[i + 2] * 0.0722);
+            hist[lum]++;
+            totalLum += lum;
+            sampleCount++;
+        }
+
+        const avgLum = sampleCount > 0 ? totalLum / sampleCount : 0;
+        if (UI.avgBrightnessVal) UI.avgBrightnessVal.textContent = (avgLum / 2.55).toFixed(1) + '%';
+        if (UI.renderResVal) UI.renderResVal.textContent = `${state.renderWidth}x${state.renderHeight}`;
+
+        // Draw to canvas
+        const ctx = UI.histogramCanvas.getContext('2d');
+        const cw = UI.histogramCanvas.width;
+        const ch = UI.histogramCanvas.height;
+
+        ctx.clearRect(0, 0, cw, ch);
+
+        // Find max for scaling
+        let max = 0;
+        for (let i = 0; i < 256; i++) if (hist[i] > max) max = hist[i];
+
+        ctx.fillStyle = '#2a9df4';
+        ctx.beginPath();
+        ctx.moveTo(0, ch);
+        for (let i = 0; i < 256; i++) {
+            const x = (i / 255) * cw;
+            const h = (hist[i] / max) * ch;
+            ctx.lineTo(x, ch - h);
+        }
+        ctx.lineTo(cw, ch);
+        ctx.fill();
+
+        // Add grid line for 50%
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.beginPath();
+        ctx.moveTo(cw / 2, 0); ctx.lineTo(cw / 2, ch);
+        ctx.stroke();
+    }
+
+    /**
+     * Real-time Vectorscope Calculation
+     * logic: Plots pixel colors in a circular hue/saturation space.
+     */
+    function updateVectorscope(pixels, w, h) {
+        if (!state.gl || !state.baseImage || !UI.vectorscopeCanvas || !pixels) return;
+
+        // Calculate dynamic sample rate for performance (max ~10k samples from 256x256)
+        const maxSamples = 10000;
+        const totalPixels = w * h;
+        const sampleRate = Math.max(1, Math.floor(totalPixels / maxSamples));
+        const stride = sampleRate * 4;
+
+        const ctx = UI.vectorscopeCanvas.getContext('2d');
+        const size = UI.vectorscopeCanvas.width;
+        const cx = size / 2;
+        const cy = size / 2;
+        const radius = size / 2 - 5;
+
+        // Clear canvas
+        ctx.clearRect(0, 0, size, size);
+
+        // Draw pixel data first
+        let totalSat = 0;
+        let sampleCount = 0;
+
+        // Sample with dynamic stride for performance
+        for (let i = 0; i < pixels.length; i += stride) {
+            const r = pixels[i] / 255;
+            const g = pixels[i + 1] / 255;
+            const b = pixels[i + 2] / 255;
+
+            // RGB to HSV conversion (better for vectorscope)
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            const d = max - min;
+
+            let h = 0, s = 0;
+            if (max > 0) s = d / max; // Saturation based on max (HSV style)
+
+            if (d > 0) {
+                switch (max) {
+                    case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+                    case g: h = ((b - r) / d + 2) / 6; break;
+                    case b: h = ((r - g) / d + 4) / 6; break;
+                }
+            }
+
+            totalSat += s;
+            sampleCount++;
+
+            // Skip very low saturation pixels (they clutter the center)
+            if (s < 0.02) continue;
+
+            // Convert hue/saturation to x/y coordinates
+            const angle = h * Math.PI * 2 - Math.PI / 2; // Start at top (red at top)
+            const dist = s * radius;
+            const x = cx + Math.cos(angle) * dist;
+            const y = cy + Math.sin(angle) * dist;
+
+            // Draw a small colored dot
+            ctx.fillStyle = `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, 0.4)`;
+            ctx.fillRect(x - 1, y - 1, 2, 2);
+        }
+
+        // Draw reference circles AFTER pixels (so they're visible on top)
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * 0.5, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * 0.25, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Draw crosshairs
+        ctx.beginPath();
+        ctx.moveTo(cx, 0); ctx.lineTo(cx, size);
+        ctx.moveTo(0, cy); ctx.lineTo(size, cy);
+        ctx.stroke();
+
+        // Update saturation stat
+        const avgSat = sampleCount > 0 ? (totalSat / sampleCount) * 100 : 0;
+        if (UI.avgSaturationVal) UI.avgSaturationVal.textContent = avgSat.toFixed(1) + '%';
+    }
+
+    /**
+     * RGB Parade Calculation
+     * logic: Maps red, green, and blue histograms spatially separated left-to-right.
+     */
+    function updateParade(pixels, w, h) {
+        if (!state.gl || !state.baseImage || !UI.paradeCanvas || !pixels) return;
+
+        const ctx = UI.paradeCanvas.getContext('2d');
+        const cw = UI.paradeCanvas.width;
+        const ch = UI.paradeCanvas.height;
+
+        // Clear canvas
+        ctx.clearRect(0, 0, cw, ch);
+
+        // We divide the canvas into 3 horizontal sections: Red, Green, Blue
+        const sectionWidth = cw / 3;
+        // Padding purely for aesthetics between the channels
+        const padding = 2;
+        const actualWidth = sectionWidth - padding;
+
+        // Draw Reference Grid Lines
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, ch / 2); ctx.lineTo(cw, ch / 2); // 50%
+        ctx.moveTo(0, ch * 0.25); ctx.lineTo(cw, ch * 0.25); // 75%
+        ctx.moveTo(0, ch * 0.75); ctx.lineTo(cw, ch * 0.75); // 25%
+        ctx.stroke();
+
+        ctx.globalCompositeOperation = 'screen';
+
+        const maxSamples = 20000;
+        const totalPixels = w * h;
+        const sampleRate = Math.max(1, Math.floor(totalPixels / maxSamples));
+        // Ensure stride is a multiple of 4 (one full RGBA pixel)
+        const stride = sampleRate * 4;
+
+        ctx.fillStyle = 'rgba(255, 50, 50, 0.1)';
+        for (let i = 0; i < pixels.length; i += stride) {
+            const x = (i / 4) % w;
+            ctx.fillRect((x / w) * actualWidth, ch - (pixels[i] / 255) * ch, 1.5, 1.5);
+        }
+
+        ctx.fillStyle = 'rgba(50, 255, 50, 0.1)';
+        const offsetXG = sectionWidth;
+        for (let i = 0; i < pixels.length; i += stride) {
+            const x = (i / 4) % w;
+            ctx.fillRect(offsetXG + (x / w) * actualWidth, ch - (pixels[i + 1] / 255) * ch, 1.5, 1.5);
+        }
+
+        ctx.fillStyle = 'rgba(50, 100, 255, 0.1)';
+        const offsetXB = sectionWidth * 2;
+        for (let i = 0; i < pixels.length; i += stride) {
+            const x = (i / 4) % w;
+            ctx.fillRect(offsetXB + (x / w) * actualWidth, ch - (pixels[i + 2] / 255) * ch, 1.5, 1.5);
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+    }
+
+    // --- WEBGL CORE ---
+    /** 
+     * Initializes the WebGL2 context, compiles all shaders, and sets up 
+     * the static full-screen quad geometry (VBO).
+     */
+    async function initWebGL() {
+        state.canvas = UI.displayCanvas;
+        const gl = state.canvas.getContext('webgl2', { antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
+        if (!gl) { alert('WebGL2 not supported.'); return; }
+
+        // [STABILITY] Handle WebGL Context Loss gracefully
+        state.canvas.addEventListener('webglcontextlost', (e) => {
+            e.preventDefault();
+            console.error("WebGL Context Lost! The GPU crashed or was reset.");
+            document.getElementById('loading').textContent = "ERROR: GPU CRASHED. Reload page.";
+            document.getElementById('loading').style.display = "block";
+            document.getElementById('loading').style.backgroundColor = "red";
+            state.isPlaying = false;
+            if (state.playInterval) clearInterval(state.playInterval);
+        }, false);
+
+        state.canvas.addEventListener('webglcontextrestored', async () => {
+            console.log("WebGL Context Restored. Re-initializing...");
+            await initWebGL();
+            if (state.baseImage) {
+                reallocateBuffers(false);
+                requestRender();
+            }
+            document.getElementById('loading').style.display = "none";
+            document.getElementById('loading').style.backgroundColor = "var(--accent)";
+            document.getElementById('loading').textContent = "PROCESSING GPU...";
+        }, false);
+
+        // Enable specialized texture formats
+        gl.getExtension('EXT_color_buffer_float');
+        gl.getExtension('OES_texture_float_linear');
+
+        state.gl = gl;
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+
+        // [SHADER COMPILATION] Load manifest and compile all shaders from .frag files
+        console.log('[Engine] Loading shader manifest...');
+        const manifest = await fetch('Shaders/manifest.json').then(r => r.json());
+
+        // Fetch vertex shader (shared by all programs)
+        const vsSrc = await fetchShaderSource(manifest.vertex);
+        console.log(`[Engine] Vertex shader loaded from ${manifest.vertex}`);
+
+        // Fetch ALL fragment shaders in parallel for speed
+        const programNames = Object.keys(manifest.programs);
+        const fragSources = await Promise.all(
+            programNames.map(name => fetchShaderSource(manifest.programs[name].frag))
+        );
+        console.log(`[Engine] ${programNames.length} fragment shaders loaded`);
+
+        // Compile all programs
+        state.programs = {};
+        programNames.forEach((name, i) => {
+            state.programs[name] = createProgramFromSources(gl, vsSrc, fragSources[i], 'vs-quad', name);
+            if (!state.programs[name]) {
+                console.error(`[Engine] FAILED to compile program: ${name}`);
+            }
+        });
+
+        // Map manifest program names to the keys the render pipeline expects
+        if (state.programs.lightleaks && !state.programs.lightLeaks) {
+            state.programs.lightLeaks = state.programs.lightleaks;
+        }
+        if (state.programs.lens && !state.programs.lensDistort) {
+            state.programs.lensDistort = state.programs.lens;
+        }
+        if (state.programs.analog && !state.programs.analogVideo) {
+            state.programs.analogVideo = state.programs.analog;
+        }
+
+        console.log(`[Engine] ${Object.keys(state.programs).length} shader programs compiled`);
+
+        // [GEOMETRY] Single full-screen quad (2 triangles)
+        const quadVBO = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quadVBO);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+            -1, -1, 0, 0,
+            1, -1, 1, 0,
+            -1, 1, 0, 1,
+            -1, 1, 0, 1,
+            1, -1, 1, 0,
+            1, 1, 1, 1
+        ]), gl.STATIC_DRAW);
+
+        // Bind global attributes
+        Object.values(state.programs).forEach(p => {
+            gl.useProgram(p);
+            const posLoc = gl.getAttribLocation(p, 'a_pos');
+            const uvLoc = gl.getAttribLocation(p, 'a_uv');
+            gl.enableVertexAttribArray(posLoc);
+            gl.enableVertexAttribArray(uvLoc);
+            gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 16, 0);
+            gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 16, 8);
+        });
+
+        // Create FBO for background thumbnail processing
+        const tw = 320, th = 180;
+        const tTex = createTexture(gl, null, tw, th);
+        const tFbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, tFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tTex, 0);
+        state.thumbnailFBO = { fbo: tFbo, tex: tTex, w: tw, h: th };
+
+        // Create FBO for analysis tools (Histogram/Vectorscope)
+        const aw = 256, ah = 256;
+        const aTex = createTexture(gl, null, aw, ah);
+        const aFbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, aFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, aTex, 0);
+        state.analysisFBO = { fbo: aFbo, tex: aTex, w: aw, h: ah };
+
+        // Optimization: Cached resources for thumbnail generation
+        state.thumbTempCanvas = document.createElement('canvas');
+        state.thumbTempCanvas.width = tw;
+        state.thumbTempCanvas.height = th;
+        state.thumbTempCtx = state.thumbTempCanvas.getContext('2d');
+        state.thumbPixelBuffer = new Uint8Array(tw * th * 4);
+        state.thumbClampedBuffer = new Uint8ClampedArray(tw * th * 4);
+
+        // Display Hardware Limit
+        if (UI.gpuMaxRes) {
+            const max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+            UI.gpuMaxRes.textContent = `${max}px`;
+        }
+        // Fallback textures for masking
+        state.textures.white = createTexture(gl, new Uint8Array([255, 255, 255, 255]), 1, 1);
+        state.textures.black = createTexture(gl, new Uint8Array([0, 0, 0, 255]), 1, 1);
+    }
+
+    function loadNewImage(img) {
+        state.baseImage = img;
+        state.width = img.width;
+        state.height = img.height;
+
+        const gl = state.gl;
+        if (state.textures.base) {
+            gl.deleteTexture(state.textures.base);
+            state.textures.base = null;
+        }
+        state.textures.base = createTexture(gl, img);
+
+        // Force FBOs to be reallocated for any size (preview or export) after image change
+        state.fboWidth = 0;
+        state.fboHeight = 0;
+
+        reallocateBuffers(false);
+
+        UI.downloadBtn.disabled = false;
+        UI.downloadCurrentBtn.disabled = false;
+        UI.compareBtn.disabled = false;
+
+        UI.overlayCanvas.width = img.width;
+        UI.overlayCanvas.height = img.height;
+        UI.overlayCanvas.getContext('2d').drawImage(img, 0, 0);
+
+        UI.caPin.classList.add('active');
+
+        setupDragLayerList();
+        requestRender();
+    }
+
+    /** 
+     * Resizes internal offscreen textures into Resolution Pools to support mid-pipeline scaling.
+     * Logic: Calculates the required resolution for every layer step, allocating a pool of FBOs
+     * for each unique resolution demand. Deletes stale pools to free VRAM.
+     */
+    function reallocateBuffers(fullRes = false) {
+        const gl = state.gl;
+        if (!gl) return; // Wait for initialization
+
+        if (!state.fboPools) state.fboPools = {};
+        if (!state.layerResolutions) state.layerResolutions = {};
+
+        const maxTexSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+        const maxDim = (!fullRes && state.clampPreview) ? 2048 : maxTexSize;
+
+        let baseScale = 1.0;
+        if (state.width > maxTexSize || state.height > maxTexSize) {
+            baseScale = Math.min(maxTexSize / state.width, maxTexSize / state.height);
+        }
+        if (!fullRes && state.clampPreview) {
+            if (state.width > maxDim || state.height > maxDim) {
+                baseScale = Math.min(maxDim / state.width, maxDim / state.height);
+            }
+        }
+
+        let currentW = Math.max(1, Math.round(state.width * baseScale));
+        let currentH = Math.max(1, Math.round(state.height * baseScale));
+
+        state.initialRes = { w: currentW, h: currentH };
+
+        const requiredPools = new Set();
+        requiredPools.add(`${currentW}x${currentH}`);
+
+        if (state.renderOrder) {
+            for (let i = 0; i < state.renderOrder.length; i++) {
+                const instanceId = state.renderOrder[i];
+                const { baseType, index } = parseInstanceId(instanceId);
+                const vis = state.layerVisibility[instanceId] ?? state.layerVisibility[baseType] ?? true;
+                const toggleId = (baseType === 'adjust' ? 'adjust' : baseType) + 'Enable';
+                const suffix = index === 0 ? '' : `__${index}`;
+
+                const enableEl = UI[toggleId + suffix];
+                const isEnabled = enableEl ? enableEl.checked : true;
+
+                if (vis && isEnabled && baseType === 'scale') {
+                    const multEl = UI[`scaleMultiplier${suffix}`];
+                    if (multEl && !isNaN(parseFloat(multEl.value))) {
+                        currentW = Math.round(currentW * parseFloat(multEl.value));
+                        currentH = Math.round(currentH * parseFloat(multEl.value));
+
+                        if (currentW > maxDim || currentH > maxDim) {
+                            const clampScale = Math.min(maxDim / currentW, maxDim / currentH);
+                            currentW = Math.floor(currentW * clampScale);
+                            currentH = Math.floor(currentH * clampScale);
+                        }
+                        currentW = Math.max(1, currentW);
+                        currentH = Math.max(1, currentH);
+                    }
+                }
+                state.layerResolutions[instanceId] = { w: currentW, h: currentH };
+                requiredPools.add(`${currentW}x${currentH}`);
+            }
+        }
+
+        state.renderWidth = currentW;
+        state.renderHeight = currentH;
+        state._exportScale = baseScale;
+
+        // Update UI displays for Scale layers
+        document.querySelectorAll('[id^="scaleResolutionDisplay"]').forEach(el => {
+            const suffix = el.id.substring('scaleResolutionDisplay'.length);
+            const instanceId = suffix === '' ? 'scale' : `scale${suffix}`;
+            const res = state.layerResolutions[instanceId];
+            if (res) {
+                // Display the theoretical un-clamped resolution for accuracy
+                const displayW = Math.round(res.w / baseScale);
+                const displayH = Math.round(res.h / baseScale);
+                el.innerHTML = `${displayW} &times; ${displayH} px`;
+            }
+        });
+
+        // Garbage collection: delete pools that are no longer needed
+        for (const poolKey in state.fboPools) {
+            if (!requiredPools.has(poolKey)) {
+                const p = state.fboPools[poolKey];
+                ['pingPong0', 'pingPong1', 'tempNoise', 'blur1', 'blur2', 'preview', 'chainCapture', 'maskTotal'].forEach(k => {
+                    if (p[k]) {
+                        if (p[k].tex) gl.deleteTexture(p[k].tex);
+                        if (p[k].fbo) gl.deleteFramebuffer(p[k].fbo);
+                    }
+                });
+                delete state.fboPools[poolKey];
+            }
+        }
+
+        // Allocate missing pools
+        const makeFBO = (w, h, highPrec = true) => {
+            const tex = createTexture(gl, null, w, h, highPrec);
+            const fbo = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+            return { tex, fbo };
+        };
+
+        for (const poolKey of requiredPools) {
+            if (!state.fboPools[poolKey]) {
+                const [pw, ph] = poolKey.split('x').map(Number);
+                const p = {};
+                p.pingPong0 = makeFBO(pw, ph);
+                p.pingPong1 = makeFBO(pw, ph);
+                p.tempNoise = makeFBO(pw, ph);
+                p.blur1 = makeFBO(pw, ph);
+                p.blur2 = makeFBO(pw, ph);
+                p.preview = makeFBO(pw, ph);
+                p.chainCapture = makeFBO(pw, ph);
+                p.maskTotal = makeFBO(pw, ph);
+                state.fboPools[poolKey] = p;
+            }
+        }
+
+        // Keep global references pointing to the final output pool so UI elements like eyedropper don't break
+        const finalPool = state.fboPools[`${currentW}x${currentH}`];
+        state.pingPong = [finalPool.pingPong0, finalPool.pingPong1];
+        ['tempNoise', 'blur1', 'blur2', 'preview', 'chainCapture', 'maskTotal'].forEach(k => {
+            state.textures[k] = finalPool[k].tex;
+            state.fbos[k] = finalPool[k].fbo;
+        });
+
+        return { w: currentW, h: currentH };
+    }
+
+    // --- LAYER LOGIC EXTRACTOR ---
+    /** 
+     * The core of the render pipeline.
+     * logic: Dynamically selects the appropriate shader and uniform set for a given layer.
+     * Pass-through: Takes 'inputTex' and writes result to 'outputFbo'.
+     * @param {string} key - The ID of the layer (e.g. 'noise', 'blur').
+     */
+
+    /** Checks if a layer is enabled, respecting enableDefault in JSON when no checkbox exists. */
+    function isLayerEnabled(key, enableId) {
+        const el = UI[enableId];
+        if (el) return el.checked;
+        // No checkbox element — check JSON enableDefault
+        const def = window._layerDefCache && window._layerDefCache[key] ? window._layerDefCache[key].def : null;
+        return def ? def.enableDefault !== false : true;
+    }
+
+    function renderSingleLayer(gl, key, inputTex, outputFbo, uniforms, force = false) {
+        const w = state.renderWidth;
+        const h = state.renderHeight;
+        gl.viewport(0, 0, w, h);
+
+        // --- DATA-DRIVEN PIPELINE DISPATCHER ---
+        const layerDef = window._layerDefCache && window._layerDefCache[key] ? window._layerDefCache[key].def : null;
+        if (layerDef && layerDef.uniforms && !layerDef.customRender) {
+
+            // Check if there is an enableId defined in the JSON. If so, lookup the element and check its checked state.
+            let isEnabled = true;
+            if (layerDef.enableId) {
+                const enableEl = UI[layerDef.enableId];
+                if (enableEl) {
+                    isEnabled = enableEl.checked;
+                } else {
+                    // Element not found in UI cache, default to true or false depending on JSON default
+                    isEnabled = layerDef.enableDefault !== false;
+                }
+            }
+
+            if (!isEnabled && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+
+            const maskTex = layerDef.mask ? renderMaskForLayer(gl, inputTex, key) : null;
+            let progName = key;
+
+            // Handle mapped names from manifest (legacy support)
+            if (key === 'ca' && state.programs.chroma) progName = 'chroma';
+            if (key === 'lightLeaks' && state.programs.lightleaks) progName = 'lightleaks';
+            if (key === 'lensDistort' && state.programs.lens) progName = 'lens';
+            if (key === 'analogVideo' && state.programs.analog) progName = 'analog';
+
+            let prog = state.programs[progName];
+            if (maskTex && state.programs['masked' + progName.charAt(0).toUpperCase() + progName.slice(1)]) {
+                prog = state.programs['masked' + progName.charAt(0).toUpperCase() + progName.slice(1)];
+            }
+
+            if (!prog) {
+                console.error(`[Data-Driven] Shader program '${progName}' not found. Executing bypass.`);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+
+            gl.useProgram(prog);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+
+            // Base uniforms
+            if (gl.getUniformLocation(prog, 'u_res')) gl.uniform2f(gl.getUniformLocation(prog, 'u_res'), w, h);
+            if (gl.getUniformLocation(prog, 'u_time')) gl.uniform1f(gl.getUniformLocation(prog, 'u_time'), uniforms.u_time);
+
+            // Dynamic JSON bindings
+            const _debugUniforms = state.frameRenderCount % 60 === 0;
+            if (_debugUniforms) console.log(`[Data-Driven] Layer '${key}' using program '${progName}' — binding ${layerDef.uniforms.length} uniforms:`);
+            for (const u of layerDef.uniforms) {
+                const el = UI[u.ui_id];
+
+                // [STRICT MODE] Proactive UI mapping validation
+                if (!el) {
+                    console.warn(`[Data-Driven] Missing DOM element for uniform '${u.name}' (Expected ID: '${u.ui_id}'). Defaulting to 0.`);
+                }
+
+                let val = el ? parseFloat(el.value || 0) : 0;
+                const rawVal = val;
+                if (u.divideBy) val /= u.divideBy;
+
+                const loc = gl.getUniformLocation(prog, u.name);
+                if (_debugUniforms) console.log(`  ${u.name} (${u.type}): ui_id='${u.ui_id}' el=${el ? 'FOUND(tag=' + el.tagName + ',id=' + el.id + ')' : 'NULL'} raw=${rawVal} final=${val} loc=${loc ? 'OK' : 'NOT_IN_SHADER'}`);
+                if (!loc) continue;
+
+                if (u.type === 'int') {
+                    gl.uniform1i(loc, parseInt(el && el.value ? el.value : 0));
+                } else if (u.type === 'rgb' || u.type === 'color') {
+                    const rgb = hexToRgb(el && el.value ? el.value : '#000000');
+                    gl.uniform3f(loc, rgb.r, rgb.g, rgb.b);
+                } else if (u.type === 'bool' || u.type === 'boolean') {
+                    gl.uniform1i(loc, el && el.checked ? 1 : 0);
+                } else {
+                    gl.uniform1f(loc, val);
+                }
+            }
+
+            if (maskTex) {
+                gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_mask'), 1);
+                if (gl.getUniformLocation(prog, 'u_useMask')) gl.uniform1i(gl.getUniformLocation(prog, 'u_useMask'), 1);
+            } else {
+                if (gl.getUniformLocation(prog, 'u_useMask')) gl.uniform1i(gl.getUniformLocation(prog, 'u_useMask'), 0);
+            }
+
+            // [POST-BIND] Layer-specific uniforms not expressible in JSON
+            if (key === 'ca') {
+                const centerLoc = gl.getUniformLocation(prog, 'u_center');
+                if (centerLoc) gl.uniform2f(centerLoc, state.caCenter.x, state.caCenter.y);
+            }
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Keep rendering if animated parameters are active
+            if (layerDef.animated && isEnabled) {
+                requestRender();
+            }
+
+            return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+        }
+        // --- END DATA-DRIVEN PIPELINE ---
+
+        if (key === 'scale' || key === 'alpha') {
+            // [TOOL: SCALE / ALPHA] Pass-through layers.
+            // Scale: Resizing is handled via reallocateBuffers(). Alpha: Controls consumed by composite shader.
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.useProgram(state.programs.copy);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+        }
+        else if (key === 'adjust') {
+            // [TOOL: ADJUSTMENTS] Color, Sharpening, Brightness
+            if (!isLayerEnabled(key, 'adjustEnable') && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+            let maskTex = null;
+            const hasSH = UI.adjLumaMask?.checked;
+            const hasCol = UI.adjColorExclude?.checked;
+
+            if (hasSH || hasCol) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.blur1);
+                gl.clearColor(1, 1, 1, 1);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+                gl.enable(gl.BLEND);
+                gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+
+                if (hasSH) {
+                    gl.useProgram(state.programs.mask);
+                    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                    gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_tex'), 0);
+                    gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_useS'), 1);
+                    gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_sth'), parseFloat(UI.adjShadowThreshold?.value || 0));
+                    gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_sfa'), parseFloat(UI.adjShadowFade?.value || 0));
+                    gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_useH'), 1);
+                    gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_hth'), parseFloat(UI.adjHighlightThreshold?.value || 1));
+                    gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_hfa'), parseFloat(UI.adjHighlightFade?.value || 0));
+                    gl.drawArrays(gl.TRIANGLES, 0, 6);
+                }
+                if (hasCol) {
+                    const targetColor = UI.adjExcludeColor?.value || '#000000';
+                    const r = parseInt(targetColor.slice(1, 3), 16) / 255;
+                    const g = parseInt(targetColor.slice(3, 5), 16) / 255;
+                    const b = parseInt(targetColor.slice(5, 7), 16) / 255;
+                    gl.useProgram(state.programs.colorMask);
+                    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                    gl.uniform1i(gl.getUniformLocation(state.programs.colorMask, 'u_tex'), 0);
+                    gl.uniform3f(gl.getUniformLocation(state.programs.colorMask, 'u_targetColor'), r, g, b);
+                    gl.uniform1f(gl.getUniformLocation(state.programs.colorMask, 'u_tolerance'), parseFloat(UI.adjColorTolerance?.value || 10) / 100.0);
+                    gl.uniform1f(gl.getUniformLocation(state.programs.colorMask, 'u_fade'), parseFloat(UI.adjColorFade?.value || 0) / 100.0);
+                    gl.drawArrays(gl.TRIANGLES, 0, 6);
+                }
+                gl.disable(gl.BLEND);
+                maskTex = state.textures.blur1;
+
+                if (maskTex && UI.adjInvertMask?.checked) {
+                    gl.useProgram(state.programs.invert);
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.blur2);
+                    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+                    gl.uniform1i(gl.getUniformLocation(state.programs.invert, 'u_tex'), 0);
+                    gl.drawArrays(gl.TRIANGLES, 0, 6);
+                    maskTex = state.textures.blur2;
+                }
+            }
+
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            const prog = state.programs.adjustMasked || state.programs.adjust;
+            gl.useProgram(prog);
+
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, inputTex);
+
+            gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_bright'), uniforms.u_bright);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_cont'), uniforms.u_cont);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_sat'), uniforms.u_sat);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_hdrTol'), 0.0);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_hdrAmt'), 0.0);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_warmth'), uniforms.u_warmth);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_sharp'), uniforms.u_sharp);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_sharpThresh'), uniforms.u_sharpThresh);
+            gl.uniform2f(gl.getUniformLocation(prog, 'u_step'), uniforms.u_step[0], uniforms.u_step[1]);
+
+            if (maskTex && prog) {
+                gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_mask'), 1);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_useMask'), 1);
+            } else if (prog) {
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_useMask'), 0);
+            }
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            return outputFbo; // Effectively specific texture attached to this FBO
+        }
+        else if (key === 'hdr') {
+            // [TOOL: HDR EMULATION] Luminance Compression
+            if (!isLayerEnabled(key, 'hdrEnable') && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.useProgram(state.programs.adjust);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.adjust, 'u_tex'), 0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.adjust, 'u_bright'), 0.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.adjust, 'u_cont'), 0.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.adjust, 'u_sat'), 0.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.adjust, 'u_warmth'), 0.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.adjust, 'u_sharp'), 0.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.adjust, 'u_hdrTol'), uniforms.u_hdrTol);
+            gl.uniform1f(gl.getUniformLocation(state.programs.adjust, 'u_hdrAmt'), uniforms.u_hdrAmt);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+        }
+        else if (key === 'noise') {
+            // [TOOL: NOISE GROUP] Procedural Grain & Compositing
+            if (!isLayerEnabled(key, 'noiseEnable') && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+            gl.useProgram(state.programs.noise);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.tempNoise);
+            gl.uniform1i(gl.getUniformLocation(state.programs.noise, 'u_type'), parseInt(UI.noiseType?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.noise, 'u_seed'), Math.random() * 100.0);
+            gl.uniform2f(gl.getUniformLocation(state.programs.noise, 'u_res'), w, h);
+            gl.uniform2f(gl.getUniformLocation(state.programs.noise, 'u_origRes'), state.width * state.upscaleFactor, state.height * state.upscaleFactor);
+            gl.uniform1f(gl.getUniformLocation(state.programs.noise, 'u_scale'), parseFloat(UI.noiseSize.value));
+            gl.uniform1f(gl.getUniformLocation(state.programs.noise, 'u_paramA'), parseFloat(UI.noiseParamA?.value || 0) / 100.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.noise, 'u_paramB'), parseFloat(UI.noiseParamB?.value || 0) / 100.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.noise, 'u_paramC'), parseFloat(UI.noiseParamC?.value || 0) / 100.0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            const blurAmt = parseFloat(UI.blurriness?.value || 0) / 100.0;
+            let noiseTex = state.textures.tempNoise;
+            if (blurAmt > 0) {
+                gl.useProgram(state.programs.blur);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.blur1);
+                gl.bindTexture(gl.TEXTURE_2D, state.textures.tempNoise);
+                gl.uniform1i(gl.getUniformLocation(state.programs.blur, 'u_tex'), 0);
+                gl.uniform2f(gl.getUniformLocation(state.programs.blur, 'u_dir'), 1.0 / w, 0.0);
+                gl.uniform1f(gl.getUniformLocation(state.programs.blur, 'u_rad'), blurAmt * 2.0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.blur2);
+                gl.bindTexture(gl.TEXTURE_2D, state.textures.blur1);
+                gl.uniform2f(gl.getUniformLocation(state.programs.blur, 'u_dir'), 0.0, 1.0 / h);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                noiseTex = state.textures.blur2;
+            }
+            const maskTex = renderMaskForLayer(gl, inputTex, 'noise');
+
+            // Composite
+            gl.useProgram(state.programs.composite);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, noiseTex);
+            gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, maskTex || state.textures.white); // Fallback to white if no mask
+
+            gl.uniform1i(gl.getUniformLocation(state.programs.composite, 'u_base'), 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.composite, 'u_noise'), 1);
+            gl.uniform1i(gl.getUniformLocation(state.programs.composite, 'u_mask'), 2);
+            gl.uniform1i(gl.getUniformLocation(state.programs.composite, 'u_mode'), parseInt(UI.blendMode?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.composite, 'u_opacity'), parseFloat(UI.opacity?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.composite, 'u_str'), parseFloat(UI.strength?.value || 0));
+            gl.uniform1i(gl.getUniformLocation(state.programs.composite, 'u_nType'), parseInt(UI.noiseType?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.composite, 'u_satStr'), parseFloat(UI.satStrength?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.composite, 'u_satImp'), parseFloat(UI.satPerNoise?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.composite, 'u_skinProt'), parseFloat(UI.skinProtection?.value || 0));
+            gl.uniform1i(gl.getUniformLocation(state.programs.composite, 'u_ignA'), UI.ignoreAlphaToggle?.checked ? 1 : 0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.composite, 'u_ignAstr'), parseFloat(UI.ignoreAlphaStrength?.value || 0));
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        else if (key === 'blur') {
+            // [TOOL: BLUR] Masked Gaussian/Box/Motion Blur
+            if (!UI.blurEnable?.checked) {
+                // Pass-through copy if needed, but often we just skip.
+                // If we need to write to outputFbo to maintain chain:
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+
+            const maskTex = renderMaskForLayer(gl, inputTex, 'blur');
+            const blurAmt = parseFloat(UI.blurAmount?.value || 0) / 100.0;
+            if (blurAmt > 0) {
+                const prog = maskTex ? state.programs.maskedBlur : state.programs.blur;
+                gl.useProgram(prog);
+                // H Pass
+                gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.blur2);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+                gl.uniform2f(gl.getUniformLocation(prog, 'u_dir'), 1.0 / w, 0.0);
+                gl.uniform1f(gl.getUniformLocation(prog, 'u_rad'), blurAmt * 2.0);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_blurType'), parseInt(UI.blurType?.value || 0));
+
+                if (maskTex) {
+                    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+                    gl.uniform1i(gl.getUniformLocation(prog, 'u_mask'), 1);
+                }
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                // V Pass
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.textures.blur2);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+                gl.uniform2f(gl.getUniformLocation(prog, 'u_dir'), 0.0, 1.0 / h);
+                gl.uniform1f(gl.getUniformLocation(prog, 'u_rad'), blurAmt * 2.0);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_blurType'), parseInt(UI.blurType?.value || 0));
+
+                if (maskTex) {
+                    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+                    gl.uniform1i(gl.getUniformLocation(prog, 'u_mask'), 1);
+                }
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+            } else {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+            }
+        }
+        else if (key === 'cell') {
+            // [TOOL: CELL SHADING] Posterization & Outlines
+            if (!UI.cellEnable?.checked && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.useProgram(state.programs.cell);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.cell, 'u_tex'), 0);
+            gl.uniform2f(gl.getUniformLocation(state.programs.cell, 'u_res'), w, h);
+            gl.uniform1i(gl.getUniformLocation(state.programs.cell, 'u_levels'), parseInt(UI.cellLevels?.value || 4));
+            gl.uniform1f(gl.getUniformLocation(state.programs.cell, 'u_bias'), parseFloat(UI.cellBias?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.cell, 'u_gamma'), parseFloat(UI.cellGamma?.value || 1));
+            gl.uniform1i(gl.getUniformLocation(state.programs.cell, 'u_quantMode'), parseInt(UI.cellQuantMode?.value || 0));
+            gl.uniform1i(gl.getUniformLocation(state.programs.cell, 'u_bandMap'), parseInt(UI.cellBandMap?.value || 0));
+            gl.uniform1i(gl.getUniformLocation(state.programs.cell, 'u_edgeMethod'), parseInt(UI.cellEdgeMethod?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.cell, 'u_edgeStr'), parseFloat(UI.cellEdgeStr?.value || 1));
+            gl.uniform1f(gl.getUniformLocation(state.programs.cell, 'u_edgeThick'), parseFloat(UI.cellEdgeThick?.value || 1));
+            gl.uniform1i(gl.getUniformLocation(state.programs.cell, 'u_colorPreserve'), UI.cellColorPreserve?.checked ? 1 : 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.cell, 'u_edgeEnable'), UI.cellEdgeEnable?.checked ? 1 : 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+
+
+        else if (key === 'dither') {
+            // [TOOL: DITHERING] Bit-depth Reduction
+            if (!UI.ditherEnable?.checked && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+
+            const maskTex = renderMaskForLayer(gl, inputTex, 'dither');
+            const prog = maskTex ? state.programs.maskedDither : state.programs.dither;
+            gl.useProgram(prog);
+
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+            gl.uniform1i(gl.getUniformLocation(prog, 'u_type'), parseInt(UI.ditherType?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_bitDepth'), parseFloat(UI.ditherBitDepth?.value || 4));
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_strength'), parseFloat(UI.ditherStrength?.value || 100) / 100.0);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_scale'), parseFloat(UI.ditherScale?.value || 1));
+            gl.uniform2f(gl.getUniformLocation(prog, 'u_res'), w, h);
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_seed'), Math.random() * 100.0);
+            gl.uniform1i(gl.getUniformLocation(prog, 'u_gamma'), UI.ditherGamma?.checked ? 1 : 0);
+
+            const usePalette = UI.ditherUsePalette?.checked ? 1 : 0;
+            gl.uniform1i(gl.getUniformLocation(prog, 'u_usePalette'), usePalette);
+
+            if (usePalette) {
+                const paletteRgb = state.palette.map(hexToRgb);
+                const flatPalette = new Float32Array(256 * 3);
+                paletteRgb.forEach((rgb, i) => {
+                    flatPalette[i * 3] = rgb[0] / 255;
+                    flatPalette[i * 3 + 1] = rgb[1] / 255;
+                    flatPalette[i * 3 + 2] = rgb[2] / 255;
+                });
+                gl.uniform3fv(gl.getUniformLocation(prog, 'u_customPalette'), flatPalette);
+                gl.uniform1f(gl.getUniformLocation(prog, 'u_paletteSize'), paletteRgb.length);
+            } else {
+                gl.uniform1f(gl.getUniformLocation(prog, 'u_paletteSize'), parseFloat(UI.ditherPaletteSize?.value || 4));
+            }
+
+            if (maskTex) {
+                gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, maskTex);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_mask'), 1);
+            }
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+
+        else if (key === 'compression') {
+            // [TOOL: COMPRESSION] Lossy Compression Simulation
+            if (!UI.compressionEnable?.checked && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+
+            const iters = Math.max(1, parseInt(UI.compressionIterations?.value || 1));
+            const prog = state.programs.compression;
+            gl.useProgram(prog);
+            gl.uniform1i(gl.getUniformLocation(prog, 'u_method'), parseInt(UI.compressionMethod?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_quality'), parseFloat(UI.compressionQuality?.value || 50));
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_blockSize'), parseFloat(UI.compressionBlockSize?.value || 8));
+            gl.uniform1f(gl.getUniformLocation(prog, 'u_blend'), parseFloat(UI.compressionBlend?.value || 100) / 100.0);
+            gl.uniform2f(gl.getUniformLocation(prog, 'u_res'), w, h);
+
+            if (iters <= 1) {
+                // Single pass: direct to output
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+            } else {
+                // Iterative: ping-pong using blur1/blur2 as scratch FBOs
+                let readTex = inputTex;
+                for (let i = 0; i < iters; i++) {
+                    const isLast = (i === iters - 1);
+                    const writeFbo = isLast ? outputFbo : (i % 2 === 0 ? state.fbos.blur1 : state.fbos.blur2);
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, writeFbo);
+                    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, readTex);
+                    gl.uniform1i(gl.getUniformLocation(prog, 'u_tex'), 0);
+                    gl.drawArrays(gl.TRIANGLES, 0, 6);
+                    if (!isLast) {
+                        readTex = (i % 2 === 0) ? state.textures.blur1 : state.textures.blur2;
+                    }
+                }
+            }
+        }
+        else if (key === 'palette') {
+            // [TOOL: PALETTE RECONSTRUCTOR] Indexed Color Mapping
+            if (!UI.paletteEnable?.checked && !force) {
+                gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+                gl.useProgram(state.programs.copy);
+                gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+                gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                gl.drawArrays(gl.TRIANGLES, 0, 6);
+                return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+            }
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.useProgram(state.programs.palette);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.palette, 'u_tex'), 0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.palette, 'u_blend'), parseFloat(UI.paletteBlend?.value || 100) / 100.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.palette, 'u_smoothing'), parseFloat(UI.paletteSmoothing?.value || 0));
+            gl.uniform1i(gl.getUniformLocation(state.programs.palette, 'u_smoothingType'), parseInt(UI.paletteSmoothingType?.value || 0));
+            gl.uniform2f(gl.getUniformLocation(state.programs.palette, 'u_res'), w, h);
+
+            const pSize = Math.min(state.palette.length, 256);
+            gl.uniform1i(gl.getUniformLocation(state.programs.palette, 'u_paletteSize'), pSize);
+
+            const flatPalette = new Float32Array(256 * 3);
+            for (let i = 0; i < pSize; i++) {
+                const hex = state.palette[i];
+                flatPalette[i * 3 + 0] = parseInt(hex.slice(1, 3), 16) / 255;
+                flatPalette[i * 3 + 1] = parseInt(hex.slice(3, 5), 16) / 255;
+                flatPalette[i * 3 + 2] = parseInt(hex.slice(5, 7), 16) / 255;
+            }
+            gl.uniform3fv(gl.getUniformLocation(state.programs.palette, 'u_palette'), flatPalette);
+
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        // [SAFETY NET] Unknown or unhandled layer — copy input to output to prevent chain corruption
+        else {
+            console.warn(`[Pipeline] No handler for layer '${key}'. Performing pass-through copy.`);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+            gl.useProgram(state.programs.copy);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        return (outputFbo === state.fbos.temp2) ? state.textures.temp2 : state.textures.temp1;
+    }
+
+    /**
+     * [PIPELINE OPTIMIZATION] Unified Mask Rendering
+     * logic: Generates a combined Luma + Color mask for a given tool prefix.
+     * returns: The texture containing the final mask.
+     */
+    function renderMaskForLayer(gl, inputTex, prefix) {
+        const hasSH = UI[prefix + 'LumaMask']?.checked || UI['noiseLumaMask']?.checked;
+        const hasCol = UI[prefix + 'ColorExclude']?.checked || UI['noiseColorExclude']?.checked;
+
+        if (!hasSH && !hasCol) return null;
+
+        // Ensure maskTotal buffers exist
+        if (!state.fbos.maskTotal) {
+            state.textures.maskTotal = createTexture(gl, null, state.renderWidth, state.renderHeight);
+            state.fbos.maskTotal = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskTotal);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.textures.maskTotal, 0);
+        }
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskTotal);
+        gl.clearColor(1, 1, 1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+
+        if (hasSH) {
+            gl.useProgram(state.programs.mask);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_tex'), 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_useS'), 1);
+            gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_sth'), parseFloat(UI[prefix + 'ShadowThreshold']?.value || UI['shadowThreshold']?.value || 0));
+            gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_sfa'), parseFloat(UI[prefix + 'ShadowFade']?.value || UI['shadowFade']?.value || 0.1));
+            gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_useH'), 1);
+            gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_hth'), parseFloat(UI[prefix + 'HighlightThreshold']?.value || UI['highlightThreshold']?.value || 1));
+            gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_hfa'), parseFloat(UI[prefix + 'HighlightFade']?.value || UI['highlightFade']?.value || 0.1));
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        if (hasCol) {
+            const targetColor = UI[prefix + 'ExcludeColor']?.value || UI[prefix + 'TargetColor']?.value || UI['noiseExcludeColor']?.value || '#000000';
+            const rgb = hexToRgb(targetColor);
+            gl.useProgram(state.programs.colorMask);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.colorMask, 'u_tex'), 0);
+            gl.uniform3f(gl.getUniformLocation(state.programs.colorMask, 'u_targetColor'), rgb.r, rgb.g, rgb.b);
+            gl.uniform1f(gl.getUniformLocation(state.programs.colorMask, 'u_tolerance'), parseFloat(UI[prefix + 'ColorTolerance']?.value || UI['noiseColorTolerance']?.value || 10) / 100.0);
+            gl.uniform1f(gl.getUniformLocation(state.programs.colorMask, 'u_fade'), parseFloat(UI[prefix + 'ColorFade']?.value || UI['noiseColorFade']?.value || 20) / 100.0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        gl.disable(gl.BLEND);
+
+        if (UI[prefix + 'InvertMask']?.checked || UI['noiseInvertMask']?.checked) {
+            gl.useProgram(state.programs.invert);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.blur1); // Use blur1 as temp for inversion
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.textures.maskTotal);
+            gl.uniform1i(gl.getUniformLocation(state.programs.invert, 'u_tex'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Copy back to maskTotal
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskTotal);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.textures.blur1);
+            gl.useProgram(state.programs.copy);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        return state.textures.maskTotal;
+    }
+
+    // --- PIPELINE EXECUTION ---
+
+    // --- PIPELINE EXECUTION ---
+    /** 
+     * The orchestrator for the entire render process.
+     * logic: 
+     * 1. Reallocates FBOs if resolution changed.
+     * 2. Uploads the base image to the first ping-pong buffer.
+     * 3. Iterates through 'state.renderOrder' and calls 'renderSingleLayer' for each.
+     * 4. Copies the final result to the screen/display canvas.
+     */
+    function renderFrame(isExport = false) {
+        if (!state.baseImage) return;
+
+        // --- FPS Counter ---
+        if (!isExport) {
+            const now = performance.now();
+            if (state.lastFrameTime > 0) {
+                const deltaTime = now - state.lastFrameTime;
+                state.realtimeFps = 1000 / deltaTime;
+            }
+            state.lastFrameTime = now;
+            state.frameRenderCount++;
+            if (state.frameRenderCount % 15 === 0) { // Update UI every 15 frames
+                UI.actualFps.textContent = `(Actual: ${Math.round(state.realtimeFps)} FPS)`;
+            }
+        }
+        // --------------------
+
+        const gl = state.gl;
+        const size = reallocateBuffers(isExport);
+
+        // Reset pool write indexes
+        for (let key in state.fboPools) {
+            state.fboPools[key].writeIdx = 0;
+        }
+
+        const initialW = state.initialRes.w;
+        const initialH = state.initialRes.h;
+        const initialPoolKey = `${initialW}x${initialH}`;
+        const initialPool = state.fboPools[initialPoolKey];
+
+        gl.viewport(0, 0, initialW, initialH);
+
+        // [EXPORT LOGIC] Draw upscaled base image to a temp canvas and upload as high-res texture
+        let baseTex = state.textures.base;
+        if (isExport && (initialW !== state.width || initialH !== state.height)) {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = initialW;
+            tempCanvas.height = initialH;
+            const ctx = tempCanvas.getContext('2d');
+            ctx.drawImage(state.baseImage, 0, 0, state.width, state.height, 0, 0, initialW, initialH);
+            // Create a new texture from the upscaled image
+            baseTex = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, baseTex);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, tempCanvas);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        }
+
+        // Start with Base
+        gl.bindFramebuffer(gl.FRAMEBUFFER, initialPool.pingPong0.fbo);
+        gl.useProgram(state.programs.copy);
+        gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, baseTex);
+        gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Clean up temp texture if created
+        if (isExport && baseTex !== state.textures.base) {
+            gl.deleteTexture(baseTex);
+        }
+
+        let currentTex = initialPool.pingPong0.tex;
+
+        // [MULTI-INSTANCE] Render loop with per-instance UI Proxy support
+        const debugRender = !isExport && state.frameRenderCount % 60 === 0;
+        if (debugRender) console.groupCollapsed(`[Pipeline] Rendering Frame ${state.frameRenderCount} (${state.renderOrder.length} layers)`);
+
+        state.renderOrder.forEach((instanceId, i) => {
+            const { baseType, index } = parseInstanceId(instanceId);
+            // Correctly handle 'adjust' -> 'adjustEnable' mismatch
+            const toggleId = (baseType === 'adjust' ? 'adjust' : baseType) + 'Enable';
+
+            // [MULTI-INSTANCE] Swap UI to Proxy for non-default instances
+            const savedUI = UI;
+            if (index > 0) UI = createInstanceUIProxy(index);
+
+            try {
+                // Optimized: Skip disabled layers entirely. No pass-through needed.
+                const vis = state.layerVisibility[instanceId] ?? state.layerVisibility[baseType] ?? true;
+                const isEnabled = UI[toggleId] ? UI[toggleId].checked : true;
+
+                if (debugRender) console.log(`  [${i}] ${instanceId}: visible=${vis}, enabled=${isEnabled}`);
+
+                if (vis && isEnabled) {
+                    const res = state.layerResolutions[instanceId] || { w: initialW, h: initialH };
+                    const targetW = res.w;
+                    const targetH = res.h;
+                    const poolKey = `${targetW}x${targetH}`;
+                    const pool = state.fboPools[poolKey];
+
+                    gl.viewport(0, 0, targetW, targetH);
+                    state.renderWidth = targetW;
+                    state.renderHeight = targetH;
+
+                    // Bind temporary scratch buffers for this specific resolution pool
+                    state.textures.blur1 = pool.blur1.tex; state.fbos.blur1 = pool.blur1.fbo;
+                    state.textures.blur2 = pool.blur2.tex; state.fbos.blur2 = pool.blur2.fbo;
+                    state.textures.tempNoise = pool.tempNoise.tex; state.fbos.tempNoise = pool.tempNoise.fbo;
+                    state.textures.maskTotal = pool.maskTotal.tex; state.fbos.maskTotal = pool.maskTotal.fbo;
+
+                    const outputBuffer = pool.writeIdx === 0 ? pool.pingPong1 : pool.pingPong0;
+
+                    // Compute uniforms per-instance (uses current UI, which may be proxied)
+                    const uniforms = computeUniforms(targetW, targetH);
+
+                    // Execute layer using baseType for dispatch
+                    renderSingleLayer(gl, baseType, currentTex, outputBuffer.fbo, uniforms);
+
+                    currentTex = outputBuffer.tex;
+                    pool.writeIdx = 1 - pool.writeIdx;
+
+                    // Save output for chain preview
+                    state.layerTextures[instanceId] = currentTex;
+
+                    // [CHAIN PREVIEW FIX] Snapshot the active layer's output
+                    if (state.activeSection && instanceId === state.activeSection && pool.chainCapture) {
+                        gl.bindFramebuffer(gl.FRAMEBUFFER, pool.chainCapture.fbo);
+                        gl.useProgram(state.programs.copy);
+                        gl.activeTexture(gl.TEXTURE0);
+                        gl.bindTexture(gl.TEXTURE_2D, currentTex);
+                        gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+                        gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), 0);
+                        gl.drawArrays(gl.TRIANGLES, 0, 6);
+                        state.textures.chainCapture = pool.chainCapture.tex;
+                    }
+                }
+            } catch (e) {
+                console.error(`[Pipeline] ERROR in layer ${instanceId}:`, e.message);
+            } finally {
+                // [MULTI-INSTANCE] Always restore original UI
+                UI = savedUI;
+            }
+        });
+        if (debugRender) console.groupEnd();
+
+        // FINAL OUTPUT
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+        const finalW = size.w;
+        const finalH = size.h;
+
+        // Resize canvas DOM element to match final render size
+        if (gl.canvas.width !== finalW || gl.canvas.height !== finalH) {
+            gl.canvas.width = finalW;
+            gl.canvas.height = finalH;
+        }
+        gl.viewport(0, 0, finalW, finalH);
+
+        const sourceTex = state.activeLayerPreview && state.layerTextures[state.activeLayerPreview]
+            ? state.layerTextures[state.activeLayerPreview]
+            : currentTex;
+
+        let chan = 0;
+        if (state.activeLayerPreview === 'shadows') chan = 2;
+        if (state.activeLayerPreview === 'highlights') chan = 3;
+
+        if (chan === 0) {
+            gl.useProgram(state.programs.final);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, sourceTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.final, 'u_tex'), 0);
+            gl.uniform2f(gl.getUniformLocation(state.programs.final, 'u_res'), finalW, finalH);
+        } else {
+            gl.useProgram(state.programs.copy);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, sourceTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), chan);
+        }
+
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.flush();
+
+        // Analysis Pass (Downsample final result for Histogram/Vectorscope)
+        const infoDetails = document.querySelector('.info-details');
+        if (infoDetails && infoDetails.open) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.analysisFBO.fbo);
+            gl.viewport(0, 0, state.analysisFBO.w, state.analysisFBO.h);
+            gl.useProgram(state.programs.copy);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, sourceTex);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        // Ensure rendering is complete before export (toDataURL relies on buffer)
+        if (isExport) {
+            gl.finish();
+        } else {
+            // Only update previews if the breakdown grid is visible (performance optimization)
+            if (UI.layerGrid && UI.layerGrid.offsetHeight > 0) {
+                updateLayerPreviews();
+            }
+
+            // Only update graphs if the section is open (performance optimization)
+            const infoDetails = document.querySelector('.info-details');
+            if (infoDetails && infoDetails.open) {
+                const aw = state.analysisFBO.w;
+                const ah = state.analysisFBO.h;
+                if (!state.analysisPixelBuffer) {
+                    state.analysisPixelBuffer = new Uint8Array(aw * ah * 4);
+                }
+                gl.bindFramebuffer(gl.FRAMEBUFFER, state.analysisFBO.fbo);
+                gl.readPixels(0, 0, aw, ah, gl.RGBA, gl.UNSIGNED_BYTE, state.analysisPixelBuffer);
+
+                updateHistogram(state.analysisPixelBuffer, aw, ah);
+                updateVectorscope(state.analysisPixelBuffer, aw, ah);
+                updateParade(state.analysisPixelBuffer, aw, ah);
+            }
+
+            // [NEW] Sync to external preview
+            if (state.previewWindow && !state.previewWindow.closed) {
+                try {
+                    const destCanvas = state.previewWindow.document.getElementById('fs-canvas');
+                    if (destCanvas) {
+                        // Only update dimensions if changed (avoids flickering/resetting)
+                        if (destCanvas.width !== finalW || destCanvas.height !== finalH) {
+                            destCanvas.width = finalW;
+                            destCanvas.height = finalH;
+                        }
+                        const ctx = destCanvas.getContext('2d');
+                        ctx.drawImage(gl.canvas, 0, 0);
+                    } else {
+                        state.previewWindow = null;
+                    }
+                } catch (err) {
+                    // Window might be navigating away or closed
+                    state.previewWindow = null;
+                    console.warn("Preview sync error:", err);
+                }
+            }
+        }
+    }
+
+    function calcCurve(val, max, scale = 1.0) {
+        const norm = val / max;
+        return (norm * norm) * scale;
+    }
+
+    function updatePinPosition() {
+        const x = state.caCenter.x * 100;
+        const y = (1.0 - state.caCenter.y) * 100;
+        UI.caPin.style.left = x + '%';
+        UI.caPin.style.top = y + '%';
+    }
+
+    function updatePaletteUI() {
+        UI.paletteList.innerHTML = '';
+        state.palette.forEach((color, index) => {
+            const item = document.createElement('div');
+            item.className = 'palette-color-item';
+            item.innerHTML = `
+                    <input type="color" value="${color}">
+                    <button class="remove-color-btn" title="Remove">&times;</button>
+                `;
+            item.querySelector('input').addEventListener('input', (e) => {
+                state.palette[index] = e.target.value;
+                requestRender();
+            });
+            item.querySelector('.remove-color-btn').addEventListener('click', () => {
+                state.palette.splice(index, 1);
+                updatePaletteUI();
+                requestRender();
+            });
+            UI.paletteList.appendChild(item);
+        });
+    }
+
+    function syncNoiseUI(suffix = '') {
+        const typeInput = _UI_BASE['noiseType' + suffix] || document.getElementById('noiseType' + suffix);
+        if (!typeInput) return;
+        const type = parseInt(typeInput.value);
+
+        const getEl = (id) => _UI_BASE[id + suffix] || document.getElementById(id + suffix);
+
+        const header = getEl('noiseParamsHeader');
+        const rowA = getEl('noiseParamRowA');
+        const rowB = getEl('noiseParamRowB');
+        const rowC = getEl('noiseParamRowC');
+        const labelA = getEl('noiseLabelA');
+        const labelB = getEl('noiseLabelB');
+        const labelC = getEl('noiseLabelC');
+        const paramA = getEl('noiseParamA');
+
+        // Reset
+        [header, rowA, rowB, rowC].forEach(el => { if (el) el.style.display = 'none'; });
+
+        const showSet = (a, b, c) => {
+            if (header) header.style.display = 'block';
+            if (a && rowA && labelA) { rowA.style.display = 'flex'; labelA.textContent = a; }
+            if (b && rowB && labelB) { rowB.style.display = 'flex'; labelB.textContent = b; }
+            if (c && rowC && labelC) { rowC.style.display = 'flex'; labelC.textContent = c; }
+        };
+
+        switch (type) {
+            case 5: // Perlin
+                showSet("Complexity", "Organic Flow", "Octave Mix");
+                if (paramA) {
+                    paramA.min = 1; paramA.max = 8; paramA.step = 1;
+                    if (paramA.value > 8) { paramA.value = 4; paramA.dispatchEvent(new Event('input')); }
+                }
+                break;
+            case 6: // Worley
+                showSet("Cell Jitter", "Density", "Sphericity");
+                if (paramA) {
+                    paramA.min = 0; paramA.max = 100; paramA.step = 1;
+                }
+                break;
+            case 7: // Scanlines
+                showSet("Line Thickness", "Vertical Jitter", "Sync Grain");
+                break;
+            case 8: // Speckle
+                showSet("Density", "Sharpness", "Variable Size");
+                break;
+            case 9: // Glitch
+                showSet("Block Size", "Horiz Shift", "RGB Split");
+                break;
+            case 10: // Anisotropic
+                showSet("Stretch", "Rotation", "Fiber Link");
+                break;
+            case 11: // Voronoi Mosaic
+                showSet("Cell Detail", "Randomness", "Smoothness");
+                break;
+            case 12: // Crosshatch
+                showSet("Line Density", "Diagonal Angle", "Pressure");
+                break;
+        }
+    }
+
+    /** 
+     * Procedural Color Palette Extraction.
+     * logic: Uses 'Farthest First Traversal' to ensure the extracted palette 
+     * is diverse and representative, not just the most common colors.
+     * Reference: Controlled by 'Palette Reconstructor' UI.
+     */
+    async function extractPaletteFromImage(img, count) {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const size = 128; // Small size for faster analysis
+        canvas.width = size;
+        canvas.height = size;
+        ctx.drawImage(img, 0, 0, size, size);
+        const data = ctx.getImageData(0, 0, size, size).data;
+
+        const counts = {};
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] < 128) continue; // Skip transparency
+            const r = data[i], g = data[i + 1], b = data[i + 2];
+            const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+            counts[hex] = (counts[hex] || 0) + 1;
+        }
+
+        const uniqueColors = Object.entries(counts).map(([hex, freq]) => {
+            return {
+                hex,
+                freq,
+                r: parseInt(hex.slice(1, 3), 16),
+                g: parseInt(hex.slice(3, 5), 16),
+                b: parseInt(hex.slice(5, 7), 16)
+            };
+        });
+
+        if (uniqueColors.length === 0) return;
+
+        // Farthest First Traversal (Diversity Logic)
+        const resultPalette = [];
+        // 1. Pick the most frequent as the anchor
+        uniqueColors.sort((a, b) => b.freq - a.freq);
+        resultPalette.push(uniqueColors[0]);
+
+        // 2. Iteratively pick colors that are farthest from the current palette
+        const dists = new Float32Array(uniqueColors.length).fill(1e10);
+
+        const updateDists = (lastPicked) => {
+            for (let i = 0; i < uniqueColors.length; i++) {
+                const c = uniqueColors[i];
+                const d = Math.sqrt(
+                    Math.pow(c.r - lastPicked.r, 2) +
+                    Math.pow(c.g - lastPicked.g, 2) +
+                    Math.pow(c.b - lastPicked.b, 2)
+                );
+                if (d < dists[i]) dists[i] = d;
+            }
+        };
+
+        updateDists(resultPalette[0]);
+
+        const targetCount = Math.min(count, uniqueColors.length);
+        while (resultPalette.length < targetCount) {
+            let bestIdx = -1;
+            let maxMinDist = -1;
+
+            for (let i = 0; i < uniqueColors.length; i++) {
+                if (dists[i] > maxMinDist) {
+                    maxMinDist = dists[i];
+                    bestIdx = i;
+                }
+            }
+
+            if (bestIdx === -1) break;
+            const picked = uniqueColors[bestIdx];
+            resultPalette.push(picked);
+            updateDists(picked);
+        }
+
+        state.palette = resultPalette.map(c => c.hex);
+        updatePaletteUI();
+        requestRender();
+    }
+
+    // [SHADER HELPERS] Modular fetch-based shader loading
+    // Loads shader source from external .frag/.vert files
+    async function fetchShaderSource(url) {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`Failed to load shader: ${url} (${response.status})`);
+        return (await response.text()).trim();
+    }
+
+    function compileShaderSource(gl, type, src, label) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, src);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error(`Shader compile error [${label}]:`, gl.getShaderInfoLog(shader));
+            return null;
+        }
+        return shader;
+    }
+
+    function createProgramFromSources(gl, vsSrc, fsSrc, vsLabel, fsLabel) {
+        const vs = compileShaderSource(gl, gl.VERTEX_SHADER, vsSrc, vsLabel);
+        const fs = compileShaderSource(gl, gl.FRAGMENT_SHADER, fsSrc, fsLabel);
+        if (!vs || !fs) return null;
+        const p = gl.createProgram();
+        gl.attachShader(p, vs);
+        gl.attachShader(p, fs);
+        gl.linkProgram(p);
+        if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+            console.error(`Program link error [${vsLabel} + ${fsLabel}]:`, gl.getProgramInfoLog(p));
+            return null;
+        }
+        return p;
+    }
+
+    function createTexture(gl, img, w, h, highPrec = false) {
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+        const internalFormat = highPrec ? gl.RGBA16F : gl.SRGB8_ALPHA8;
+        const format = gl.RGBA;
+        const type = highPrec ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+
+        if (img && (img instanceof HTMLImageElement || img instanceof HTMLCanvasElement || img instanceof ImageBitmap)) {
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, format, type, img);
+        } else {
+            // TypedArray or Null
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+            gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+            gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, w, h, 0, format, type, img || null);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); // Restore global state
+        }
+        return tex;
+    }
+
+    function hexToRgb(hex) {
+        const r = parseInt(hex.slice(1, 3), 16) / 255;
+        const g = parseInt(hex.slice(3, 5), 16) / 255;
+        const b = parseInt(hex.slice(5, 7), 16) / 255;
+        return { r, g, b };
+    }
+
+    // --- UTILS: EXPORT & UI ---
+
+    /** 
+     * [EXPORT] Renders and saves the final image at the highest quality.
+     * logic: Temporarily sets 'upscaleFactor' to target resolution, processes 
+     * the full stack, and extracts the buffer via 'toDataURL'.
+     */
+    async function downloadFullRes() {
+        UI.loading.style.display = 'block';
+        await new Promise(r => setTimeout(r, 50));
+
+        // Ensure buffers are allocated for full resolution export
+        reallocateBuffers(true);
+        renderFrame(true);
+
+        const link = document.createElement('a');
+        link.download = 'grain-export.png';
+        link.href = state.canvas.toDataURL('image/png', 1.0);
+        link.click();
+
+        // Restore buffers to preview size after export
+        reallocateBuffers(false);
+        requestRender();
+        UI.loading.style.display = 'none';
+    }
+
+    /** 
+     * [COMPARISON MODAL] Visual A/B Testing.
+     * logic: Renders full image at 1:1, copies to a side-by-side modal for detail inspection.
+     * Note: Temporarily forces full-res buffers to ensure accuracy.
+     */
+    async function openCompare() {
+        UI.loading.style.display = 'block';
+        await new Promise(r => setTimeout(r, 50));
+
+        renderFrame(true);
+
+        const original = document.getElementById('compareOriginal');
+        const processed = document.getElementById('compareProcessed');
+
+        const aspect = state.width / state.height;
+        original.width = 600; original.height = 600 / aspect;
+        processed.width = 600; processed.height = 600 / aspect;
+
+        const ctxO = original.getContext('2d');
+        const ctxP = processed.getContext('2d');
+
+        ctxO.drawImage(state.baseImage, 0, 0, original.width, original.height);
+        ctxP.drawImage(state.canvas, 0, 0, processed.width, processed.height);
+
+        // Update Export Info
+        if (UI.exportInfo) {
+            const reqW = Math.round(state.width * state.upscaleFactor);
+            const reqH = Math.round(state.height * state.upscaleFactor);
+            const actW = state.renderWidth;
+            const actH = state.renderHeight;
+            const scale = state._exportScale || 1.0;
+
+            UI.exportInfo.innerHTML = `Requested: ${reqW}x${reqH} | Actual: ${actW}x${actH} (Safe Scale: ${scale.toFixed(2)})`;
+
+            if (scale < 1.0) {
+                UI.exportInfo.style.color = '#ffaa00'; // Warning color if downscaled
+            } else {
+                UI.exportInfo.style.color = '#0f0';
+            }
+        }
+
+        document.getElementById('compareModal').classList.add('show');
+
+        reallocateBuffers(false);
+        requestRender();
+        UI.loading.style.display = 'none';
+    }
+
+    /** 
+     * [EXPORT] Multi-panel Comparison Image.
+     * logic: Combines original and processed images into a single vertical or horizontal layout.
+     */
+    async function exportComparison(mode) {
+        const o = document.getElementById('compareOriginal');
+        const p = document.getElementById('compareProcessed');
+        const c = document.createElement('canvas');
+        if (mode === 'side') {
+            c.width = o.width * 2;
+            c.height = o.height;
+            c.getContext('2d').drawImage(o, 0, 0);
+            c.getContext('2d').drawImage(p, o.width, 0);
+        } else {
+            c.width = o.width;
+            c.height = o.height * 2;
+            c.getContext('2d').drawImage(o, 0, 0);
+            c.getContext('2d').drawImage(p, 0, o.height);
+        }
+        const link = document.createElement('a');
+        link.download = `grain-compare-${mode}.png`;
+        link.href = c.toDataURL('image/png', 1.0);
+        link.click();
+    }
+
+    // --- PREVIEW POPOUT ---
+    function openFullscreenPreview() {
+        if (state.previewWindow && !state.previewWindow.closed) {
+            state.previewWindow.focus();
+            return;
+        }
+        const win = window.open('', 'NoiseStudioPreview', 'width=800,height=600');
+        if (!win) {
+            alert('Pop-up blocked. Please allow pop-ups for this site.');
+            return;
+        }
+        // DOM construction to avoid script tag issues
+        const d = win.document;
+        d.open();
+        d.write('');
+        d.close();
+
+        d.title = "Noise Studio Preview";
+        d.body.style.margin = '0';
+        d.body.style.background = '#111';
+        d.body.style.height = '100vh';
+        d.body.style.display = 'flex';
+        d.body.style.alignItems = 'center';
+        d.body.style.justifyContent = 'center';
+        d.body.style.overflow = 'hidden';
+
+        const cvs = d.createElement('canvas');
+        cvs.id = 'fs-canvas';
+        cvs.style.maxWidth = '100%';
+        cvs.style.maxHeight = '100%';
+        cvs.style.objectFit = 'contain';
+        cvs.style.boxShadow = '0 0 20px rgba(0,0,0,0.5)';
+        d.body.appendChild(cvs);
+
+        state.previewWindow = win;
+
+        // Apply UI expansion state
+        document.body.classList.add('popout-active');
+
+        // Resize Analysis Canvases for the expanded view
+        if (UI.vectorscopeCanvas) {
+            UI.vectorscopeCanvas.width = 600;
+            UI.vectorscopeCanvas.height = 600;
+        }
+        if (UI.histogramCanvas) {
+            UI.histogramCanvas.width = 1024;
+            UI.histogramCanvas.height = 300;
+        }
+        if (UI.paradeCanvas) {
+            UI.paradeCanvas.width = 1024;
+            UI.paradeCanvas.height = 300;
+        }
+
+        // Monitor window close state
+        const monitorInterval = setInterval(() => {
+            if (win.closed) {
+                clearInterval(monitorInterval);
+                state.previewWindow = null;
+                document.body.classList.remove('popout-active');
+
+                // Restore Analysis Canvas original sizes
+                if (UI.vectorscopeCanvas) {
+                    UI.vectorscopeCanvas.width = 400;
+                    UI.vectorscopeCanvas.height = 400;
+                }
+                if (UI.histogramCanvas) {
+                    UI.histogramCanvas.width = 512;
+                    UI.histogramCanvas.height = 300;
+                }
+                if (UI.paradeCanvas) {
+                    UI.paradeCanvas.width = 600;
+                    UI.paradeCanvas.height = 200;
+                }
+                setTimeout(() => requestRender(), 50); // Final render to update sizes
+            }
+        }, 500);
+
+        // Initial sync
+        setTimeout(() => requestRender(), 100);
+    }
+
+    // Ensure event listener is added in init
+    document.getElementById('fullscreenPreviewBtn').addEventListener('click', openFullscreenPreview);
+
+    // --- PREVIEW SYSTEM REFACTOR ---
+
+    /** 
+     * Maps an input element index to its parent tool category.
+     * logic: Used to auto-update the Section Breakdown grid when a slider is moved.
+     */
+    function getSectionFromId(id) {
+        if (!id) return null;
+        if (id.startsWith('scale')) return 'scale';
+        if (id.startsWith('alpha')) return 'alpha';
+        if (id.startsWith('adj') || id === 'brightness' || id === 'contrast' || id === 'saturationAdj' || id === 'warmth' || id === 'sharpen') return 'adjust';
+        if (id.startsWith('colorGrade')) return 'colorGrade';
+        if (id.startsWith('hdr')) return 'hdr';
+        if (id.startsWith('noise') || id === 'opacity' || id === 'strength' || id === 'blendMode' || id.startsWith('sat') || id.startsWith('ignore')) return 'noise';
+        if (id.startsWith('blur')) return 'blur';
+        if (id.startsWith('dither')) return 'dither';
+        if (id.startsWith('cell')) return 'cell';
+        if (id.startsWith('halftone')) return 'halftone';
+        if (id.startsWith('bilateral')) return 'bilateral';
+        if (id.startsWith('denoise')) return 'denoise';
+        if (id.startsWith('aberration') || id.startsWith('ca')) return 'ca';
+        if (id.startsWith('corruption')) return 'corruption';
+        if (id.startsWith('compression')) return 'compression';
+        if (id.startsWith('palette')) return 'palette';
+        if (id.startsWith('edge')) return 'edge';
+        if (id.startsWith('airyBloom')) return 'airyBloom';
+        if (id.startsWith('glareRays')) return 'glareRays';
+        if (id.startsWith('hankelBlur')) return 'hankelBlur';
+        if (id.startsWith('vignette')) return 'vignette';
+        if (id.startsWith('analogVideo')) return 'analogVideo';
+        if (id.startsWith('lensDistort')) return 'lensDistort';
+        if (id.startsWith('heatwave')) return 'heatwave';
+        if (id.startsWith('lightLeaks')) return 'lightLeaks';
+        return 'adjust'; // Default fallthrough to adjust if unknown (or null)
+    }
+
+    /** 
+     * Dynamically builds the 'Layer Breakdown' UI based on the current active tool.
+     * logic: Injects 'Chain Result', 'Isolated', and 'Mask' preview tiles.
+     */
+    function setupLayerGridDOM(section) {
+        const { baseType } = section ? parseInstanceId(section) : { baseType: 'adjust' };
+        const grid = UI.layerGrid;
+        grid.innerHTML = '';
+
+        const items = [
+            { id: 'chain', label: 'Chain' },
+            { id: 'isolated', label: 'Isolated' }
+        ];
+
+        const maskLayers = {
+            'blur': true,
+            'dither': true,
+            'halftone': true,
+            'bilateral': true,
+            'adjust': true,
+            'noise': true
+        };
+
+        if (maskLayers[baseType]) {
+            items.push({ id: 'mask_luma', label: 'Luma Mask' });
+            items.push({ id: 'mask_color', label: 'Color Mask' });
+            items.push({ id: 'mask_total', label: 'Total Mask' });
+        } else if (baseType === 'ca') {
+            items.push({ id: 'falloff', label: 'Falloff Map' });
+        }
+
+        // Calculate dimensions based on aspect ratio
+        const aspect = state.width / state.height;
+        const thumbHeight = 110; // Fixed vertical space for canvas roughly
+        const thumbWidth = thumbHeight * aspect;
+
+        items.forEach(item => {
+            const d = document.createElement('div');
+            d.className = 'layer-item';
+            d.style.minWidth = `${Math.max(80, thumbWidth)}px`;
+            d.style.flex = '0 0 auto';
+
+            const key = section + '_' + item.id;
+            if (state.activeLayerPreview === key) d.classList.add('active');
+
+            d.onclick = () => {
+                const targetKey = section + '_' + item.id;
+                if (state.activeLayerPreview === targetKey) {
+                    state.activeLayerPreview = null;
+                    d.classList.remove('active');
+                } else {
+                    state.activeLayerPreview = targetKey;
+                    document.querySelectorAll('.layer-item').forEach(el => el.classList.remove('active'));
+                    d.classList.add('active');
+                    UI.overlayOriginal.classList.remove('show');
+                }
+                requestRender();
+            };
+
+            d.innerHTML = `
+                    <div class="layer-title">${item.label}</div>
+                    <canvas class="layer-canvas" id="thumb-${item.id}" width="${Math.round(thumbWidth)}" height="${thumbHeight}"></canvas>
+                `;
+            grid.appendChild(d);
+        });
+    }
+
+    /** 
+     * Logic for the 'Breakdown' strip.
+     * logic: 
+     * 1. Renders the currently selected section in 'Isolated' mode (only that effect on base image).
+     * 2. Extracts the 'Mask' texture if masking is active.
+     * 3. Draws all results to the small preview canvases using 'drawToThumbnail'.
+     */
+    function updateLayerPreviews() {
+        const gl = state.gl;
+        if (!state.baseImage) return;
+
+        const section = state.activeSection || 'adjust';
+
+        if (state.lastActiveSectionDOM !== section) {
+            setupLayerGridDOM(section);
+            state.lastActiveSectionDOM = section;
+        }
+
+        if (!state.thumbnailFBO) return;
+
+        // 1. Chain Result
+        // [CHAIN PREVIEW FIX] Use the captured texture if available, otherwise fall back to layerTextures (which might be stale)
+        const chainTex = (state.textures.chainCapture) ? state.textures.chainCapture : state.layerTextures[section];
+        drawToThumbnail(chainTex, 'thumb-chain');
+
+        const orderIdx = state.renderOrder.indexOf(section);
+        const inputTex = (orderIdx > 0) ? state.layerTextures[state.renderOrder[orderIdx - 1]] : state.textures.base;
+
+        const { baseType, index: instIdx } = parseInstanceId(section);
+
+        // [MULTI-INSTANCE] Swap UI for non-default instances during preview render
+        const savedUI = UI;
+        if (instIdx > 0) UI = createInstanceUIProxy(instIdx);
+
+        try {
+            const uniforms = computeUniforms(state.renderWidth, state.renderHeight);
+            renderSingleLayer(gl, baseType, inputTex, state.fbos.preview, uniforms, true);
+        } finally {
+            UI = savedUI;
+        }
+        drawToThumbnail(state.textures.preview, 'thumb-isolated');
+
+        // Special case for active preview overrides
+        if (state.activeLayerPreview === section + '_isolated') {
+            state.layerTextures[state.activeLayerPreview] = state.textures.preview;
+        }
+
+        // 3. Mask Previews (Dedicated path)
+        const lumaCanvas = document.getElementById('thumb-mask_luma');
+        const colorCanvas = document.getElementById('thumb-mask_color');
+        const totalCanvas = document.getElementById('thumb-mask_total');
+
+        if (lumaCanvas || colorCanvas || totalCanvas) {
+            renderMaskForSection(section, inputTex);
+
+            if (lumaCanvas) {
+                drawToThumbnail(state.textures.maskLuma, 'thumb-mask_luma', 1); // R channel
+                if (state.activeLayerPreview === section + '_mask_luma') state.layerTextures[state.activeLayerPreview] = state.textures.maskLuma;
+            }
+            if (colorCanvas) {
+                drawToThumbnail(state.textures.maskColor, 'thumb-mask_color', 0); // Composite is enough if colorMask is simple
+                if (state.activeLayerPreview === section + '_mask_color') state.layerTextures[state.activeLayerPreview] = state.textures.maskColor;
+            }
+            if (totalCanvas) {
+                drawToThumbnail(state.textures.maskTotal, 'thumb-mask_total', 0);
+                if (state.activeLayerPreview === section + '_mask_total') state.layerTextures[state.activeLayerPreview] = state.textures.maskTotal;
+            }
+        }
+
+        // Falloff for CA
+        const falloffCanvas = document.getElementById('thumb-falloff');
+        if (falloffCanvas) {
+            renderCAFalloff();
+            drawToThumbnail(state.textures.preview, 'thumb-falloff');
+            if (state.activeLayerPreview === section + '_falloff') state.layerTextures[state.activeLayerPreview] = state.textures.preview;
+        }
+    }
+
+    function renderMaskForSection(section, inputTex) {
+        const gl = state.gl;
+        const w = state.renderWidth;
+        const h = state.renderHeight;
+        gl.viewport(0, 0, w, h);
+
+        // Ensure we have mask textures if not exists
+        if (!state.textures.maskLuma) {
+            state.textures.maskLuma = createTexture(gl, null, w, h);
+            state.fbos.maskLuma = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskLuma);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.textures.maskLuma, 0);
+
+            state.textures.maskColor = createTexture(gl, null, w, h);
+            state.fbos.maskColor = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskColor);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.textures.maskColor, 0);
+
+            state.textures.maskTotal = createTexture(gl, null, w, h);
+            state.fbos.maskTotal = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskTotal);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, state.textures.maskTotal, 0);
+        }
+
+        // Get prefix (e.g. 'adj', 'noise', 'blur')
+        let pref = section === 'adjust' ? 'adj' : section;
+
+        // Luma Mask
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskLuma);
+        gl.useProgram(state.programs.mask);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+        gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_tex'), 0);
+        gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_useS'), 1);
+        gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_sth'), parseFloat(UI[pref + 'ShadowThreshold']?.value || UI['shadowThreshold']?.value || 0));
+        gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_sfa'), parseFloat(UI[pref + 'ShadowFade']?.value || UI['shadowFade']?.value || 0));
+        gl.uniform1i(gl.getUniformLocation(state.programs.mask, 'u_useH'), 1);
+        gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_hth'), parseFloat(UI[pref + 'HighlightThreshold']?.value || UI['highlightThreshold']?.value || 1));
+        gl.uniform1f(gl.getUniformLocation(state.programs.mask, 'u_hfa'), parseFloat(UI[pref + 'HighlightFade']?.value || UI['highlightFade']?.value || 0));
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Color Mask
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskColor);
+        const targetColor = UI[pref + 'ExcludeColor']?.value || UI['noiseExcludeColor']?.value || '#000000';
+        const rgb = hexToRgb(targetColor);
+        gl.useProgram(state.programs.colorMask);
+        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, inputTex);
+        gl.uniform1i(gl.getUniformLocation(state.programs.colorMask, 'u_tex'), 0);
+        gl.uniform3f(gl.getUniformLocation(state.programs.colorMask, 'u_targetColor'), rgb.r, rgb.g, rgb.b);
+        gl.uniform1f(gl.getUniformLocation(state.programs.colorMask, 'u_tolerance'), parseFloat(UI[pref + 'ColorTolerance']?.value || UI['noiseColorTolerance']?.value || 0.1) / 100.0);
+        gl.uniform1f(gl.getUniformLocation(state.programs.colorMask, 'u_fade'), parseFloat(UI[pref + 'ColorFade']?.value || UI['noiseColorFade']?.value || 0) / 100.0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Total Mask
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskTotal);
+        gl.clearColor(1, 1, 1, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+
+        if (UI[pref + 'LumaMask']?.checked || UI['noiseLumaMask']?.checked) {
+            gl.useProgram(state.programs.copy);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.textures.maskLuma);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), 1); // R is combined mask in fs-mask
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        if (UI[pref + 'ColorExclude']?.checked || UI['noiseColorExclude']?.checked) {
+            gl.useProgram(state.programs.copy);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.textures.maskColor);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+        gl.disable(gl.BLEND);
+
+        if (UI[pref + 'InvertMask']?.checked || UI['noiseInvertMask']?.checked) {
+            gl.useProgram(state.programs.invert);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.preview); // Temporarily use preview FBO for inversion
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.textures.maskTotal);
+            gl.uniform1i(gl.getUniformLocation(state.programs.invert, 'u_tex'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+            // Copy back
+            gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.maskTotal);
+            gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, state.textures.preview);
+            gl.useProgram(state.programs.copy);
+            gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+    }
+
+    function renderCAFalloff() {
+        const gl = state.gl;
+        const w = state.renderWidth;
+        const h = state.renderHeight;
+        gl.viewport(0, 0, w, h);
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.fbos.preview);
+        gl.useProgram(state.programs.radial);
+        gl.uniform2f(gl.getUniformLocation(state.programs.radial, 'u_res'), w, h);
+        gl.uniform2f(gl.getUniformLocation(state.programs.radial, 'u_center'), state.caCenter.x, state.caCenter.y);
+        gl.uniform1f(gl.getUniformLocation(state.programs.radial, 'u_radius'), parseFloat(UI.caRadius.value) / 1000.0);
+        gl.uniform1f(gl.getUniformLocation(state.programs.radial, 'u_falloff'), parseFloat(UI.caFalloff.value) / 1000.0);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+
+    /** 
+     * Low-level helper to copy a WebGL texture onto a 2D canvas.
+     * logic: Uses an intermediate offscreen FBO to read pixels from the GPU into the CPU-bound canvas.
+     */
+    function drawToThumbnail(tex, canvasId, channel = 0) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !tex) return;
+        const gl = state.gl;
+
+        const dw = canvas.width;
+        const dh = canvas.height;
+        const tw = state.thumbnailFBO.w;
+        const th = state.thumbnailFBO.h;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, state.thumbnailFBO.fbo);
+        gl.viewport(0, 0, tw, th);
+        gl.useProgram(state.programs.copy);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_tex'), 0);
+        gl.uniform1i(gl.getUniformLocation(state.programs.copy, 'u_channel'), channel);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+        // Use cached buffer
+        const pixels = state.thumbPixelBuffer;
+        gl.readPixels(0, 0, tw, th, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+
+        // Fast vertical flip and transfer to clamped array for ImageData
+        const clamped = state.thumbClampedBuffer;
+        for (let y = 0; y < th; y++) {
+            const srcOff = (th - 1 - y) * tw * 4;
+            const dstOff = y * tw * 4;
+            clamped.set(pixels.subarray(srcOff, srcOff + tw * 4), dstOff);
+        }
+
+        const imgData = new ImageData(clamped, tw, th);
+        state.thumbTempCtx.putImageData(imgData, 0, 0);
+
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.drawImage(state.thumbTempCanvas, 0, 0, tw, th, 0, 0, dw, dh);
+    }
+
+    function bindDynamicControls(container) {
+        container.querySelectorAll('details').forEach(details => {
+            if (details.dataset.bound) return;
+            details.addEventListener('toggle', (e) => {
+                if (details.open) {
+                    const input = details.querySelector('input, select');
+                    if (input) {
+                        let section = typeof getSectionFromId === 'function' ? getSectionFromId(input.id) : null;
+                        if (section) {
+                            const suffixMatch = input.id.match(/__(\d+)$/);
+                            if (suffixMatch && suffixMatch[1] !== '0') {
+                                section += '__' + suffixMatch[1];
+                            }
+                            if (state.activeSection !== section) {
+                                state.textures.chainCapture = null; // Clear stale capture
+                                state.activeSection = section;
+                            }
+                            requestRender();
+                        }
+                    }
+                } else {
+                    // Reset to adjust if the active section is closed
+                    if (state.activeSection === (details.dataset.layerKey + (details.dataset.instanceIndex !== '0' ? '__' + details.dataset.instanceIndex : ''))) {
+                        state.textures.chainCapture = null;
+                        state.activeSection = 'adjust';
+                    }
+                    requestRender();
+                }
+            });
+            details.dataset.bound = 'true';
+        });
+
+        container.querySelectorAll('input[type=range]').forEach(range => {
+            if (range.dataset.bound) return;
+            const text = range.nextElementSibling;
+            if (text && text.classList.contains('control-value')) {
+                const update = () => text.value = range.value;
+                range.addEventListener('input', () => {
+                    update();
+                    if (range.id && range.id.startsWith('scaleMultiplier')) {
+                        if (state.baseImage) reallocateBuffers(false);
+                    }
+                    requestRender();
+                });
+                // Sync initial value but don't overwrite if not needed
+                update();
+            } else {
+                range.addEventListener('input', () => {
+                    if (range.id && range.id.startsWith('scaleMultiplier')) {
+                        if (state.baseImage) reallocateBuffers(false);
+                    }
+                    requestRender();
+                });
+            }
+            range.dataset.bound = 'true';
+        });
+
+        container.querySelectorAll('select, input[type=checkbox], input[type=color]').forEach(el => {
+            if (el.dataset.bound) return;
+            el.addEventListener('change', () => {
+                if (el.id === 'clampPreviewToggle') {
+                    state.clampPreview = !el.checked;
+                    reallocateBuffers(state.isZooming);
+                }
+                if (el.id && el.id.startsWith('scaleEnable')) {
+                    if (state.baseImage) reallocateBuffers(false);
+                }
+                if (el.id && el.id.startsWith('edgeMode')) {
+                    const suffix = el.id.substring(8);
+                    const targetId = 'edgeSatControls' + suffix;
+                    const target = document.getElementById(targetId) || _UI_BASE[targetId];
+                    if (target) target.style.display = el.value === '1' ? 'block' : 'none';
+                }
+                if (el.id && el.id.startsWith('noiseType')) {
+                    const suffix = el.id.substring(9);
+                    syncNoiseUI(suffix);
+                }
+                requestRender();
+            });
+            el.addEventListener('input', requestRender);
+            el.dataset.bound = 'true';
+        });
+
+        container.querySelectorAll('.eyedropper-btn').forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.addEventListener('click', (e) => {
+                const targetId = e.target.dataset.target;
+                if (eyedropperTarget === targetId) {
+                    eyedropperTarget = null;
+                    UI.displayCanvas.classList.remove('eyedropper-active');
+                } else {
+                    eyedropperTarget = targetId;
+                    UI.displayCanvas.classList.add('eyedropper-active');
+                }
+                e.stopPropagation();
+            });
+            btn.dataset.bound = 'true';
+        });
+
+        // 3-Way Color Wheels Logic
+        container.querySelectorAll('.color-wheel-interactive').forEach(wheel => {
+            if (wheel.dataset.bound) return;
+
+            const handle = wheel.querySelector('.color-wheel-handle');
+            const targetId = wheel.dataset.target;
+            const input = document.getElementById(targetId) || _UI_BASE[targetId];
+
+            let isDragging = false;
+
+            if (input) {
+                input.addEventListener('change', () => {
+                    if (isDragging) return; // Prevent loop triggered by manual mouse actions
+                    const hex = input.value;
+                    if (!hex) return;
+                    const r = parseInt(hex.slice(1, 3), 16) / 255;
+                    const g = parseInt(hex.slice(3, 5), 16) / 255;
+                    const b = parseInt(hex.slice(5, 7), 16) / 255;
+                    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+                    const d = max - min;
+                    let hStr = 0, s = max === 0 ? 0 : d / max;
+                    if (max === min) hStr = 0;
+                    else {
+                        switch (max) {
+                            case r: hStr = (g - b) / d + (g < b ? 6 : 0); break;
+                            case g: hStr = (b - r) / d + 2; break;
+                            case b: hStr = (r - g) / d + 4; break;
+                        }
+                        hStr /= 6;
+                    }
+                    const angle = hStr * Math.PI * 2 - Math.PI / 2;
+                    const dx = Math.cos(angle) * s * 50;
+                    const dy = Math.sin(angle) * s * 50;
+                    if (handle) {
+                        handle.style.left = `calc(50% + ${dx}%)`;
+                        handle.style.top = `calc(50% + ${dy}%)`;
+                    }
+                });
+            }
+
+            let currentDx = 0;
+            let currentDy = 0;
+
+            const updateWheelFromDelta = (dx, dy, rect) => {
+                const radius = rect.width / 2;
+
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > radius) {
+                    dx = (dx / dist) * radius;
+                    dy = (dy / dist) * radius;
+                    dist = radius;
+                }
+
+                currentDx = dx;
+                currentDy = dy;
+
+                handle.style.left = `calc(50% + ${dx}px)`;
+                handle.style.top = `calc(50% + ${dy}px)`;
+
+                // Map to HSV
+                const angle = Math.atan2(dy, dx); // -PI to PI
+                let hue = (angle + Math.PI / 2) / (Math.PI * 2);
+                if (hue < 0) hue += 1.0;
+
+                // Exaggerate saturation near center so it's easier to rest at pure white
+                let saturation = dist / radius;
+                if (saturation < 0.05) saturation = 0;
+
+                // Simple HSV to RGB mapping strictly for the color wheel
+                const h = hue * 6;
+                const i = Math.floor(h);
+                const f = h - i;
+                const q = 1 - f;
+                const t = 1 - (1 - f);
+
+                let r, g, b;
+                const v = 1.0;
+                switch (i % 6) {
+                    case 0: r = v, g = t, b = 0; break;
+                    case 1: r = q, g = v, b = 0; break;
+                    case 2: r = 0, g = v, b = t; break;
+                    case 3: r = 0, g = q, b = v; break;
+                    case 4: r = t, g = 0, b = v; break;
+                    case 5: r = v, g = 0, b = q; break;
+                }
+
+                // Mix with white based on saturation
+                r = Math.round((1.0 - saturation + r * saturation) * 255);
+                g = Math.round((1.0 - saturation + g * saturation) * 255);
+                b = Math.round((1.0 - saturation + b * saturation) * 255);
+
+                const hex = "#" + (1 << 24 | r << 16 | g << 8 | b).toString(16).slice(1);
+
+                if (input) {
+                    input.value = hex;
+                    input.dispatchEvent(new Event('input'));
+                }
+            };
+
+            wheel.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                document.body.classList.add('hide-cursor');
+
+                const rect = wheel.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+
+                let dx = e.clientX - cx;
+                let dy = e.clientY - cy;
+                updateWheelFromDelta(dx, dy, rect);
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (isDragging) {
+                    currentDx += e.movementX / 2.0;
+                    currentDy += e.movementY / 2.0;
+                    const rect = wheel.getBoundingClientRect();
+                    updateWheelFromDelta(currentDx, currentDy, rect);
+                }
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isDragging) {
+                    isDragging = false;
+                    document.body.classList.remove('hide-cursor');
+                    if (input) input.dispatchEvent(new Event('change'));
+                }
+            });
+
+            wheel.dataset.bound = 'true';
+        });
+
+        // Reset Wheels Button
+        container.querySelectorAll('.btn-reset-wheels').forEach(btn => {
+            if (btn.dataset.bound) return;
+            btn.addEventListener('click', (e) => {
+                const parent = e.target.parentElement;
+                if (!parent) return;
+
+                parent.querySelectorAll('.color-wheel-interactive').forEach(wheel => {
+                    const handle = wheel.querySelector('.color-wheel-handle');
+                    const targetId = wheel.dataset.target;
+                    const input = document.getElementById(targetId) || _UI_BASE[targetId];
+
+                    if (handle) {
+                        handle.style.left = '50%';
+                        handle.style.top = '50%';
+                    }
+                    if (input) {
+                        input.value = '#ffffff';
+                        input.dispatchEvent(new Event('input'));
+                        input.dispatchEvent(new Event('change'));
+                    }
+                });
+            });
+            btn.dataset.bound = 'true';
+        });
+
+    }
+})();

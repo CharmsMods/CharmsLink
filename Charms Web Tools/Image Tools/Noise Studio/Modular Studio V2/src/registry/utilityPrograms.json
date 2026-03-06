@@ -1,0 +1,12 @@
+{
+  "vertex": "Shaders/vs-quad.vert",
+  "programs": {
+    "copy": "Shaders/copy.frag",
+    "final": "Shaders/final.frag",
+    "mask": "Shaders/mask.frag",
+    "colorMask": "Shaders/colorMask.frag",
+    "invert": "Shaders/invert.frag",
+    "composite": "Shaders/composite.frag",
+    "radial": "Shaders/radial.frag"
+  }
+}

@@ -1,0 +1,2522 @@
+{
+  "version": "mns-layer-registry/v2",
+  "layers": [
+    {
+      "layerId": "scale",
+      "label": "Resolution Scale",
+      "technicalLabel": "Resolution Scale",
+      "group": "base",
+      "description": "Controls render resolution and export scale.",
+      "executor": "manual",
+      "programKey": "scale",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "scaleEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "message",
+          "tone": "muted",
+          "text": "Modifies the internal rendering resolution and final export size."
+        },
+        {
+          "type": "range",
+          "label": "Multiplier (x)",
+          "min": 0.1,
+          "max": 10,
+          "step": 0.1,
+          "default": 1,
+          "key": "scaleMultiplier"
+        },
+        {
+          "type": "message",
+          "tone": "data",
+          "key": "scaleResolutionDisplay",
+          "text": "Realtime Export Resolution",
+          "dynamic": "resolution"
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "noise",
+      "label": "Noise",
+      "technicalLabel": "Noise",
+      "group": "texture",
+      "description": "Procedural grain and texture generation.",
+      "executor": "manual",
+      "programKey": "noise",
+      "shader": "Shaders/noise.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "noiseEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "range",
+          "label": "Noise Strength",
+          "min": 0,
+          "max": 150,
+          "step": 0.1,
+          "default": 0,
+          "key": "strength"
+        },
+        {
+          "type": "select",
+          "label": "Noise Type",
+          "options": [
+            {
+              "value": "1",
+              "label": "Grayscale",
+              "selected": true
+            },
+            {
+              "value": "0",
+              "label": "Color"
+            },
+            {
+              "value": "3",
+              "label": "Blue Noise"
+            },
+            {
+              "value": "4",
+              "label": "Blue Noise (Color)"
+            },
+            {
+              "value": "2",
+              "label": "Blend (Sat)"
+            },
+            {
+              "value": "5",
+              "label": "Perlin (Cloudy)"
+            },
+            {
+              "value": "6",
+              "label": "Worley (Cellular)"
+            },
+            {
+              "value": "7",
+              "label": "Scanlines"
+            },
+            {
+              "value": "8",
+              "label": "Speckle (Dust)"
+            },
+            {
+              "value": "9",
+              "label": "Glitch"
+            },
+            {
+              "value": "10",
+              "label": "Anisotropic (Fiber)"
+            },
+            {
+              "value": "11",
+              "label": "Voronoi Mosaic"
+            },
+            {
+              "value": "12",
+              "label": "Crosshatch"
+            }
+          ],
+          "key": "noiseType"
+        },
+        {
+          "type": "range",
+          "label": "Sat Strength",
+          "min": 0,
+          "max": 4,
+          "step": 0.1,
+          "default": 1,
+          "key": "satStrength"
+        },
+        {
+          "type": "range",
+          "label": "Sat Impact",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "satPerNoise"
+        },
+        {
+          "type": "message",
+          "tone": "section",
+          "text": "Advanced Settings"
+        },
+        {
+          "type": "range",
+          "label": "Param A",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "hidden": true,
+          "key": "noiseParamA"
+        },
+        {
+          "type": "range",
+          "label": "Param B",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "hidden": true,
+          "key": "noiseParamB"
+        },
+        {
+          "type": "range",
+          "label": "Param C",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "hidden": true,
+          "key": "noiseParamC"
+        },
+        {
+          "type": "separator",
+          "dashed": true,
+          "height": null
+        },
+        {
+          "type": "range",
+          "label": "Scale (Size)",
+          "min": 0,
+          "max": 10,
+          "step": 1,
+          "default": 0,
+          "key": "noiseSize"
+        },
+        {
+          "type": "range",
+          "label": "Blurriness",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 2,
+          "key": "blurriness"
+        },
+        {
+          "type": "separator",
+          "dashed": true,
+          "height": null
+        },
+        {
+          "type": "select",
+          "label": "Blend Mode",
+          "options": [
+            {
+              "value": "0",
+              "label": "Normal"
+            },
+            {
+              "value": "1",
+              "label": "Overlay",
+              "selected": true
+            },
+            {
+              "value": "2",
+              "label": "Screen"
+            },
+            {
+              "value": "3",
+              "label": "Multiply"
+            },
+            {
+              "value": "4",
+              "label": "Add"
+            },
+            {
+              "value": "5",
+              "label": "Difference"
+            }
+          ],
+          "key": "blendMode"
+        },
+        {
+          "type": "range",
+          "label": "Opacity",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.5,
+          "key": "opacity"
+        },
+        {
+          "type": "separator",
+          "dashed": true,
+          "height": null
+        },
+        {
+          "type": "range",
+          "label": "Skin Protection",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "skinProtection"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "noiseColorExclude",
+          "colorKey": "noiseExcludeColor",
+          "toleranceKey": "noiseColorTolerance",
+          "fadeKey": "noiseColorFade",
+          "eyedropper": true
+        },
+        "lumaMask": {
+          "enableKey": "noiseLumaMask",
+          "shadowThresholdKey": "shadowThreshold",
+          "shadowFadeKey": "shadowFade",
+          "highlightThresholdKey": "highlightThreshold",
+          "highlightFadeKey": "highlightFade"
+        },
+        "invertKey": "noiseInvertMask"
+      },
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "alpha",
+      "label": "Alpha Handling",
+      "technicalLabel": "Alpha Channel",
+      "group": "base",
+      "description": "Adjusts how source alpha is preserved or ignored during compositing.",
+      "executor": "manual",
+      "programKey": "alpha",
+      "animated": false,
+      "supportsMultiInstance": false,
+      "enableKey": "alphaEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Ignore Alpha",
+          "default": true,
+          "key": "ignoreAlphaToggle"
+        },
+        {
+          "type": "range",
+          "label": "Strength",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "ignoreAlphaStrength"
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "glareRays",
+      "label": "Glare Rays",
+      "technicalLabel": "Glare Rays",
+      "group": "optics",
+      "description": "Directional bloom streaks and starburst response.",
+      "executor": "shader",
+      "programKey": "glareRays",
+      "shader": "Shaders/glareRays.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "glareRaysEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable Rays",
+          "default": false,
+          "key": "glareRaysEnable"
+        },
+        {
+          "type": "range",
+          "label": "Intensity",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.4,
+          "key": "glareRaysIntensity"
+        },
+        {
+          "type": "range",
+          "label": "Ray Count",
+          "min": 1,
+          "max": 16,
+          "step": 1,
+          "default": 6,
+          "key": "glareRaysRays"
+        },
+        {
+          "type": "range",
+          "label": "Ray Length",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.3,
+          "key": "glareRaysLength"
+        },
+        {
+          "type": "range",
+          "label": "Ray Blur",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.2,
+          "key": "glareRaysBlur"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_intensity",
+          "key": "glareRaysIntensity",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_rays",
+          "key": "glareRaysRays",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_length",
+          "key": "glareRaysLength",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_blur",
+          "key": "glareRaysBlur",
+          "type": "float",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "hankelBlur",
+      "label": "Radial Hankel Blur",
+      "technicalLabel": "Radial Hankel Blur",
+      "group": "texture",
+      "description": "",
+      "executor": "shader",
+      "programKey": "hankelBlur",
+      "shader": "Shaders/hankelBlur.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "hankelBlurEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable Blur",
+          "default": false,
+          "key": "hankelBlurEnable"
+        },
+        {
+          "type": "range",
+          "label": "Intensity",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.5,
+          "key": "hankelBlurIntensity"
+        },
+        {
+          "type": "range",
+          "label": "Radius",
+          "min": 1,
+          "max": 50,
+          "step": 0.5,
+          "default": 5,
+          "key": "hankelBlurRadius"
+        },
+        {
+          "type": "range",
+          "label": "Quality",
+          "min": 4,
+          "max": 32,
+          "step": 1,
+          "default": 16,
+          "key": "hankelBlurQuality"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "hankelColorExclude",
+          "colorKey": "hankelExcludeColor",
+          "toleranceKey": "hankelColorTolerance",
+          "fadeKey": "hankelColorFade",
+          "eyedropper": true
+        },
+        "lumaMask": {
+          "enableKey": "hankelLumaMask",
+          "shadowThresholdKey": "hankelShadowThreshold",
+          "shadowFadeKey": "hankelShadowFade",
+          "highlightThresholdKey": "hankelHighlightThreshold",
+          "highlightFadeKey": "hankelHighlightFade"
+        },
+        "invertKey": "hankelInvertMask"
+      },
+      "bindings": [
+        {
+          "uniform": "u_intensity",
+          "key": "hankelBlurIntensity",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_radius",
+          "key": "hankelBlurRadius",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_quality",
+          "key": "hankelBlurQuality",
+          "type": "float",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "adjust",
+      "label": "Adjustments",
+      "technicalLabel": "Adjustments",
+      "group": "color",
+      "description": "Core tonal and sharpening controls.",
+      "executor": "manual",
+      "programKey": "adjust",
+      "shader": "Shaders/adjust.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "adjustEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "range",
+          "label": "Brightness",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "brightness"
+        },
+        {
+          "type": "range",
+          "label": "Contrast",
+          "min": -100,
+          "max": 200,
+          "step": 1,
+          "default": 0,
+          "key": "contrast"
+        },
+        {
+          "type": "range",
+          "label": "Saturation",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "saturationAdj"
+        },
+        {
+          "type": "range",
+          "label": "Warmth",
+          "min": -500,
+          "max": 500,
+          "step": 1,
+          "default": 0,
+          "key": "warmth"
+        },
+        {
+          "type": "range",
+          "label": "Sharpening",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "sharpen"
+        },
+        {
+          "type": "range",
+          "label": "Sharpen Threshold",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 5,
+          "key": "sharpenThreshold"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "adjColorExclude",
+          "colorKey": "adjExcludeColor",
+          "toleranceKey": "adjColorTolerance",
+          "fadeKey": "adjColorFade",
+          "eyedropper": true
+        },
+        "lumaMask": {
+          "enableKey": "adjLumaMask",
+          "shadowThresholdKey": "adjShadowThreshold",
+          "shadowFadeKey": "adjShadowFade",
+          "highlightThresholdKey": "adjHighlightThreshold",
+          "highlightFadeKey": "adjHighlightFade"
+        },
+        "invertKey": "adjInvertMask"
+      },
+      "bindings": [],
+      "extraPrograms": [
+        {
+          "key": "adjustMasked",
+          "shader": "Shaders/adjustMasked.frag"
+        }
+      ]
+    },
+    {
+      "layerId": "colorGrade",
+      "label": "3-Way Color Grade",
+      "technicalLabel": "3-Way Color Grading",
+      "group": "color",
+      "description": "Three-way color balance for shadows, midtones, and highlights.",
+      "executor": "shader",
+      "programKey": "colorGrade",
+      "shader": "Shaders/colorGrade.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "colorGradeEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "range",
+          "label": "Strength",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "colorGradeStrength"
+        },
+        {
+          "type": "colorWheel3Way",
+          "items": [
+            {
+              "key": "cgShadows",
+              "label": "Shadows",
+              "default": "#ffffff"
+            },
+            {
+              "key": "cgMidtones",
+              "label": "Midtones",
+              "default": "#ffffff"
+            },
+            {
+              "key": "cgHighlights",
+              "label": "Highlights",
+              "default": "#ffffff"
+            }
+          ]
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "cgColorExclude",
+          "colorKey": "cgExcludeColor",
+          "toleranceKey": "cgColorTolerance",
+          "fadeKey": "cgColorFade",
+          "eyedropper": true
+        },
+        "lumaMask": {
+          "enableKey": "cgLumaMask",
+          "shadowThresholdKey": "cgShadowThreshold",
+          "shadowFadeKey": "cgShadowFade",
+          "highlightThresholdKey": "cgHighlightThreshold",
+          "highlightFadeKey": "cgHighlightFade"
+        },
+        "invertKey": "cgInvertMask"
+      },
+      "bindings": [
+        {
+          "uniform": "u_strength",
+          "key": "colorGradeStrength",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_shadows",
+          "key": "cgShadows",
+          "type": "rgb",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_midtones",
+          "key": "cgMidtones",
+          "type": "rgb",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_highlights",
+          "key": "cgHighlights",
+          "type": "rgb",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "hdr",
+      "label": "HDR Emulation",
+      "technicalLabel": "HDR Emulation",
+      "group": "color",
+      "description": "Expands highlight response through HDR-style tonal compression.",
+      "executor": "manual",
+      "programKey": "hdr",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "hdrEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "range",
+          "label": "Tolerance",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "hdrTolerance"
+        },
+        {
+          "type": "range",
+          "label": "Amount",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "hdrAmount"
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "ca",
+      "label": "Chromatic Aberration",
+      "technicalLabel": "Chromatic Aberration",
+      "group": "optics",
+      "description": "Chromatic split, edge blur, and center control.",
+      "executor": "shader",
+      "programKey": "chroma",
+      "shader": "Shaders/chroma.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "caEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "range",
+          "label": "Amount",
+          "min": 0,
+          "max": 100,
+          "step": 0.1,
+          "default": 0,
+          "key": "aberrationAmount"
+        },
+        {
+          "type": "range",
+          "label": "Edge Blur",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "aberrationBlur"
+        },
+        {
+          "type": "range",
+          "label": "Zoom Blur",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "aberrationZoomBlur"
+        },
+        {
+          "type": "separator",
+          "dashed": false,
+          "height": 10
+        },
+        {
+          "type": "checkbox",
+          "label": "Link Falloff to Blur",
+          "default": false,
+          "key": "caFalloffToBlur"
+        },
+        {
+          "type": "checkbox",
+          "label": "Center Pin",
+          "default": false,
+          "key": "caPin"
+        },
+        {
+          "type": "range",
+          "label": "Radius",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "caRadius"
+        },
+        {
+          "type": "range",
+          "label": "Falloff",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "caFalloff"
+        },
+        {
+          "type": "button",
+          "action": "reset-ca-center",
+          "label": "Reset Center"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_amt",
+          "key": "aberrationAmount",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_blur",
+          "key": "aberrationBlur",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_zoomBlur",
+          "key": "aberrationZoomBlur",
+          "type": "float",
+          "divideBy": 50
+        },
+        {
+          "uniform": "u_radius",
+          "key": "caRadius",
+          "type": "float",
+          "divideBy": 1000
+        },
+        {
+          "uniform": "u_falloff",
+          "key": "caFalloff",
+          "type": "float",
+          "divideBy": 1000
+        },
+        {
+          "uniform": "u_falloffToBlur",
+          "key": "caFalloffToBlur",
+          "type": "bool",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "blur",
+      "label": "Blur",
+      "technicalLabel": "Blur",
+      "group": "texture",
+      "description": "Gaussian, box, and motion blur with masking support.",
+      "executor": "manual",
+      "programKey": "blur",
+      "shader": "Shaders/blur.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "blurEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": true,
+          "key": "blurEnable"
+        },
+        {
+          "type": "range",
+          "label": "Amount",
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "default": 0,
+          "key": "blurAmount"
+        },
+        {
+          "type": "select",
+          "label": "Type",
+          "options": [
+            {
+              "value": "0",
+              "label": "Gaussian",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Box"
+            },
+            {
+              "value": "2",
+              "label": "Motion"
+            }
+          ],
+          "key": "blurType"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "blurColorExclude",
+          "colorKey": "blurTargetColor",
+          "toleranceKey": "blurColorTolerance",
+          "fadeKey": "blurColorFade",
+          "eyedropper": true
+        },
+        "lumaMask": {
+          "enableKey": "blurLumaMask",
+          "shadowThresholdKey": "blurShadowThreshold",
+          "shadowFadeKey": "blurShadowFade",
+          "highlightThresholdKey": "blurHighlightThreshold",
+          "highlightFadeKey": "blurHighlightFade"
+        },
+        "invertKey": "blurInvertMask"
+      },
+      "bindings": [],
+      "extraPrograms": [
+        {
+          "key": "maskedBlur",
+          "shader": "Shaders/maskedBlur.frag"
+        }
+      ]
+    },
+    {
+      "layerId": "dither",
+      "label": "Dithering",
+      "technicalLabel": "Dithering",
+      "group": "stylize",
+      "description": "Bit depth reduction and ordered or stochastic dithering.",
+      "executor": "manual",
+      "programKey": "dither",
+      "shader": "Shaders/dither.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "ditherEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "ditherEnable"
+        },
+        {
+          "type": "range",
+          "label": "Bit Depth",
+          "min": 1,
+          "max": 8,
+          "step": 1,
+          "default": 4,
+          "key": "ditherBitDepth"
+        },
+        {
+          "type": "range",
+          "label": "Palette Size",
+          "min": 2,
+          "max": 256,
+          "step": 1,
+          "default": 8,
+          "key": "ditherPaletteSize"
+        },
+        {
+          "type": "range",
+          "label": "Strength",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "ditherStrength"
+        },
+        {
+          "type": "range",
+          "label": "Scale",
+          "min": 1,
+          "max": 8,
+          "step": 1,
+          "default": 1,
+          "key": "ditherScale"
+        },
+        {
+          "type": "select",
+          "label": "Type",
+          "options": [
+            {
+              "value": "0",
+              "label": "Ordered (Bayer 8x8)",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Error Diffusion"
+            },
+            {
+              "value": "2",
+              "label": "White Noise"
+            },
+            {
+              "value": "3",
+              "label": "Bayer 4x4"
+            },
+            {
+              "value": "4",
+              "label": "Bayer 2x2"
+            },
+            {
+              "value": "5",
+              "label": "Interleaved Gradient"
+            }
+          ],
+          "key": "ditherType"
+        },
+        {
+          "type": "checkbox",
+          "label": "Use Studio Palette",
+          "default": false,
+          "key": "ditherUsePalette"
+        },
+        {
+          "type": "checkbox",
+          "label": "Gamma Correct",
+          "default": false,
+          "key": "ditherGamma"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "ditherColorExclude",
+          "colorKey": "ditherExcludeColor",
+          "toleranceKey": "ditherColorTolerance",
+          "fadeKey": "ditherColorFade",
+          "eyedropper": false
+        },
+        "lumaMask": {
+          "enableKey": "ditherLumaMask",
+          "shadowThresholdKey": "ditherShadowThreshold",
+          "shadowFadeKey": "ditherShadowFade",
+          "highlightThresholdKey": "ditherHighlightThreshold",
+          "highlightFadeKey": "ditherHighlightFade"
+        },
+        "invertKey": null
+      },
+      "bindings": [],
+      "extraPrograms": [
+        {
+          "key": "maskedDither",
+          "shader": "Shaders/maskedDither.frag"
+        }
+      ]
+    },
+    {
+      "layerId": "corruption",
+      "label": "Corruption",
+      "technicalLabel": "Corruption",
+      "group": "damage",
+      "description": "Digital breakup and corruption effects.",
+      "executor": "shader",
+      "programKey": "corruption",
+      "shader": "Shaders/corruption.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "corruptionEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "corruptionEnable"
+        },
+        {
+          "type": "select",
+          "label": "Algorithm",
+          "options": [
+            {
+              "value": "0",
+              "label": "Pixel Sort",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Data Mosh"
+            },
+            {
+              "value": "2",
+              "label": "Bit Shift"
+            },
+            {
+              "value": "3",
+              "label": "Channel Offset"
+            }
+          ],
+          "key": "corruptionAlgorithm"
+        },
+        {
+          "type": "range",
+          "label": "Quality",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "corruptionResScale"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_algorithm",
+          "key": "corruptionAlgorithm",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_resScale",
+          "key": "corruptionResScale",
+          "type": "float",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "analogVideo",
+      "label": "Analog Video",
+      "technicalLabel": "Analog Video (VHS/CRT)",
+      "group": "damage",
+      "description": "VHS and CRT-inspired video degradation.",
+      "executor": "shader",
+      "programKey": "analog",
+      "shader": "Shaders/analog.frag",
+      "animated": true,
+      "supportsMultiInstance": true,
+      "enableKey": "analogVideoEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "analogVideoEnable"
+        },
+        {
+          "type": "range",
+          "label": "Tape Wobble",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 30,
+          "key": "analogWobble"
+        },
+        {
+          "type": "range",
+          "label": "Color Bleed",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "analogBleed"
+        },
+        {
+          "type": "range",
+          "label": "CRT Curve",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 20,
+          "key": "analogCurve"
+        },
+        {
+          "type": "range",
+          "label": "Scanline Noise",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 40,
+          "key": "analogNoise"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_wobble",
+          "key": "analogWobble",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_bleed",
+          "key": "analogBleed",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_curve",
+          "key": "analogCurve",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_noise",
+          "key": "analogNoise",
+          "type": "float",
+          "divideBy": 100
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "lensDistort",
+      "label": "Lens Distortion",
+      "technicalLabel": "Lens Distortion (Optics)",
+      "group": "optics",
+      "description": "Barrel and pincushion style optical distortion.",
+      "executor": "shader",
+      "programKey": "lens",
+      "shader": "Shaders/lens.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "lensDistortEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "range",
+          "label": "Distortion Amount",
+          "min": -100,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "lensAmount"
+        },
+        {
+          "type": "message",
+          "tone": "muted",
+          "text": "&lt; Barrel (Fisheye) &nbsp;&nbsp;|&nbsp;&nbsp; Pincushion &gt;"
+        },
+        {
+          "type": "range",
+          "label": "Scale Base",
+          "min": 50,
+          "max": 150,
+          "step": 1,
+          "default": 100,
+          "key": "lensScale"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_amount",
+          "key": "lensAmount",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_scale",
+          "key": "lensScale",
+          "type": "float",
+          "divideBy": 100
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "heatwave",
+      "label": "Heatwave & Ripples",
+      "technicalLabel": "Heatwave & Ripples",
+      "group": "optics",
+      "description": "Animated refractive warping and shimmer.",
+      "executor": "shader",
+      "programKey": "heatwave",
+      "shader": "Shaders/heatwave.frag",
+      "animated": true,
+      "supportsMultiInstance": true,
+      "enableKey": "heatwaveEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "heatwaveEnable"
+        },
+        {
+          "type": "range",
+          "label": "Intensity",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 30,
+          "key": "heatwaveIntensity"
+        },
+        {
+          "type": "range",
+          "label": "Speed",
+          "min": 0,
+          "max": 200,
+          "step": 1,
+          "default": 50,
+          "key": "heatwaveSpeed"
+        },
+        {
+          "type": "range",
+          "label": "Scale",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "default": 20,
+          "key": "heatwaveScale"
+        },
+        {
+          "type": "select",
+          "label": "Direction",
+          "options": [
+            {
+              "value": "0",
+              "label": "Vertical (Heat)",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Horizontal"
+            },
+            {
+              "value": "2",
+              "label": "Radial (Ripple)"
+            }
+          ],
+          "key": "heatwaveDirection"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_intensity",
+          "key": "heatwaveIntensity",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_speed",
+          "key": "heatwaveSpeed",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_scale",
+          "key": "heatwaveScale",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_direction",
+          "key": "heatwaveDirection",
+          "type": "int",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "lightLeaks",
+      "label": "Light Leaks",
+      "technicalLabel": "Light Leaks",
+      "group": "optics",
+      "description": "Animated colored leak overlays.",
+      "executor": "shader",
+      "programKey": "lightleaks",
+      "shader": "Shaders/lightLeaks.frag",
+      "animated": true,
+      "supportsMultiInstance": true,
+      "enableKey": "lightLeaksEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "lightLeaksEnable"
+        },
+        {
+          "type": "range",
+          "label": "Intensity",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "lightLeaksIntensity"
+        },
+        {
+          "type": "color",
+          "label": "Color 1",
+          "default": "#ff5500",
+          "key": "lightLeaksColor1"
+        },
+        {
+          "type": "color",
+          "label": "Color 2",
+          "default": "#0055ff",
+          "key": "lightLeaksColor2"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_intensity",
+          "key": "lightLeaksIntensity",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_color1",
+          "key": "lightLeaksColor1",
+          "type": "color",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_color2",
+          "key": "lightLeaksColor2",
+          "type": "color",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "compression",
+      "label": "Compression",
+      "technicalLabel": "Compression",
+      "group": "damage",
+      "description": "Lossy block compression artifacts and degradation.",
+      "executor": "manual",
+      "programKey": "compression",
+      "shader": "Shaders/compression.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "compressionEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "compressionEnable"
+        },
+        {
+          "type": "select",
+          "label": "Method",
+          "options": [
+            {
+              "value": "0",
+              "label": "DCT Block",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Chroma Subsampling"
+            },
+            {
+              "value": "2",
+              "label": "Wavelet"
+            }
+          ],
+          "key": "compressionMethod"
+        },
+        {
+          "type": "range",
+          "label": "Quality",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "compressionQuality"
+        },
+        {
+          "type": "range",
+          "label": "Block Size",
+          "min": 2,
+          "max": 32,
+          "step": 1,
+          "default": 8,
+          "key": "compressionBlockSize"
+        },
+        {
+          "type": "range",
+          "label": "Blend",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "compressionBlend"
+        },
+        {
+          "type": "range",
+          "label": "Iterations",
+          "min": 1,
+          "max": 20,
+          "step": 1,
+          "default": 1,
+          "key": "compressionIterations"
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "cell",
+      "label": "Cell Shading",
+      "technicalLabel": "Cell Shading",
+      "group": "stylize",
+      "description": "Posterization, banding, and outline rendering.",
+      "executor": "manual",
+      "programKey": "cell",
+      "shader": "Shaders/cell.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "cellEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "cellEnable"
+        },
+        {
+          "type": "range",
+          "label": "Shading Levels",
+          "min": 2,
+          "max": 12,
+          "step": 1,
+          "default": 4,
+          "key": "cellLevels"
+        },
+        {
+          "type": "range",
+          "label": "Contrast Bias",
+          "min": -1,
+          "max": 1,
+          "step": 0.01,
+          "default": 0,
+          "key": "cellBias"
+        },
+        {
+          "type": "range",
+          "label": "Gamma",
+          "min": 0.1,
+          "max": 3,
+          "step": 0.01,
+          "default": 1,
+          "key": "cellGamma"
+        },
+        {
+          "type": "select",
+          "label": "Quantization Mode",
+          "options": [
+            {
+              "value": "0",
+              "label": "Luminance",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Per-Channel"
+            },
+            {
+              "value": "2",
+              "label": "HSV Value"
+            }
+          ],
+          "key": "cellQuantMode"
+        },
+        {
+          "type": "select",
+          "label": "Band Mapping",
+          "options": [
+            {
+              "value": "0",
+              "label": "Linear",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Smooth"
+            },
+            {
+              "value": "2",
+              "label": "Hard"
+            }
+          ],
+          "key": "cellBandMap"
+        },
+        {
+          "type": "select",
+          "label": "Edge Method",
+          "options": [
+            {
+              "value": "0",
+              "label": "Sobel",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Roberts Cross"
+            },
+            {
+              "value": "2",
+              "label": "Laplacian"
+            }
+          ],
+          "key": "cellEdgeMethod"
+        },
+        {
+          "type": "range",
+          "label": "Edge Strength",
+          "min": 0,
+          "max": 200,
+          "step": 1,
+          "default": 50,
+          "key": "cellEdgeStr"
+        },
+        {
+          "type": "range",
+          "label": "Edge Thickness",
+          "min": 0.5,
+          "max": 5,
+          "step": 0.1,
+          "default": 1,
+          "key": "cellEdgeThick"
+        },
+        {
+          "type": "range",
+          "label": "Color Preserve",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "cellColorPreserve"
+        },
+        {
+          "type": "checkbox",
+          "label": "Show Edges",
+          "default": true,
+          "key": "cellEdgeEnable"
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "halftone",
+      "label": "Halftoning",
+      "technicalLabel": "Halftoning",
+      "group": "stylize",
+      "description": "Print-like dot and screen stylization.",
+      "executor": "shader",
+      "programKey": "halftone",
+      "shader": "Shaders/halftone.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "halftoneEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "halftoneEnable"
+        },
+        {
+          "type": "range",
+          "label": "Dot Size",
+          "min": 1,
+          "max": 30,
+          "step": 0.5,
+          "default": 5,
+          "key": "halftoneSize"
+        },
+        {
+          "type": "range",
+          "label": "Intensity",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "halftoneIntensity"
+        },
+        {
+          "type": "range",
+          "label": "Sharpness",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "halftoneSharpness"
+        },
+        {
+          "type": "select",
+          "label": "Pattern",
+          "options": [
+            {
+              "value": "0",
+              "label": "Dot Grid",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Line"
+            },
+            {
+              "value": "2",
+              "label": "Diamond"
+            },
+            {
+              "value": "3",
+              "label": "Cross"
+            },
+            {
+              "value": "4",
+              "label": "Hex"
+            }
+          ],
+          "key": "halftonePattern"
+        },
+        {
+          "type": "select",
+          "label": "Color Mode",
+          "options": [
+            {
+              "value": "0",
+              "label": "BW",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "CMYK"
+            },
+            {
+              "value": "2",
+              "label": "RGB"
+            },
+            {
+              "value": "3",
+              "label": "Custom"
+            }
+          ],
+          "key": "halftoneColorMode"
+        },
+        {
+          "type": "select",
+          "label": "Sampling",
+          "options": [
+            {
+              "value": "0",
+              "label": "Center",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Average"
+            }
+          ],
+          "key": "halftoneSample"
+        },
+        {
+          "type": "checkbox",
+          "label": "Grayscale Input",
+          "default": false,
+          "key": "halftoneGray"
+        },
+        {
+          "type": "checkbox",
+          "label": "Lock Dot Grid",
+          "default": false,
+          "key": "halftoneScreenLock"
+        },
+        {
+          "type": "checkbox",
+          "label": "Invert",
+          "default": false,
+          "key": "halftoneInvert"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_size",
+          "key": "halftoneSize",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_intensity",
+          "key": "halftoneIntensity",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sharpness",
+          "key": "halftoneSharpness",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_pattern",
+          "key": "halftonePattern",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_colorMode",
+          "key": "halftoneColorMode",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sample",
+          "key": "halftoneSample",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_gray",
+          "key": "halftoneGray",
+          "type": "bool",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_lock",
+          "key": "halftoneScreenLock",
+          "type": "bool",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_invert",
+          "key": "halftoneInvert",
+          "type": "bool",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "bilateral",
+      "label": "Bilateral Filter",
+      "technicalLabel": "Bilateral Filter",
+      "group": "texture",
+      "description": "Edge-aware smoothing with optional masks.",
+      "executor": "shader",
+      "programKey": "bilateral",
+      "shader": "Shaders/bilateral.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "bilateralEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "bilateralEnable"
+        },
+        {
+          "type": "range",
+          "label": "Radius",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "default": 3,
+          "key": "bilateralRadius"
+        },
+        {
+          "type": "range",
+          "label": "Sigma Color",
+          "min": 0.01,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.1,
+          "key": "bilateralColorSig"
+        },
+        {
+          "type": "range",
+          "label": "Sigma Space",
+          "min": 0.5,
+          "max": 10,
+          "step": 0.1,
+          "default": 3,
+          "key": "bilateralSpatialSig"
+        },
+        {
+          "type": "select",
+          "label": "Kernel",
+          "options": [
+            {
+              "value": "0",
+              "label": "Gaussian",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Box"
+            }
+          ],
+          "key": "bilateralKernel"
+        },
+        {
+          "type": "select",
+          "label": "Edge Mode",
+          "options": [
+            {
+              "value": "0",
+              "label": "Clamp",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Mirror"
+            }
+          ],
+          "key": "bilateralEdgeMode"
+        },
+        {
+          "type": "range",
+          "label": "Iterations",
+          "min": 1,
+          "max": 10,
+          "step": 1,
+          "default": 1,
+          "key": "bilateralIter"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "bilateralColorExclude",
+          "colorKey": "bilateralExcludeColor",
+          "toleranceKey": "bilateralColorTolerance",
+          "fadeKey": "bilateralColorFade",
+          "eyedropper": false
+        },
+        "lumaMask": {
+          "enableKey": "bilateralLumaMask",
+          "shadowThresholdKey": "bilateralShadowThreshold",
+          "shadowFadeKey": "bilateralShadowFade",
+          "highlightThresholdKey": "bilateralHighlightThreshold",
+          "highlightFadeKey": "bilateralHighlightFade"
+        },
+        "invertKey": null
+      },
+      "bindings": [
+        {
+          "uniform": "u_radius",
+          "key": "bilateralRadius",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sigmaCol",
+          "key": "bilateralColorSig",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sigmaSpace",
+          "key": "bilateralSpatialSig",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_kernel",
+          "key": "bilateralKernel",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_edgeMode",
+          "key": "bilateralEdgeMode",
+          "type": "int",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "denoise",
+      "label": "Denoising",
+      "technicalLabel": "Denoising",
+      "group": "texture",
+      "description": "Spatial noise reduction for cleanup and smoothing.",
+      "executor": "shader",
+      "programKey": "denoise",
+      "shader": "Shaders/denoise.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "denoiseEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "denoiseEnable"
+        },
+        {
+          "type": "select",
+          "label": "Mode",
+          "options": [
+            {
+              "value": "0",
+              "label": "Non-Local Means",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Median"
+            },
+            {
+              "value": "2",
+              "label": "Mean (Box)"
+            }
+          ],
+          "key": "denoiseMode"
+        },
+        {
+          "type": "range",
+          "label": "Search Radius",
+          "min": 1,
+          "max": 15,
+          "step": 1,
+          "default": 5,
+          "key": "denoiseSearchRadius"
+        },
+        {
+          "type": "range",
+          "label": "Patch Radius",
+          "min": 1,
+          "max": 5,
+          "step": 1,
+          "default": 2,
+          "key": "denoisePatchRadius"
+        },
+        {
+          "type": "range",
+          "label": "Filter Strength",
+          "min": 0.01,
+          "max": 2,
+          "step": 0.01,
+          "default": 0.5,
+          "key": "denoiseH"
+        },
+        {
+          "type": "range",
+          "label": "Blend",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "denoiseBlend"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "denoiseColorExclude",
+          "colorKey": "denoiseExcludeColor",
+          "toleranceKey": "denoiseColorTolerance",
+          "fadeKey": "denoiseColorFade",
+          "eyedropper": false
+        },
+        "lumaMask": {
+          "enableKey": "denoiseLumaMask",
+          "shadowThresholdKey": "denoiseShadowThreshold",
+          "shadowFadeKey": "denoiseShadowFade",
+          "highlightThresholdKey": "denoiseHighlightThreshold",
+          "highlightFadeKey": "denoiseHighlightFade"
+        },
+        "invertKey": "denoiseInvertMask"
+      },
+      "bindings": [
+        {
+          "uniform": "u_mode",
+          "key": "denoiseMode",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_searchRadius",
+          "key": "denoiseSearchRadius",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_patchRadius",
+          "key": "denoisePatchRadius",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_h",
+          "key": "denoiseH",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_strength",
+          "key": "denoiseBlend",
+          "type": "float",
+          "divideBy": 100
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "palette",
+      "label": "Palette Reconstructor",
+      "technicalLabel": "Palette Reconstructor",
+      "group": "stylize",
+      "description": "Restricts output to a curated color palette.",
+      "executor": "manual",
+      "programKey": "palette",
+      "shader": "Shaders/palette.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "paletteEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "paletteEnable"
+        },
+        {
+          "type": "range",
+          "label": "Global Blend",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "paletteBlend"
+        },
+        {
+          "type": "paletteEditor"
+        },
+        {
+          "type": "select",
+          "label": "Smoothing Type",
+          "options": [
+            {
+              "value": "0",
+              "label": "Box"
+            },
+            {
+              "value": "1",
+              "label": "Gaussian"
+            }
+          ],
+          "key": "paletteSmoothingType"
+        },
+        {
+          "type": "range",
+          "label": "Palette Smoothing",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "paletteSmoothing"
+        },
+        {
+          "type": "range",
+          "label": "Extract Count",
+          "min": 2,
+          "max": 200,
+          "step": 1,
+          "default": 8,
+          "key": "extractCount"
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "vignette",
+      "label": "Vignette & Focus",
+      "technicalLabel": "Vignette & Focus",
+      "group": "optics",
+      "description": "Framing, darkening, and focus shaping.",
+      "executor": "shader",
+      "programKey": "vignette",
+      "shader": "Shaders/vignette.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "vignetteEnable",
+      "enableDefault": false,
+      "controls": [
+        {
+          "type": "range",
+          "label": "Intensity",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "vignetteIntensity"
+        },
+        {
+          "type": "range",
+          "label": "Radius",
+          "min": 0,
+          "max": 200,
+          "step": 1,
+          "default": 75,
+          "key": "vignetteRadius"
+        },
+        {
+          "type": "range",
+          "label": "Softness",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 50,
+          "key": "vignetteSoftness"
+        },
+        {
+          "type": "color",
+          "label": "Color",
+          "default": "#000000",
+          "width": "60px",
+          "key": "vignetteColor"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_intensity",
+          "key": "vignetteIntensity",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_radius",
+          "key": "vignetteRadius",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_softness",
+          "key": "vignetteSoftness",
+          "type": "float",
+          "divideBy": 100
+        },
+        {
+          "uniform": "u_color",
+          "key": "vignetteColor",
+          "type": "color",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "edge",
+      "label": "Edge Effects",
+      "technicalLabel": "Edge Effects",
+      "group": "stylize",
+      "description": "Edge overlays and saturation-mask style processing.",
+      "executor": "shader",
+      "programKey": "edge",
+      "shader": "Shaders/edge.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "edgeEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "edgeEnable"
+        },
+        {
+          "type": "range",
+          "label": "Blend",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "edgeBlend"
+        },
+        {
+          "type": "select",
+          "label": "Mode",
+          "options": [
+            {
+              "value": "0",
+              "label": "Edge Overlay",
+              "selected": true
+            },
+            {
+              "value": "1",
+              "label": "Saturation Mask"
+            }
+          ],
+          "key": "edgeMode"
+        },
+        {
+          "type": "range",
+          "label": "Strength",
+          "min": 0,
+          "max": 1000,
+          "step": 1,
+          "default": 500,
+          "key": "edgeStrength"
+        },
+        {
+          "type": "range",
+          "label": "Tolerance",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 10,
+          "key": "edgeTolerance"
+        },
+        {
+          "type": "conditionalGroup",
+          "when": {
+            "key": "edgeMode",
+            "equals": "1"
+          },
+          "label": "Saturation Mask Controls",
+          "controls": [
+            {
+              "type": "range",
+              "key": "edgeFgSat",
+              "label": "Foreground Sat",
+              "min": 0,
+              "max": 200,
+              "step": 1,
+              "default": 150
+            },
+            {
+              "type": "range",
+              "key": "edgeBgSat",
+              "label": "Background Sat",
+              "min": 0,
+              "max": 200,
+              "step": 1,
+              "default": 0
+            },
+            {
+              "type": "range",
+              "key": "edgeBloom",
+              "label": "Bloom Spread",
+              "min": 0,
+              "max": 50,
+              "step": 1,
+              "default": 10
+            },
+            {
+              "type": "range",
+              "key": "edgeSmooth",
+              "label": "Bloom Smoothness",
+              "min": 0,
+              "max": 100,
+              "step": 1,
+              "default": 50
+            }
+          ]
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_mode",
+          "key": "edgeMode",
+          "type": "int",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_strength",
+          "key": "edgeStrength",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_tolerance",
+          "key": "edgeTolerance",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_bgSat",
+          "key": "edgeBgSat",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_fgSat",
+          "key": "edgeFgSat",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_bloom",
+          "key": "edgeBloom",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_smooth",
+          "key": "edgeSmooth",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_blend",
+          "key": "edgeBlend",
+          "type": "float",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "airyBloom",
+      "label": "Airy Bloom",
+      "technicalLabel": "Airy Disk Bloom",
+      "group": "optics",
+      "description": "Diffraction-inspired bloom and glow.",
+      "executor": "shader",
+      "programKey": "airyBloom",
+      "shader": "Shaders/airyBloom.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "airyBloomEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": false,
+          "key": "airyBloomEnable"
+        },
+        {
+          "type": "range",
+          "label": "Intensity",
+          "min": 0,
+          "max": 2,
+          "step": 0.01,
+          "default": 0.5,
+          "key": "airyBloomIntensity"
+        },
+        {
+          "type": "range",
+          "label": "Aperture",
+          "min": 1,
+          "max": 50,
+          "step": 0.5,
+          "default": 8,
+          "key": "airyBloomAperture"
+        },
+        {
+          "type": "range",
+          "label": "Threshold",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.7,
+          "key": "airyBloomThreshold"
+        },
+        {
+          "type": "range",
+          "label": "Threshold Fade",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.1,
+          "key": "airyBloomThresholdFade"
+        },
+        {
+          "type": "range",
+          "label": "Cutoff",
+          "min": 0.01,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.1,
+          "key": "airyBloomCutoff"
+        }
+      ],
+      "mask": {
+        "colorExclude": {
+          "enableKey": "airyBloomColorExclude",
+          "colorKey": "airyBloomExcludeColor",
+          "toleranceKey": "airyBloomColorTolerance",
+          "fadeKey": "airyBloomColorFade",
+          "eyedropper": true
+        },
+        "lumaMask": {
+          "enableKey": "airyBloomLumaMask",
+          "shadowThresholdKey": "airyBloomShadowThreshold",
+          "shadowFadeKey": "airyBloomShadowFade",
+          "highlightThresholdKey": "airyBloomHighlightThreshold",
+          "highlightFadeKey": "airyBloomHighlightFade"
+        },
+        "invertKey": "airyBloomInvertMask"
+      },
+      "bindings": [
+        {
+          "uniform": "u_intensity",
+          "key": "airyBloomIntensity",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_aperture",
+          "key": "airyBloomAperture",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_threshold",
+          "key": "airyBloomThreshold",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_thresholdFade",
+          "key": "airyBloomThresholdFade",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_cutoff",
+          "key": "airyBloomCutoff",
+          "type": "float",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
+    }
+  ]
+}
