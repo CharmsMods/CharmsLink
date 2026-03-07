@@ -68,7 +68,7 @@ if (cursor) {
     });
 
     // Handle hover states for interactive elements
-    const interactiveElements = 'a, button, .project-card, .social-icon, .popup-link, .popup-close, .mod-grid-item';
+    const interactiveElements = 'a, button, .project-card, .social-icon, .popup-link, .popup-close, .mod-grid-item, .grid-item';
 
     document.addEventListener('mouseover', (e) => {
         if (e.target.closest(interactiveElements)) {
