@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Tools // Navigation</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;600;800&display=swap');
+
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --glass-border: rgba(255, 255, 255, 0.2);
+            --text-primary: #ffffff;
+            --accent-glow: rgba(255, 255, 255, 0.5);
+        }
+
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: 'Outfit', sans-serif;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #000;
+        }
+
+        #vanta-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        .container {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 1200px;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h1 {
+            color: var(--text-primary);
+            font-size: 1.2rem;
+            font-weight: 300;
+            text-transform: uppercase;
+            letter-spacing: 0.8rem;
+            margin-bottom: 80px;
+            text-align: center;
+            opacity: 0.7;
+            animation: fadeInDown 1.2s ease-out;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            /* Border lines between cards */
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .card {
+            background: rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(20px);
+            padding: 50px 30px;
+            text-decoration: none;
+            color: var(--text-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 0;
+            height: 1px;
+            background: #fff;
+            transition: all 0.5s cubic-bezier(0.19, 1, 0.22, 1);
+            opacity: 0.5;
+        }
+
+        .card:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .card:hover::after {
+            width: 40px;
+            left: calc(50% - 20px);
+        }
+
+        .card span {
+            font-size: 0.75rem;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 4px;
+            opacity: 0.6;
+            transition: all 0.5s ease;
+        }
+
+        .card:hover span {
+            opacity: 1;
+            letter-spacing: 6px;
+        }
+
+        .tool-id {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 0.6rem;
+            font-weight: 600;
+            opacity: 0.2;
+            letter-spacing: 2px;
+        }
+
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+                letter-spacing: 1.5rem;
+            }
+
+            to {
+                opacity: 0.7;
+                transform: translateY(0);
+                letter-spacing: 0.8rem;
+            }
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 1rem;
+                letter-spacing: 0.4rem;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="vanta-canvas"></div>
+
+    <div class="container">
+        <h1>Internal Toolkit</h1>
+        <div class="grid">
+            <a href="../../Charms Web Tools/Image Tools/Noise Studio/Current Noise Studio/v19.html" class="card">
+                <div class="tool-id">IDX_01</div>
+                <span>Noise Studio</span>
+            </a>
+            <a href="../../Charms Web Tools/Image Tools/Background Remover/Background Remover/background remover and patcher.html"
+                class="card">
+                <div class="tool-id">IDX_02</div>
+                <span>Background Remover</span>
+            </a>
+            <a href="../../Charms Web Tools/Image Tools/Image Corruption/Image Corruption/Image Corruption.html"
+                class="card">
+                <div class="tool-id">IDX_03</div>
+                <span>Image Corruption</span>
+            </a>
+            <a href="../../Charms Web Tools/Image Tools/JPG Hex Editor/Current/index.html" class="card">
+                <div class="tool-id">IDX_04</div>
+                <span>JPG Hex Editor</span>
+            </a>
+            <a href="../../Charms Web Tools/Image Tools/Motion Detection/Current/index.html" class="card">
+                <div class="tool-id">IDX_05</div>
+                <span>Motion Detection</span>
+            </a>
+            <a href="../../Charms Web Tools/Image Tools/Pixel Art/Current/index.html" class="card">
+                <div class="tool-id">IDX_06</div>
+                <span>Pixel Art</span>
+            </a>
+            <a href="../../Charms Web Tools/Image Tools/Dithering/Current/index.html" class="card">
+                <div class="tool-id">IDX_07</div>
+                <span>Image Dithering</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="three.r134.min.js"></script>
+    <script src="vanta.clouds.min.js"></script>
+    <script>
+        VANTA.CLOUDS({
+            el: "#vanta-canvas",
+            mouseControls: true,
+            touchControls: true,
+            gyroControls: false,
+            minHeight: 200.00,
+            minWidth: 200.00,
+            backgroundColor: 0x0,
+            skyColor: 0x68b8d7,
+            cloudColor: 0xadc1de,
+            cloudShadowColor: 0x183550,
+            sunColor: 0xff9919,
+            sunGlareColor: 0xff6633,
+            sunlightColor: 0xff9933
+        });
+    </script>
+</body>
+
+</html>
