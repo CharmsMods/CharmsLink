@@ -104,6 +104,150 @@ body {
 }
 
 /* ============================================
+   HAMBURGER MENU & NAV OVERLAY
+   ============================================ */
+
+.menu-toggle {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    width: 64px;
+    height: 64px;
+    background-color: #fdf1ca;
+    border: 4px solid #000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    z-index: 1100;
+    box-shadow: 6px 6px 0px 0px #000;
+    transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.menu-toggle:hover {
+    box-shadow: 10px 10px 0px 0px #000;
+    transform: translate(-2px, -2px);
+    background-color: #fff;
+}
+
+.menu-toggle .bar {
+    width: 32px;
+    height: 4px;
+    background-color: #000;
+    transition: all 0.3s ease;
+}
+
+.nav-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #fdf1ca;
+    background-image: radial-gradient(rgba(0, 0, 0, 0.1) 2px, transparent 2px);
+    background-size: 24px 24px;
+    z-index: 12000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.nav-overlay.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.nav-close {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    width: 64px;
+    height: 64px;
+    background-color: #000;
+    color: #fdf1ca;
+    border: 4px solid #000;
+    font-size: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 6px 6px 0px 0px rgba(255, 255, 255, 0);
+    transition: all 0.15s ease;
+}
+
+.nav-close:hover {
+    background-color: #fdf1ca;
+    color: #000;
+    box-shadow: 6px 6px 0px 0px #000;
+    transform: translate(-4px, -4px);
+}
+
+.nav-content {
+    max-width: 800px;
+    width: 100%;
+    padding: 40px;
+}
+
+.nav-links {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+}
+
+.nav-link-item {
+    text-decoration: none;
+    color: #000;
+    font-size: clamp(24px, 5vw, 48px);
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 16px;
+    border: 4px solid #000;
+    box-shadow: 8px 8px 0px 0px #000;
+    background-color: #fdf1ca;
+    transition: all 0.15s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.nav-link-item:hover {
+    transform: translate(-6px, -6px);
+    box-shadow: 14px 14px 0px 0px #000;
+    background-color: #fff;
+}
+
+.link-number {
+    font-size: 0.5em;
+    opacity: 0.5;
+    border-right: 2px solid #000;
+    padding-right: 16px;
+}
+
+.link-text {
+    text-transform: uppercase;
+    letter-spacing: -1px;
+}
+
+.nav-link-item::after {
+    content: '→';
+    position: absolute;
+    right: 24px;
+    opacity: 0;
+    transform: translateX(-20px);
+    transition: all 0.3s ease;
+}
+
+.nav-link-item:hover::after {
+    opacity: 1;
+    transform: translateX(0);
+}
+
+/* ============================================
    SOCIAL BAR
    ============================================ */
 

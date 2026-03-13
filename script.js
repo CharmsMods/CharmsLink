@@ -22,6 +22,41 @@ function scrollToBio() {
     bioSection.scrollIntoView({ behavior: 'smooth' });
 }
 
+// ============================================
+// NAVIGATION MENU LOGIC
+// ============================================
+
+const menuToggle = document.getElementById('menuToggle');
+const navOverlay = document.getElementById('navOverlay');
+const navClose = document.getElementById('navClose');
+const navLinkItems = document.querySelectorAll('.nav-link-item');
+
+if (menuToggle && navOverlay) {
+    menuToggle.addEventListener('click', () => {
+        navOverlay.classList.add('active');
+        document.body.style.overflow = 'hidden'; // Prevent scrolling when menu is open
+    });
+
+    const closeNav = () => {
+        navOverlay.classList.remove('active');
+        document.body.style.overflow = ''; // Restore scrolling
+    };
+
+    navClose.addEventListener('click', closeNav);
+
+    // Close on link click
+    navLinkItems.forEach(item => {
+        item.addEventListener('click', closeNav);
+    });
+
+    // Handle escape key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && navOverlay.classList.contains('active')) {
+            closeNav();
+        }
+    });
+}
+
 
 // ============================================
 // ARCHITECTURE POPUP LOGIC
@@ -68,7 +103,7 @@ if (cursor) {
     });
 
     // Handle hover states for interactive elements
-    const interactiveElements = 'a, button, .project-card, .social-icon, .popup-link, .popup-close, .mod-grid-item, .grid-item';
+    const interactiveElements = 'a, button, .project-card, .social-icon, .popup-link, .popup-close, .mod-grid-item, .grid-item, .menu-toggle, .nav-close, .nav-link-item';
 
     document.addEventListener('mouseover', (e) => {
         if (e.target.closest(interactiveElements)) {

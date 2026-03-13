@@ -319,10 +319,10 @@ button {
     transform: translate(-50%, -50%);
 }
 
-.panel-section + .panel-section,
-.scope-card + .scope-card,
+.panel-section+.panel-section,
+.scope-card+.scope-card,
 .mask-editor,
-.library-group + .library-group {
+.library-group+.library-group {
     margin-top: 10px;
 }
 
@@ -659,7 +659,7 @@ code {
 .inspector-header p,
 .empty-panel p,
 .scope-selection,
-.preview-title-block h2 + p {
+.preview-title-block h2+p {
     margin: 4px 0 0;
 }
 

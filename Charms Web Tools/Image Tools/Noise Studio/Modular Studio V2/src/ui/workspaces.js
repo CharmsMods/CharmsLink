@@ -119,9 +119,9 @@ function renderGroups(state, registry) {
             <div class="panel-heading"><span>${GROUP_LABELS[group] || group}</span></div>
             <div class="chip-grid">
                 ${layers.map(({ layer, instances }) => {
-                    const active = instances.length > 0;
-                    const selected = instances.some((instance) => instance.instanceId === state.document.selection.layerInstanceId);
-                    return `
+        const active = instances.length > 0;
+        const selected = instances.some((instance) => instance.instanceId === state.document.selection.layerInstanceId);
+        return `
                         <div class="effect-chip ${active ? 'is-active' : ''} ${selected ? 'is-selected' : ''}">
                             <button type="button" class="effect-chip-main" data-action="${active ? 'select-layer-family' : 'add-layer'}" data-layer="${layer.layerId}">
                                 <span>${layer.label}</span>
@@ -130,7 +130,7 @@ function renderGroups(state, registry) {
                             ${active && layer.supportsMultiInstance !== false ? `<button type="button" class="chip-add" data-action="add-layer" data-layer="${layer.layerId}" title="Add ${layer.label}">Add</button>` : ''}
                         </div>
                     `;
-                }).join('')}
+    }).join('')}
             </div>
         </section>
     `).join('');
@@ -172,9 +172,9 @@ function renderThreeWayWheel(instance, control) {
     return `
         <div class="grade-wheel-grid">
             ${control.items.map((item) => {
-                const value = instance.params[item.key] ?? item.default ?? '#ffffff';
-                const handle = getWheelHandlePosition(value);
-                return `
+        const value = instance.params[item.key] ?? item.default ?? '#ffffff';
+        const handle = getWheelHandlePosition(value);
+        return `
                     <section class="grade-wheel-card">
                         <div class="grade-wheel-header">
                             <strong>${item.label}</strong>
@@ -186,7 +186,7 @@ function renderThreeWayWheel(instance, control) {
                         <div class="grade-wheel-readout"><span class="grade-swatch" style="--swatch:${value}"></span><code>${String(value).toUpperCase()}</code></div>
                     </section>
                 `;
-            }).join('')}
+    }).join('')}
         </div>
     `;
 }
@@ -337,9 +337,9 @@ function renderPipeline(state, registry) {
             <div class="panel-heading">Pipeline</div>
             <div class="pipeline-list">
                 ${state.document.layerStack.map((instance) => {
-                    const layer = registry.byId[instance.layerId];
-                    const selected = instance.instanceId === state.document.selection.layerInstanceId;
-                    return `
+        const layer = registry.byId[instance.layerId];
+        const selected = instance.instanceId === state.document.selection.layerInstanceId;
+        return `
                         <div class="pipeline-item ${selected ? 'is-selected' : ''}" draggable="true" data-instance="${instance.instanceId}">
                             <button type="button" class="pipeline-main" data-action="select-instance" data-instance="${instance.instanceId}">
                                 <span class="pipeline-name">${layer.label}${instance.meta.instanceIndex > 1 ? ` ${instance.meta.instanceIndex}` : ''}</span>
@@ -353,7 +353,7 @@ function renderPipeline(state, registry) {
                             </div>
                         </div>
                     `;
-                }).join('')}
+    }).join('')}
             </div>
         </div>
     `;
