@@ -1,0 +1,655 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>STATIC ASSET MINIFIER // BRUTALIST EDITION</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="lib/tailwind.min.js"></script>
+  <script src="lib/clean-css.js"></script>
+  <script src="lib/html-minifier.js"></script>
+  <script src="lib/terser.js"></script>
+  <script src="lib/diff.js"></script>
+  <script src="lib/jzip.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Space+Grotesk:wght@400;700&display=swap"
+    rel="stylesheet">
+
+  <link rel="stylesheet" href="v9.css">
+
+</head>
+
+<body class="min-h-screen flex flex-col" id="dropBoundary">
+  <div id="cursor"></div>
+
+  <!-- HEADER -->
+  <header class="p-6 md:p-8 border-b-[3px] border-[#121212] bg-[#F0F0EB]">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+      <div>
+        <div class="flex items-center gap-4 mb-2">
+          <div class="bg-[#121212] text-[#F0F0EB] px-2 py-1 text-xs font-bold font-mono uppercase tracking-widest">
+            v2.1.0</div>
+          <div class="h-[2px] flex-1 bg-[#121212]"></div>
+        </div>
+        <h1 class="text-4xl md:text-6xl font-bold uppercase tracking-tighter leading-none">
+          Static Asset<br>
+          <span class="text-[#FF3366]">Minifier</span> & Bundler
+        </h1>
+      </div>
+      <div class="max-w-xs flex flex-col items-end gap-2">
+        <div class="flex gap-2">
+          <button id="importProjectBtn"
+            class="bg-[#121212] text-white text-[10px] font-bold uppercase tracking-widest px-3 py-2 hover:bg-[#58CC02] transition-colors flex items-center gap-2"
+            title="Import Project JSON">
+            <span>📂</span> OPEN
+          </button>
+          <button id="exportProjectBtn"
+            class="bg-[#121212] text-white text-[10px] font-bold uppercase tracking-widest px-3 py-2 hover:bg-[#FF3366] transition-colors flex items-center gap-2"
+            title="Export Project JSON">
+            <span>💾</span> SAVE
+          </button>
+          <input type="file" id="projectInput" accept=".json" class="hidden">
+        </div>
+        <button id="openHelp"
+          class="text-[10px] font-bold uppercase tracking-widest border-[2px] border-[#121212] px-3 py-1 hover:bg-[#121212] hover:text-white transition-all">
+          [?] HOW TO USE
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <div class="flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 flex flex-col gap-6">
+
+    <!-- NAV TABS -->
+    <nav class="flex w-full">
+      <button
+        class="tab-btn active flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] border-l-[3px] rounded-t-md"
+        data-tab="workspace">Workspace</button>
+      <button
+        class="tab-btn flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] rounded-t-md"
+        data-tab="output">Build Output</button>
+      <button
+        class="tab-btn flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] rounded-t-md"
+        data-tab="extractor">Extract Output</button>
+      <button
+        class="tab-btn flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] rounded-t-md"
+        data-tab="cleaner">Folder Cleaner</button>
+      <button
+        class="tab-btn flex-1 py-4 text-sm md:text-base border-t-[3px] border-r-[3px] border-l-[3px] border-[#121212] rounded-t-md"
+        data-tab="log">Process Logs</button>
+    </nav>
+
+    <!-- CONTENT AREA -->
+    <main class="brutal-shadow bg-white relative min-h-[600px] flex flex-col">
+
+      <!-- WORKSPACE SECTION -->
+      <section id="workspace" class="tab-content block h-[600px] flex overflow-hidden">
+
+        <!-- Sidebar -->
+        <div class="w-64 flex flex-col border-r-[3px] border-[#121212] bg-[#F8F8F3] z-10">
+          <div class="p-4 border-b-[3px] border-[#121212] bg-[#121212] text-white">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-xs font-bold font-mono tracking-widest">ASSETS</span>
+              <span id="assetCount" class="bg-[#FF3366] text-[10px] px-1.5 font-bold">0</span>
+            </div>
+            <div class="flex gap-2">
+              <button id="addHtml"
+                class="flex-1 bg-[#333] hover:bg-white hover:text-black text-white text-[10px] font-bold py-2 transition-colors uppercase">+HTML</button>
+              <button id="addCss"
+                class="flex-1 bg-[#333] hover:bg-white hover:text-black text-white text-[10px] font-bold py-2 transition-colors uppercase">+CSS</button>
+              <button id="addJs"
+                class="flex-1 bg-[#333] hover:bg-white hover:text-black text-white text-[10px] font-bold py-2 transition-colors uppercase">+JS</button>
+            </div>
+          </div>
+          <div id="assetList" class="flex-1 overflow-y-auto"></div>
+        </div>
+
+        <!-- Editor Area -->
+        <div class="flex-1 flex flex-col relative bg-[#121212]">
+
+          <!-- Empty State -->
+          <div id="noAssetPrompt"
+            class="absolute inset-0 z-10 bg-[#121212] flex flex-col items-center justify-center p-12 text-center">
+            <div class="w-20 h-20 border-4 border-[#333] flex items-center justify-center mb-6 animate-pulse">
+              <svg class="w-10 h-10 text-[#555]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold text-[#333] uppercase tracking-widest mb-2">System Ready</h3>
+            <p class="text-sm font-mono text-[#555] max-w-xs leading-relaxed">
+              [WAITING FOR INPUT]<br>
+              Drag files anywhere to import.<br>
+              Or use buttons to create new assets.
+            </p>
+          </div>
+
+          <!-- Editor Header -->
+          <div id="editorHeader"
+            class="hidden h-12 bg-[#1e1e1e] border-b border-[#333] flex items-center justify-between px-4">
+            <div class="flex items-center gap-3">
+              <div class="w-3 h-3 rounded-full bg-red-500"></div>
+              <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+              <div class="w-3 h-3 rounded-full bg-green-500"></div>
+              <span id="currentFileName" class="text-sm font-mono text-[#888] ml-4">Select an asset</span>
+            </div>
+            <button id="removeAsset"
+              class="text-[10px] font-bold text-red-500 hover:text-red-400 border border-red-900 bg-red-900/20 px-3 py-1 uppercase tracking-wider hover:bg-red-500 hover:text-white transition-all">Delete
+              File</button>
+          </div>
+
+          <textarea id="mainEditor" class="editor-area hidden flex-1 w-full p-6 text-sm resize-none focus:bg-[#1a1a1a]"
+            placeholder="// Write code here..."></textarea>
+
+          <div id="mediaView"
+            class="hidden flex-1 flex flex-col items-center justify-center bg-[#121212] p-10 overflow-hidden relative">
+            <!-- Grid background for media -->
+            <div class="absolute inset-0 opacity-10"
+              style="background-image: linear-gradient(#333 1px, transparent 1px), linear-gradient(90deg, #333 1px, transparent 1px); background-size: 20px 20px;">
+            </div>
+
+            <div class="relative z-10 text-center">
+              <div
+                class="text-[10px] font-bold text-[#555] mb-4 uppercase tracking-widest border-b border-[#333] inline-block pb-1">
+                Binary Asset Preview</div>
+              <div class="border-4 border-[#333] bg-[#000] p-2 inline-block shadow-[8px_8px_0_#333]">
+                <img id="imgPreview" class="max-w-full max-h-[350px] block" src="" alt="">
+              </div>
+              <div id="base64Summary"
+                class="mt-4 text-[10px] font-mono text-[#444] break-all max-w-md text-center border border-[#333] p-2 bg-[#1a1a1a]">
+                ...</div>
+            </div>
+          </div>
+
+          <!-- Drop Overlay -->
+          <div id="dropOverlay"
+            class="absolute inset-0 pointer-events-none z-50 flex items-center justify-center transition-all duration-200 hidden">
+            <div class="bg-[#F0F0EB] border-[5px] border-[#121212] px-12 py-8 shadow-[12px_12px_0_#000]">
+              <h2 class="text-4xl font-black uppercase tracking-tighter animate-pulse">Drop Files</h2>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- OUTPUT SECTION -->
+      <section id="output" class="tab-content hidden p-6 md:p-10 flex flex-col h-full gap-8">
+
+        <!-- Config Bar -->
+        <div class="flex flex-col gap-6 p-6 bg-[#F8F8F3] border-[3px] border-[#121212] shadow-[6px_6px_0_#121212]">
+
+          <!-- Row 1: Mode & Build -->
+          <div class="flex flex-wrap items-end justify-between gap-4">
+            <div class="flex flex-col gap-2">
+              <label class="text-[10px] font-bold uppercase tracking-widest text-[#666]">Build Mode</label>
+              <div class="relative">
+                <select id="mode"
+                  class="brutal-input px-4 py-3 text-sm font-bold appearance-none pr-10 cursor-pointer w-64">
+                  <option value="inline">Single HTML Bundle (Inline)</option>
+                  <option value="bundle">Bundle (Combine by Type)</option>
+                  <option value="batch">Batch (Minify Individual Files)</option>
+                </select>
+                <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none font-bold">▼</div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-4 flex-wrap">
+              <div id="build-status" class="hidden text-[#FF3366] font-bold font-mono text-sm uppercase animate-pulse">
+                // OPTIMIZING...
+              </div>
+              <button id="scanMissing"
+                class="bg-white border-[3px] border-[#121212] text-[#121212] text-[10px] font-black py-3 px-4 uppercase tracking-widest shadow-[4px_4px_0_#121212] hover:bg-[#121212] hover:text-white hover:translate-x-[-1px] hover:translate-y-[-1px] transition-all">
+                Scan Missing Links
+              </button>
+              <button id="build"
+                class="bg-[#121212] hover:bg-[#FF3366] text-white text-sm font-black py-4 px-12 uppercase tracking-widest shadow-[4px_4px_0_#FF3366] hover:shadow-[6px_6px_0_#FF3366] hover:translate-x-[-2px] hover:translate-y-[-2px] transition-all flex items-center gap-2">
+                <span id="buildIcon">⚡</span> Run Build
+              </button>
+            </div>
+          </div>
+
+          <!-- Row 2: Advanced Options -->
+          <div class="pt-4 border-t border-[#ccc] grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Toggles -->
+            <div class="flex flex-col gap-3">
+              <label class="text-[10px] font-bold uppercase tracking-widest text-[#666]">Minification Strategy</label>
+              <div class="flex flex-col gap-2">
+                <div class="flex items-center gap-4 flex-wrap">
+                  <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="optMinifyHTML" checked class="w-4 h-4 accent-[#FF3366]">
+                    <span class="text-xs font-mono font-bold">HTML</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="optMinifyCSS" checked class="w-4 h-4 accent-[#FF3366]">
+                    <span class="text-xs font-mono font-bold">CSS</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="optMinifyJS" checked class="w-4 h-4 accent-[#FF3366]">
+                    <span class="text-xs font-mono font-bold">JS</span>
+                  </label>
+                </div>
+                <div class="flex items-center gap-4 mt-1 border-t border-[#ddd] pt-2">
+                  <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="optComments" checked class="w-4 h-4 accent-[#FF3366]">
+                    <span class="text-[10px] font-mono font-bold text-[#555]">Remove Comments</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="optConsole" checked class="w-4 h-4 accent-[#FF3366]">
+                    <span class="text-[10px] font-mono font-bold text-[#555]">Drop Console</span>
+                  </label>
+                </div>
+              </div>
+              <!-- CDN Toggle -->
+              <div class="mt-2 pt-2 border-t border-[#ccc]">
+                <label class="flex items-center gap-2 cursor-pointer select-none opacity-50" id="cdnToggleContainer"
+                  title="Checking connectivity...">
+                  <input type="checkbox" id="optCDN" class="w-4 h-4 accent-[#58CC02]" disabled>
+                  <span class="text-xs font-mono font-bold text-[#58CC02]">USE CDN</span>
+                </label>
+                <div id="cdnStatus" class="text-[9px] text-[#888] font-mono mt-0.5">Checking internet...</div>
+              </div>
+            </div>
+
+            <!-- Filenames -->
+            <div class="flex flex-col gap-3">
+              <label class="text-[10px] font-bold uppercase tracking-widest text-[#666]">Change Target Filenames</label>
+              <div class="flex gap-2">
+                <input id="outNameH" class="brutal-input p-2 text-xs w-full" placeholder="index.min.html"
+                  value="index.min.html">
+                <input id="outNameC" class="brutal-input p-2 text-xs w-full" placeholder="styles.min.css"
+                  value="styles.min.css">
+                <input id="outNameJ" class="brutal-input p-2 text-xs w-full" placeholder="scripts.min.js"
+                  value="scripts.min.js">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
+          <!-- Left Column: Preview & Actions -->
+          <div class="lg:col-span-2 space-y-6">
+            <div class="border-[3px] border-[#121212] h-[400px] bg-white shadow-[4px_4px_0_#121212] flex flex-col">
+              <div class="bg-[#121212] text-white px-4 py-2 text-xs font-mono flex justify-between items-center">
+                <span>LIVE PREVIEW</span>
+                <div class="flex items-center gap-2">
+                  <button id="openNewTab"
+                    class="hover:text-[#58CC02] transition-colors text-[10px] border border-[#555] px-2 py-0.5">NEW
+                    TAB</button>
+                  <button id="togglePreview"
+                    class="hover:text-[#FF3366] transition-colors text-[10px] border border-[#555] px-2 py-0.5">TOGGLE
+                    PREVIEW</button>
+                </div>
+              </div>
+              <div id="previewBox" class="flex-1 overflow-hidden bg-white relative">
+                <iframe id="previewFrame" class="w-full h-full border-none"></iframe>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Right Column: Downloads -->
+          <div class="space-y-4">
+            <h3 class="text-xs font-black uppercase border-b-2 border-[#121212] pb-1 mb-4">Output Artifacts</h3>
+
+            <button id="downH"
+              class="w-full group text-left p-4 border-[3px] border-[#121212] bg-white hover:bg-[#121212] hover:text-white transition-all hidden">
+              <div class="flex justify-between items-center">
+                <span id="lblH" class="font-bold font-mono text-sm">index.min.html</span>
+                <span class="text-xs opacity-0 group-hover:opacity-100 transition-opacity">↓</span>
+              </div>
+            </button>
+
+            <button id="downC"
+              class="w-full group text-left p-4 border-[3px] border-[#121212] bg-white hover:bg-[#121212] hover:text-white transition-all hidden">
+              <div class="flex justify-between items-center">
+                <span id="lblC" class="font-bold font-mono text-sm">styles.min.css</span>
+                <span class="text-xs opacity-0 group-hover:opacity-100 transition-opacity">↓</span>
+              </div>
+            </button>
+
+            <button id="downJ"
+              class="w-full group text-left p-4 border-[3px] border-[#121212] bg-white hover:bg-[#121212] hover:text-white transition-all hidden">
+              <div class="flex justify-between items-center">
+                <span id="lblJ" class="font-bold font-mono text-sm">scripts.min.js</span>
+                <span class="text-xs opacity-0 group-hover:opacity-100 transition-opacity">↓</span>
+              </div>
+            </button>
+
+            <div class="pt-4 border-t border-dashed border-[#121212]">
+              <label id="zipToggleLabel" class="flex items-center gap-2 cursor-pointer select-none mb-3">
+                <input type="checkbox" id="optZip" checked class="w-4 h-4 accent-[#FF3366]">
+                <span class="text-xs font-mono font-bold">Download as ZIP</span>
+              </label>
+              <label id="linkZipLabel" class="flex items-center gap-2 cursor-pointer select-none mb-1">
+                <input type="checkbox" id="optLinkZip" checked class="w-4 h-4 accent-[#58CC02]">
+                <span class="text-xs font-mono font-bold">Link Files in ZIP</span>
+              </label>
+              <div id="linkZipHint" class="text-[9px] font-mono text-[#666] mb-3">Rewrites paths for batch ZIP exports.</div>
+              <button id="downA"
+                class="w-full bg-[#FF3366] text-white font-black uppercase text-xs py-4 shadow-[4px_4px_0_#121212] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all">
+                Download Bundle
+              </button>
+            </div>
+
+            <div class="border-[3px] border-[#121212] bg-[#F8F8F3] shadow-[4px_4px_0_#121212]">
+              <div class="bg-[#121212] text-white px-4 py-2 text-[10px] font-mono uppercase tracking-widest">
+                Build Report
+              </div>
+              <div class="p-4 space-y-4">
+                <div id="buildReportSummary" class="text-xs font-mono text-[#555] leading-relaxed">
+                  Run a build to generate artifact metrics and workflow notes.
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-[10px] font-mono uppercase tracking-wider">
+                  <div class="border border-[#121212] bg-white p-3">
+                    <div class="text-[#666] mb-1">Mode</div>
+                    <div id="reportMode" class="text-[#121212] font-bold text-xs">-</div>
+                  </div>
+                  <div class="border border-[#121212] bg-white p-3">
+                    <div class="text-[#666] mb-1">Assets</div>
+                    <div id="reportAssets" class="text-[#121212] font-bold text-xs">-</div>
+                  </div>
+                  <div class="border border-[#121212] bg-white p-3">
+                    <div class="text-[#666] mb-1">Input Size</div>
+                    <div id="reportInput" class="text-[#121212] font-bold text-xs">-</div>
+                  </div>
+                  <div class="border border-[#121212] bg-white p-3">
+                    <div class="text-[#666] mb-1">Output Size</div>
+                    <div id="reportOutput" class="text-[#121212] font-bold text-xs">-</div>
+                  </div>
+                  <div class="border border-[#121212] bg-white p-3">
+                    <div class="text-[#666] mb-1">Savings</div>
+                    <div id="reportSavings" class="text-[#121212] font-bold text-xs">-</div>
+                  </div>
+                  <div class="border border-[#121212] bg-white p-3">
+                    <div class="text-[#666] mb-1">Workers</div>
+                    <div id="reportWorkers" class="text-[#121212] font-bold text-xs">-</div>
+                  </div>
+                </div>
+                <div id="buildReportNotes" class="text-[10px] font-mono text-[#555] leading-relaxed border-t border-dashed border-[#121212] pt-3">
+                  No build notes yet.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Diff View Container -->
+        <div id="diffContainer"
+          class="border-[3px] border-[#121212] bg-white shadow-[4px_4px_0_#121212] flex flex-col mt-6 w-[95vw] relative left-1/2 -translate-x-1/2">
+          <div class="bg-[#121212] text-white px-4 py-2 text-xs font-mono flex justify-between items-center">
+            <div class="flex items-center gap-2">
+              <span>CODE DIFFERENCE</span>
+              <!-- Diff Tabs -->
+              <div class="flex ml-4 border border-[#555]">
+                <button id="diffTabHtml"
+                  class="diff-tab px-3 py-1 text-[10px] font-bold bg-[#333] hover:bg-[#FF3366] transition-colors active"
+                  data-type="html">HTML</button>
+                <button id="diffTabCss"
+                  class="diff-tab px-3 py-1 text-[10px] font-bold bg-[#222] hover:bg-[#FF3366] transition-colors border-l border-[#555]"
+                  data-type="css">CSS</button>
+                <button id="diffTabJs"
+                  class="diff-tab px-3 py-1 text-[10px] font-bold bg-[#222] hover:bg-[#FF3366] transition-colors border-l border-[#555]"
+                  data-type="js">JS</button>
+                <button id="diffTabBundle"
+                  class="diff-tab px-3 py-1 text-[10px] font-bold bg-[#222] hover:bg-[#FF3366] transition-colors border-l border-[#555]"
+                  data-type="bundle">FULL</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-1 cursor-pointer select-none">
+                <input type="checkbox" id="diffCollapseBase64" checked class="w-3 h-3 accent-[#FF3366]">
+                <span class="text-[10px]">COLLAPSE BASE64</span>
+              </label>
+              <label class="flex items-center gap-1 cursor-pointer select-none">
+                <input type="checkbox" id="diffWrap" checked class="w-3 h-3 accent-[#FF3366]">
+                <span class="text-[10px]">WRAP TEXT</span>
+              </label>
+            </div>
+          </div>
+          <div class="flex-1 flex flex-col md:flex-row h-[600px] border-t border-[#333]">
+            <!-- OriginalPane -->
+            <div class="flex-1 min-w-0 flex flex-col border-b md:border-b-0 md:border-r border-[#333]">
+              <div id="diffOriginalLabel"
+                class="bg-[#eee] px-2 py-1 text-[10px] font-bold text-[#555] uppercase border-b border-[#ccc]">
+                Original HTML</div>
+              <pre id="diffOriginal"
+                class="flex-1 p-4 font-mono text-xs overflow-auto text-[#444] leading-relaxed whitespace-pre-wrap"></pre>
+            </div>
+            <!-- OutputPane -->
+            <div class="flex-1 min-w-0 flex flex-col">
+              <div id="diffOutputLabel"
+                class="bg-[#eee] px-2 py-1 text-[10px] font-bold text-[#555] uppercase border-b border-[#ccc]">
+                Build Output HTML</div>
+              <pre id="diffOutput"
+                class="flex-1 p-4 font-mono text-xs overflow-auto text-[#444] leading-relaxed whitespace-pre-wrap"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- EXTRACTOR SECTION -->
+      <section id="extractor" class="tab-content hidden p-6 md:p-10 flex flex-col h-[600px] gap-6 bg-[#F8F8F3]">
+        <div class="flex flex-col gap-6 p-6 border-[3px] border-[#121212] shadow-[6px_6px_0_#121212] bg-white">
+          <div class="flex flex-col md:flex-row gap-6 items-end justify-between">
+            <div class="flex-1 w-full relative">
+              <label class="text-[10px] font-bold uppercase tracking-widest text-[#666] mb-2 block">Source Code
+                Upload</label>
+              <div class="relative">
+                <input type="file" id="extractorInput" accept=".html,.htm" class="hidden">
+                <button id="extractorUploadBtn"
+                  class="w-full bg-[#121212] hover:bg-[#FF3366] text-white text-sm font-black py-4 px-6 uppercase tracking-widest transition-colors flex justify-center items-center gap-2 text-center border-none cursor-pointer shadow-[4px_4px_0_#FF3366] hover:shadow-[6px_6px_0_#FF3366] hover:translate-x-[-2px] hover:translate-y-[-2px]">
+                  <span>📂</span> SELECT HTML FILE TO EXTRACT
+                </button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 w-full md:w-auto h-full justify-end">
+              <label class="flex items-center gap-2 cursor-pointer select-none p-2 py-4">
+                <input type="checkbox" id="extBase64Dec" checked class="w-4 h-4 accent-[#FF3366]">
+                <span class="text-xs font-mono font-bold">DECODE BASE64 IMAGES</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="flex-1 flex flex-col border-[3px] border-[#121212] bg-white shadow-[4px_4px_0_#121212] overflow-hidden">
+          <div class="bg-[#121212] text-white px-4 py-2 text-xs font-mono flex justify-between items-center">
+            <span>EXTRACTED ASSETS</span>
+            <button id="extractorDownloadAll" disabled
+              class="bg-[#58CC02] hover:bg-white hover:text-black text-black text-[10px] px-3 py-1 font-bold transition-colors uppercase disabled:opacity-50 disabled:cursor-not-allowed hidden">
+              DOWNLOAD ALL (ZIP)
+            </button>
+          </div>
+          <div id="extractorList" class="flex-1 overflow-y-auto p-4 flex flex-col gap-2 bg-[#F0F0EB]">
+            <div class="text-center text-[#888] font-mono text-xs italic mt-8" id="extractorEmptyState">
+              No file uploaded yet.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FOLDER CLEANER SECTION -->
+      <section id="cleaner" class="tab-content hidden p-6 md:p-10 flex flex-col h-[600px] gap-6 bg-[#F8F8F3]">
+        <div
+          class="flex flex-col gap-6 p-6 border-[3px] border-[#121212] shadow-[6px_6px_0_#121212] bg-white text-center flex-shrink-0">
+          <h2 class="text-2xl font-black uppercase tracking-tighter mb-2">Empty Folder Cleaner</h2>
+          <p class="text-xs font-mono text-[#666] mb-4">Select a source directory, then select a destination. The system
+            will copy all files and non-empty folders to a new directory.</p>
+          <button id="cleanerBtn"
+            class="w-full max-w-md mx-auto bg-[#121212] hover:bg-[#FF3366] text-white text-sm font-black py-4 px-6 uppercase tracking-widest transition-colors flex justify-center items-center gap-2 text-center border-none cursor-pointer shadow-[4px_4px_0_#FF3366] hover:shadow-[6px_6px_0_#FF3366] hover:translate-x-[-2px] hover:translate-y-[-2px]">
+            <span>📁</span> START CLEAN COPY
+          </button>
+        </div>
+
+        <div
+          class="flex-1 flex flex-col border-[3px] border-[#121212] bg-white shadow-[4px_4px_0_#121212] overflow-hidden">
+          <div class="bg-[#121212] text-white px-4 py-2 text-xs font-mono flex justify-between items-center">
+            <span>CLEANUP LOG</span>
+            <span id="cleanerStats" class="text-[#58CC02] font-bold"></span>
+          </div>
+          <div id="cleanerLog"
+            class="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed bg-[#F0F0EB] text-[#333]">
+            <div class="text-center text-[#888] italic mt-8">Waiting for directory selection...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- LOG SECTION -->
+      <section id="log" class="tab-content hidden p-0 h-[600px] flex flex-col bg-[#121212]">
+        <div class="bg-[#222] px-4 py-2 text-xs text-[#888] font-mono border-b border-[#333] flex justify-between">
+          <span>> TERMINAL OUTPUT</span>
+          <span class="text-[#FF3366]">● LIVE</span>
+        </div>
+        <div id="logBox" class="flex-1 overflow-y-auto p-6 font-mono text-xs md:text-sm leading-relaxed text-[#ccc]">
+          <div class="text-[#555] italic">> System initialized. Waiting for user input...</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- IMAGE USAGE MODAL -->
+  <div id="usageModalOverlay" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4">
+    <div class="modal-content w-full max-w-3xl max-h-[85vh] flex flex-col">
+      <div class="p-6 border-b-[3px] border-[#121212] bg-[#F8F8F3] flex justify-between items-start">
+        <div>
+          <h2 class="text-2xl font-black uppercase tracking-tighter">Asset Reference Review</h2>
+          <p class="text-xs font-mono text-[#666] mt-1">Reference detection is conservative. Review potential exclusions before building.</p>
+        </div>
+        <div class="w-3 h-3 bg-[#FF3366] rounded-full animate-ping"></div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-8 space-y-8">
+        <!-- Referenced Section -->
+        <div id="referencedSection">
+          <h3
+            class="text-[10px] font-bold uppercase tracking-[0.2em] text-[#121212] mb-4 border-l-4 border-[#58CC02] pl-3 bg-green-100 inline-block py-1">
+              Referenced Or Mentioned Assets (Keep)
+            </h3>
+            <div id="referencedList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+          </div>
+
+        <!-- Unreferenced Section -->
+        <div id="unreferencedSection">
+          <h3
+            class="text-[10px] font-bold uppercase tracking-[0.2em] text-[#121212] mb-4 border-l-4 border-[#FF3366] pl-3 bg-red-100 inline-block py-1">
+              Potentially Unused Assets (Exclude from Output)
+            </h3>
+            <div id="unreferencedList" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+          </div>
+        </div>
+
+      <div class="p-6 border-t-[3px] border-[#121212] bg-[#F8F8F3] flex gap-4">
+        <button id="modalCancel"
+          class="flex-1 py-4 border-[3px] border-[#121212] text-[#121212] text-xs font-bold uppercase hover:bg-[#121212] hover:text-white transition-colors">
+          Cancel
+        </button>
+        <button id="modalProceed"
+          class="flex-1 py-4 bg-[#58CC02] border-[3px] border-[#121212] text-white text-xs font-bold uppercase shadow-[4px_4px_0_#121212] hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[5px_5px_0_#121212] transition-all">
+          Proceed & Build
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MISSING REFERENCES MODAL -->
+  <div id="missingRefsOverlay" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4">
+    <div class="modal-content w-full max-w-2xl max-h-[85vh] flex flex-col">
+      <div class="p-6 border-b-[3px] border-[#121212] bg-[#F8F8F3] flex justify-between items-start">
+        <div>
+          <h2 class="text-2xl font-black uppercase tracking-tighter">Missing File References</h2>
+          <p class="text-xs font-mono text-[#666] mt-1">These paths were referenced but not uploaded. Links will be left unchanged.</p>
+        </div>
+        <div class="w-3 h-3 bg-[#FF3366] rounded-full animate-ping"></div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-8">
+        <div id="missingRefsList" class="space-y-2 font-mono text-xs text-[#333]"></div>
+      </div>
+      <div class="p-6 border-t-[3px] border-[#121212] bg-[#F8F8F3]">
+        <button id="missingRefsClose"
+          class="w-full py-4 bg-[#121212] text-white text-xs font-bold uppercase shadow-[4px_4px_0_#FF3366] hover:bg-[#FF3366] transition-colors">
+          OK
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ENTRY HTML MODAL -->
+  <div id="entryHtmlOverlay" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4">
+    <div class="modal-content w-full max-w-2xl max-h-[85vh] flex flex-col">
+      <div class="p-6 border-b-[3px] border-[#121212] bg-[#F8F8F3] flex justify-between items-start">
+        <div>
+          <h2 class="text-2xl font-black uppercase tracking-tighter">Choose Entry HTML</h2>
+          <p class="text-xs font-mono text-[#666] mt-1">Select the primary HTML file for this build. Other HTML files will be ignored.</p>
+        </div>
+        <div class="w-3 h-3 bg-[#58CC02] rounded-full animate-ping"></div>
+      </div>
+      <div class="flex-1 overflow-y-auto p-8">
+        <div id="entryHtmlList" class="space-y-3"></div>
+      </div>
+      <div class="p-6 border-t-[3px] border-[#121212] bg-[#F8F8F3] flex gap-4">
+        <button id="entryHtmlCancel"
+          class="flex-1 py-4 border-[3px] border-[#121212] text-[#121212] text-xs font-bold uppercase hover:bg-[#121212] hover:text-white transition-colors">
+          Cancel
+        </button>
+        <button id="entryHtmlProceed"
+          class="flex-1 py-4 bg-[#58CC02] border-[3px] border-[#121212] text-white text-xs font-bold uppercase shadow-[4px_4px_0_#121212] hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[5px_5px_0_#121212] transition-all">
+          Use Selected
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HELP MODAL -->
+  <div id="helpModalOverlay" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4">
+    <div class="modal-content w-full max-w-2xl max-h-[85vh] flex flex-col">
+      <div class="p-6 border-b-[3px] border-[#121212] bg-[#F8F8F3] flex justify-between items-start">
+        <h2 class="text-2xl font-black uppercase tracking-tighter">System Manual</h2>
+        <button id="closeHelp" class="text-xl font-bold hover:text-[#FF3366]">✕</button>
+      </div>
+      <div class="p-8 overflow-y-auto space-y-6 font-mono text-sm">
+        <div>
+          <h3 class="font-bold text-[#FF3366] uppercase mb-2">> 1. Asset Order Matters</h3>
+          <p class="text-[#555]">
+            Files are processed in the order shown in the Workspace list.
+            <br>- <strong>CSS:</strong> Lower files can override earlier ones.
+            <br>- <strong>JS:</strong> Dependencies must appear <em>before</em> the scripts that use them.
+            <br>Use the <span class="bg-[#121212] text-white px-1 text-xs">↑</span> <span
+              class="bg-[#121212] text-white px-1 text-xs">↓</span> arrows to reorder.
+          </p>
+        </div>
+        <div>
+          <h3 class="font-bold text-[#FF3366] uppercase mb-2">> 2. Entry Point</h3>
+          <p class="text-[#555]">
+            The <strong>FIRST</strong> HTML file in the list is treated as the "Entry Point".
+            <br>All other content (CSS, JS, inlined images) is injected into this file.
+          </p>
+        </div>
+        <div>
+          <h3 class="font-bold text-[#FF3366] uppercase mb-2">> 3. Protected Build</h3>
+          <p class="text-[#555]">
+            Unused assets are detected automatically. You will be asked to confirm their deletion before building to
+            keep bundle size small.
+            <br><strong>Note:</strong> JS minification is performed safely without mutating variable names that might
+            reference DOM elements.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay">
+    <div class="loader-box"></div>
+    <div class="loading-text">PROCESSING...</div>
+    <div class="progress-container hidden" id="loadingProgressContainer">
+      <div class="progress-bar" id="loadingProgressBar"></div>
+      <div class="progress-text" id="loadingProgressText">0%</div>
+    </div>
+    <div id="loadingSubtext" class="text-xs text-[#888] mt-4 font-mono hidden max-w-md text-center"></div>
+  </div>
+
+  <script src="v9.js"></script>
+</body>
+
+</html>

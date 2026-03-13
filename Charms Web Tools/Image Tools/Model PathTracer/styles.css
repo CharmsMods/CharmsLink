@@ -1,0 +1,180 @@
+/* Reset and base styles */
+body, html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #1a1a1a; /* Dark minimal theme */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: #f0f0f0;
+}
+
+canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+
+/* UI Overlay container */
+.ui-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Let clicks pass through to canvas by default */
+    z-index: 10;
+}
+
+/* Allow interaction with actual UI elements */
+.ui-container > *:not(.drop-zone) {
+    pointer-events: auto;
+}
+
+/* Drag and drop overlay */
+.drop-zone {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(26, 26, 26, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.drop-zone.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.drop-zone.active {
+    opacity: 1;
+}
+
+.drop-zone p {
+    font-size: 24px;
+    font-weight: 300;
+    color: #e0e0e0;
+    padding: 20px 40px;
+    border: 2px dashed #666;
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* Minimalist overlays */
+.overlay-panel {
+    position: absolute;
+    background-color: rgba(30, 30, 30, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 10px;
+    pointer-events: auto;
+}
+
+.top-left { top: 10px; left: 10px; }
+.top-right { top: 10px; right: 10px; }
+.bottom-left { bottom: 10px; left: 10px; }
+.bottom-right { bottom: 10px; right: 10px; }
+
+/* Status readout */
+#status-readout {
+    font-family: monospace;
+    font-size: 12px;
+    color: #aaa;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.status-label {
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+}
+
+/* lil-gui customization for dark theme */
+.lil-gui { 
+    --background-color: rgba(30, 30, 30, 0.85);
+    --text-color: #eee;
+    --title-background-color: rgba(40, 40, 40, 0.9);
+    --widget-color: #444;
+    --hover-color: #555;
+    --focus-color: #666;
+    --number-color: #4ea5ff;
+    --string-color: #a2ff00;
+    font-family: inherit;
+    z-index: 20;
+    /* positioned top right by default */
+}
+
+/* Loading overlay */
+#loading-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 15px 30px;
+    border-radius: 8px;
+    z-index: 50;
+    display: none;
+    font-weight: 300;
+}
+
+/* Error message */
+#error-message {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: rgba(220, 50, 50, 0.9);
+    color: white;
+    padding: 10px 20px;
+    border-radius: 4px;
+    z-index: 100;
+    display: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* Keyboard help */
+#shortcuts {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 15px;
+    font-size: 11px;
+    color: #888;
+    background: rgba(0,0,0,0.4);
+    padding: 6px 12px;
+    border-radius: 12px;
+    pointer-events: none;
+}
+.key {
+    background: #333;
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #ccc;
+    box-shadow: 0 1px 0 #111;
+}
