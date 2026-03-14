@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -11,11 +11,9 @@
   <script src="lib/terser.js"></script>
   <script src="lib/diff.js"></script>
   <script src="lib/jzip.min.js"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Space+Grotesk:wght@400;700&display=swap"
-    rel="stylesheet">
+  <script src="lib/acorn.js"></script>
+  <script src="lib/acorn-walk.js"></script>
+  <link rel="stylesheet" href="lib/fonts.css">
 
   <link rel="stylesheet" href="v9.css">
 
@@ -191,6 +189,18 @@
                   <option value="batch">Batch (Minify Individual Files)</option>
                 </select>
                 <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none font-bold">▼</div>
+              </div>
+              <div id="entryHtmlRow" class="mt-3 flex flex-col gap-2 hidden">
+                <label class="text-[10px] font-bold uppercase tracking-widest text-[#666]">Primary HTML (Preview)</label>
+                <div class="relative">
+                  <select id="entryHtmlSelect"
+                    class="brutal-input px-4 py-2 text-xs font-bold appearance-none pr-10 cursor-pointer w-64"></select>
+                  <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none font-bold">▼</div>
+                </div>
+                <label id="includeAllHtmlRow" class="flex items-center gap-2 cursor-pointer select-none mt-1">
+                  <input type="checkbox" id="optIncludeAllHtml" checked class="w-4 h-4 accent-[#58CC02]">
+                  <span class="text-[10px] font-mono font-bold text-[#555]">Include all HTML pages</span>
+                </label>
               </div>
             </div>
 
@@ -621,8 +631,8 @@
         <div>
           <h3 class="font-bold text-[#FF3366] uppercase mb-2">> 2. Entry Point</h3>
           <p class="text-[#555]">
-            The <strong>FIRST</strong> HTML file in the list is treated as the "Entry Point".
-            <br>All other content (CSS, JS, inlined images) is injected into this file.
+            Choose a <strong>Primary HTML</strong> when multiple HTML files are uploaded.
+            <br>This controls the preview and the default entry for builds.
           </p>
         </div>
         <div>

@@ -97,11 +97,11 @@
       };
 
       try {
-        // Parallel CDN imports for faster loading
+        // Parallel local imports
         const [cssMod, htmlMod, jsMod] = await Promise.all([
-          loadWithTimeout("https://esm.sh/clean-css", "CleanCSS"),
-          loadWithTimeout("https://esm.sh/html-minifier-terser", "HTMLMinifier"),
-          loadWithTimeout("https://esm.sh/terser", "Terser")
+          loadWithTimeout("./lib/clean-css.js", "CleanCSS"),
+          loadWithTimeout("./lib/html-minifier.js", "HTMLMinifier"),
+          loadWithTimeout("./lib/terser.js", "Terser")
         ]);
 
         log("All CDN libraries loaded successfully.");
@@ -127,7 +127,11 @@
       secondaryHtmlIds: [],
       excludedAssetIds: [],
       generatedEntry: false,
+      entryHtmlId: null,
       entryHtmlName: '',
+      includeAllHtml: false,
+      multiHtml: false,
+      outputHtmlNames: [],
       configSnapshot: null,
       report: null,
       workerCount: 0,
@@ -148,11 +152,14 @@
     let diffCacheState = { html: 'stale', css: 'stale', js: 'stale', bundle: 'stale' };
     let diffRequestToken = 0;
     const assetSizeCache = new Map();
+    let selectedEntryHtmlId = null;
+    let outputHtmlName = '';
     const MAX_JS_REFERENCE_SCAN = 800000;
     const MAX_JS_REFERENCE_MATCHES = 2000;
     const MAX_JS_STRING_LENGTH = 260;
     const KNOWN_ASSET_EXTENSIONS = new Set([
       'html', 'htm', 'css', 'js', 'json', 'map', 'webmanifest', 'wasm',
+      'mjs', 'cjs',
       'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif',
       'woff', 'woff2', 'ttf', 'otf', 'eot',
       'mp4', 'webm', 'ogg', 'mp3', 'wav', 'm4a',
@@ -183,6 +190,10 @@
     const linkZipToggle = document.getElementById("optLinkZip");
     const linkZipLabel = document.getElementById("linkZipLabel");
     const linkZipHint = document.getElementById("linkZipHint");
+    const entryHtmlRow = document.getElementById("entryHtmlRow");
+    const entryHtmlSelect = document.getElementById("entryHtmlSelect");
+    const includeAllHtmlRow = document.getElementById("includeAllHtmlRow");
+    const includeAllHtmlToggle = document.getElementById("optIncludeAllHtml");
     const buildReportSummary = document.getElementById("buildReportSummary");
     const reportMode = document.getElementById("reportMode");
     const reportAssets = document.getElementById("reportAssets");
@@ -254,6 +265,56 @@
       const idx = norm.lastIndexOf('/');
       return idx === -1 ? '' : norm.slice(0, idx);
     };
+    const hasFileExtension = (value = "") => /\.[a-zA-Z0-9]{1,8}$/.test(getBasename(value));
+    const collapsePath = (value = "") => {
+      const parts = normalizePath(value).split('/').filter(Boolean);
+      const stack = [];
+      parts.forEach(part => {
+        if (part === '.' || part === '') return;
+        if (part === '..') {
+          if (stack.length) stack.pop();
+          return;
+        }
+        stack.push(part);
+      });
+      return stack.join('/');
+    };
+    const resolvePath = (fromDir = "", ref = "") => {
+      if (!ref) return '';
+      const raw = String(ref).trim();
+      const rooted = raw.startsWith('/');
+      const cleaned = normalizePath(raw);
+      const base = rooted ? '' : normalizePath(fromDir || '');
+      const joined = base ? `${base}/${cleaned}` : cleaned;
+      return collapsePath(joined);
+    };
+    const getHtmlBaseHref = (html = "") => {
+      try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const base = doc.querySelector('base[href]');
+        return base ? (base.getAttribute('href') || '') : '';
+      } catch (err) {
+        return '';
+      }
+    };
+    const getAssetBaseDir = (asset) => {
+      if (!asset || asset.type !== 'html') return getDirname(getAssetPath(asset));
+      const htmlDir = getDirname(getAssetPath(asset));
+      const baseHref = getHtmlBaseHref(asset.content || '');
+      if (!baseHref || isExternalRef(baseHref)) return htmlDir;
+      const resolved = resolvePath(htmlDir, baseHref);
+      if (!resolved) return htmlDir;
+      return baseHref.trim().endsWith('/') ? resolved : (getDirname(resolved) || resolved);
+    };
+    const getOutputBaseDir = (asset, outputPath = "") => {
+      if (!asset || asset.type !== 'html') return getDirname(outputPath || getAssetPath(asset));
+      const baseHref = getHtmlBaseHref(asset.content || '');
+      const htmlDir = getDirname(outputPath || getAssetPath(asset));
+      if (!baseHref || isExternalRef(baseHref)) return htmlDir;
+      const resolved = resolvePath(htmlDir, baseHref);
+      if (!resolved) return htmlDir;
+      return baseHref.trim().endsWith('/') ? resolved : (getDirname(resolved) || resolved);
+    };
     const isExternalRef = (value = "") => /^(data:|blob:|file:|https?:|mailto:|tel:|#|\/\/|javascript:)/i.test(value.trim());
     const looksLikeAssetPath = (value = "") => {
       if (!value || value.length > 300) return false;
@@ -314,6 +375,7 @@
     const resetBuildMeta = () => {
       previewHtml = "";
       buildMeta = createEmptyBuildMeta();
+      outputHtmlName = '';
     };
 
     const invalidateDiffCache = () => {
@@ -323,7 +385,7 @@
     };
 
     const updateFilenameLabels = () => {
-      lblH.textContent = outNameH.value.trim() || 'index.min.html';
+      lblH.textContent = outputHtmlName || outNameH.value.trim() || 'index.min.html';
       lblC.textContent = outNameC.value.trim() || 'styles.min.css';
       lblJ.textContent = outNameJ.value.trim() || 'scripts.min.js';
     };
@@ -348,24 +410,33 @@
     const stripLocalAssetTags = (html, options = {}) => {
       if (!html) return html;
       const treatFileAsLocal = options.treatFileAsLocal !== false;
+      const assetIndex = options.assetIndex || null;
+      const sourceAsset = options.sourceAssetId ? assets.find(a => a.id === options.sourceAssetId) : null;
       const isLocalRef = (value = "") => {
         const trimmed = value.trim();
         if (!trimmed) return false;
         if (treatFileAsLocal && /^file:/i.test(trimmed)) return true;
         return !isExternalRef(trimmed);
       };
+      const shouldStrip = (value = "") => {
+        if (!value) return false;
+        if (!assetIndex || !sourceAsset) return isLocalRef(value);
+        const normalized = normalizeReference(value, sourceAsset);
+        if (!normalized) return false;
+        return Boolean(resolveReferenceAsset(normalized, assetIndex));
+      };
 
       try {
         const doc = new DOMParser().parseFromString(html, 'text/html');
         doc.querySelectorAll('script[src]').forEach(tag => {
           const src = tag.getAttribute('src') || '';
-          if (isLocalRef(src)) tag.remove();
+          if (shouldStrip(src)) tag.remove();
         });
         doc.querySelectorAll('link[rel]').forEach(tag => {
           const rel = (tag.getAttribute('rel') || '').toLowerCase();
           if (!rel.includes('stylesheet')) return;
           const href = tag.getAttribute('href') || '';
-          if (isLocalRef(href)) tag.remove();
+          if (shouldStrip(href)) tag.remove();
         });
         const serialized = doc.documentElement ? doc.documentElement.outerHTML : html;
         const hasDoctype = /<!doctype/i.test(html);
@@ -406,7 +477,10 @@
       }
       if (config.mode === 'bundle') {
         if (combinedCSS) previewDoc = injectIntoHead(previewDoc, `<style data-preview-inline="css">\n${combinedCSS}\n</style>`);
-        if (combinedJS) previewDoc = injectBeforeBodyEnd(previewDoc, `<script data-preview-inline="js">\n${combinedJS}\n<\/script>`);
+        if (combinedJS) {
+          const escapedJs = combinedJS.replace(/<\/(script)/gi, '<\\/$1');
+          previewDoc = injectBeforeBodyEnd(previewDoc, `<script data-preview-inline="js">\n${escapedJs}\n<` + `/script>`);
+        }
       }
       if (mediaAssets.length) previewDoc = replaceMediaReferences(previewDoc, mediaAssets);
       return previewDoc;
@@ -439,24 +513,34 @@
       reportSavings.textContent = report.savedBytes >= 0
         ? `${formatBytes(report.savedBytes)} (${report.savedPct.toFixed(1)}%)`
         : `+${formatBytes(Math.abs(report.savedBytes))}`;
-      reportWorkers.textContent = `${report.workerCount} • ${report.durationMs.toFixed(0)}ms`;
+      reportWorkers.textContent = `${report.workerCount} â€¢ ${report.durationMs.toFixed(0)}ms`;
       buildReportNotes.innerHTML = report.notes.length
         ? report.notes.map(note => `<div>&gt; ${escapeHtml(note)}</div>`).join('')
         : 'No build notes yet.';
     };
 
     const updateDownloadUI = (config = getBuildConfig()) => {
+      const multiHtmlOutput = Boolean(buildMeta && buildMeta.multiHtml) || (bundleHtmlOutputs.length > 0 && config.mode !== 'batch');
+      const zipToggle = document.getElementById("optZip");
       if (config.mode === 'batch') {
         document.getElementById("downH").classList.add('hidden');
         document.getElementById("downC").classList.add('hidden');
         document.getElementById("downJ").classList.add('hidden');
-        document.getElementById("optZip").checked = true;
+        zipToggle.checked = true;
+        zipToggle.disabled = false;
         downAll.textContent = 'Download ZIP';
       } else {
-        document.getElementById("downH").classList.toggle('hidden', !outputs.html);
+        document.getElementById("downH").classList.toggle('hidden', !outputs.html || multiHtmlOutput);
         document.getElementById("downC").classList.toggle('hidden', !outputs.css);
         document.getElementById("downJ").classList.toggle('hidden', !outputs.js);
-        downAll.textContent = config.mode === 'inline' ? 'Download Output' : 'Download Bundle';
+        if (multiHtmlOutput) {
+          zipToggle.checked = true;
+          zipToggle.disabled = true;
+          downAll.textContent = 'Download ZIP';
+        } else {
+          zipToggle.disabled = false;
+          downAll.textContent = config.mode === 'inline' ? 'Download Output' : 'Download Bundle';
+        }
       }
     };
 
@@ -475,6 +559,70 @@
       reader.readAsDataURL(file);
     });
 
+    const getHtmlAssets = () => assets.filter(a => a.type === 'html');
+
+    const getSelectedEntryHtmlId = () => {
+      const htmlAssets = getHtmlAssets();
+      if (!htmlAssets.length) {
+        selectedEntryHtmlId = null;
+        return null;
+      }
+      if (selectedEntryHtmlId && htmlAssets.some(a => a.id === selectedEntryHtmlId)) {
+        return selectedEntryHtmlId;
+      }
+      selectedEntryHtmlId = htmlAssets[0].id;
+      return selectedEntryHtmlId;
+    };
+
+    const updateEntryHtmlSelector = () => {
+      if (!entryHtmlSelect || !entryHtmlRow || !includeAllHtmlRow) return;
+      const htmlAssets = getHtmlAssets();
+      const hasMultiple = htmlAssets.length > 1;
+      entryHtmlRow.classList.toggle('hidden', !hasMultiple);
+      includeAllHtmlRow.classList.toggle('hidden', !hasMultiple);
+
+      if (!hasMultiple) {
+        selectedEntryHtmlId = htmlAssets[0]?.id || null;
+        entryHtmlSelect.innerHTML = '';
+        return;
+      }
+
+      entryHtmlSelect.innerHTML = '';
+      htmlAssets.forEach(asset => {
+        const option = document.createElement('option');
+        option.value = asset.id;
+        option.textContent = asset.path || asset.name || 'untitled';
+        entryHtmlSelect.appendChild(option);
+      });
+
+      if (!selectedEntryHtmlId || !htmlAssets.some(a => a.id === selectedEntryHtmlId)) {
+        selectedEntryHtmlId = htmlAssets[0].id;
+      }
+      entryHtmlSelect.value = selectedEntryHtmlId;
+    };
+
+    const updateOutputFilenameState = () => {
+      const htmlAssets = getHtmlAssets();
+      const includeAll = includeAllHtmlToggle ? includeAllHtmlToggle.checked : false;
+      const multiHtml = htmlAssets.length > 1 && includeAll;
+      outNameH.disabled = multiHtml;
+      outNameH.classList.toggle('opacity-50', multiHtml);
+      outNameH.title = multiHtml ? 'Multiple HTML outputs: filename is derived from each source HTML.' : '';
+    };
+
+    const detectModuleUsage = () => {
+      for (const asset of assets) {
+        if (asset.type === 'html') {
+          const html = asset.content || '';
+          if (/<script[^>]*type=["']module["']/i.test(html)) return true;
+        }
+        if (asset.type === 'js') {
+           if (/\\b(import|export)\\b/i.test(asset.content)) return true;
+        }
+      }
+      return false;
+    };
+
     const checkModeAvailability = () => {
       const hasHtml = assets.some(a => a.type === 'html');
       const modeSelect = document.getElementById("mode");
@@ -482,6 +630,7 @@
       const bundleOpt = modeSelect.querySelector('option[value="bundle"]');
       const batchOpt = modeSelect.querySelector('option[value="batch"]');
       const totalAssets = assets.length;
+      const hasModules = detectModuleUsage();
 
       if (totalAssets === 0) {
         if (inlineOpt) {
@@ -535,7 +684,21 @@
         inlineOpt.textContent = "Single HTML Bundle (Inline)";
       }
 
-      if (bundleOpt) {
+      if (hasModules) {
+        if (inlineOpt) {
+          inlineOpt.disabled = true;
+          inlineOpt.textContent = "Inline (Disabled: JS Modules Detected)";
+        }
+        if (bundleOpt) {
+          bundleOpt.disabled = true;
+          bundleOpt.textContent = "Bundle (Disabled: JS Modules Detected)";
+        }
+        if (modeSelect.value === 'inline' || modeSelect.value === 'bundle') {
+          modeSelect.value = 'batch';
+          updateZipToggleState();
+          showToast("JS modules detected. Switched to Batch mode.", "info");
+        }
+      } else if (bundleOpt) {
         bundleOpt.disabled = false;
         bundleOpt.textContent = "Bundle (Combine by Type)";
       }
@@ -548,6 +711,8 @@
     const renderAssetList = () => {
       assetCount.innerText = assets.length;
 
+      updateEntryHtmlSelector();
+      updateOutputFilenameState();
       checkModeAvailability();
 
       if (assets.length === 0) {
@@ -562,17 +727,22 @@
       noAssetPrompt.classList.add('hidden');
       editorHeader.classList.remove('hidden');
 
-      // Identify Entry Point (first HTML)
-      const firstHtmlId = assets.find(a => a.type === 'html')?.id;
+      // Identify Entry Point (selected HTML)
+      const firstHtmlId = getSelectedEntryHtmlId();
 
-      // Use DocumentFragment for efficient DOM updates
-      const frag = document.createDocumentFragment();
+      const existingNodes = new Map();
+      Array.from(assetList.children).forEach(child => {
+        if (child.dataset.assetId) {
+          existingNodes.set(child.dataset.assetId, child);
+        }
+      });
 
-      assets.forEach((asset, index) => {
-        const div = document.createElement('div');
-        div.className = `asset-item px-4 py-3 cursor-pointer flex justify-between items-center group relative ${asset.id === activeAssetId ? 'active' : ''}`;
+      const newNodes = new Set();
+      let lastNode = null;
 
-        // Use cached size or compute and cache it
+      assets.forEach((asset) => {
+        newNodes.add(asset.id);
+        
         let size;
         if (assetSizeCache.has(asset.id)) {
           size = assetSizeCache.get(asset.id);
@@ -590,33 +760,135 @@
         const isEntryPoint = asset.id === firstHtmlId;
         const displayName = escapeHtml(asset.name || 'untitled');
         const displayPath = asset.path && asset.path !== asset.name ? escapeHtml(asset.path) : '';
+        const isActive = asset.id === activeAssetId;
 
-        div.innerHTML = `
-          <div class="flex items-center gap-3 overflow-hidden flex-1" onclick="selectAsset('${asset.id}')">
-            <span class="text-lg">${icon}</span>
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-mono font-bold truncate ${asset.id === activeAssetId ? 'text-[#121212]' : 'text-[#666]'} group-hover:text-[#121212] transition-colors" title="${escapeHtml(asset.path || asset.name)}">${displayName}</span>
-                ${isEntryPoint ? '<span class="text-[8px] bg-[#121212] text-white px-1 font-bold uppercase tracking-wider">ENTRY</span>' : ''}
-              </div>
-              ${displayPath ? `<span class="text-[9px] text-[#777] font-mono truncate">${displayPath}</span>` : ''}
-              <span class="text-[9px] text-[#888] font-mono">${sizeStr} • ${asset.type.toUpperCase()}</span>
-            </div>
-          </div>
+        let div = existingNodes.get(asset.id);
+
+        if (!div) {
+          div = document.createElement('div');
+          div.dataset.assetId = asset.id;
+
+          const innerContainer = document.createElement('div');
+          innerContainer.className = "flex items-center gap-3 overflow-hidden flex-1";
+          innerContainer.onclick = () => window.selectAsset(asset.id);
+
+          const iconSpan = document.createElement('span');
+          iconSpan.className = "text-lg";
+          iconSpan.dataset.id = "iconSpan";
           
-          <div class="asset-controls flex items-center gap-1 pl-2">
-             <button onclick="moveAsset('${asset.id}', -1)" class="p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors" title="Move Up">↑</button>
-             <button onclick="moveAsset('${asset.id}', 1)" class="p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors" title="Move Down">↓</button>
-             <button onclick="duplicateAsset('${asset.id}')" class="p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors" title="Duplicate">❐</button>
-             <button onclick="renameAsset('${asset.id}')" class="p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors" title="Rename">✎</button>
-          </div>
-        `;
-        frag.appendChild(div);
+          const textContainer = document.createElement('div');
+          textContainer.className = "min-w-0 flex-1";
+
+          const nameRow = document.createElement('div');
+          nameRow.className = "flex items-center gap-2";
+          
+          const nameSpan = document.createElement('span');
+          nameSpan.dataset.id = "nameSpan";
+          
+          const entryBadge = document.createElement('span');
+          entryBadge.className = "text-[8px] bg-[#121212] text-white px-1 font-bold uppercase tracking-wider hidden";
+          entryBadge.textContent = "ENTRY";
+          entryBadge.dataset.id = "entryBadge";
+          
+          nameRow.appendChild(nameSpan);
+          nameRow.appendChild(entryBadge);
+
+          const pathSpan = document.createElement('span');
+          pathSpan.className = "text-[9px] text-[#777] font-mono truncate hidden";
+          pathSpan.dataset.id = "pathSpan";
+
+          const metaSpan = document.createElement('span');
+          metaSpan.className = "text-[9px] text-[#888] font-mono block";
+          metaSpan.dataset.id = "metaSpan";
+
+          textContainer.appendChild(nameRow);
+          textContainer.appendChild(pathSpan);
+          textContainer.appendChild(metaSpan);
+
+          innerContainer.appendChild(iconSpan);
+          innerContainer.appendChild(textContainer);
+
+          const controlsDiv = document.createElement('div');
+          controlsDiv.className = "asset-controls flex items-center gap-1 pl-2";
+          
+          const btnUp = document.createElement('button');
+          btnUp.className = "p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors";
+          btnUp.title = "Move Up";
+          btnUp.textContent = "↑";
+          btnUp.onclick = () => window.moveAsset(asset.id, -1);
+          
+          const btnDown = document.createElement('button');
+          btnDown.className = "p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors";
+          btnDown.title = "Move Down";
+          btnDown.textContent = "↓";
+          btnDown.onclick = () => window.moveAsset(asset.id, 1);
+          
+          const btnDup = document.createElement('button');
+          btnDup.className = "p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors";
+          btnDup.title = "Duplicate";
+          btnDup.textContent = "⧉";
+          btnDup.onclick = () => window.duplicateAsset(asset.id);
+          
+          const btnRen = document.createElement('button');
+          btnRen.className = "p-1 hover:bg-[#121212] hover:text-white rounded text-[#555] transition-colors";
+          btnRen.title = "Rename";
+          btnRen.textContent = "✎";
+          btnRen.onclick = () => window.renameAsset(asset.id);
+
+          controlsDiv.appendChild(btnUp);
+          controlsDiv.appendChild(btnDown);
+          controlsDiv.appendChild(btnDup);
+          controlsDiv.appendChild(btnRen);
+
+          div.appendChild(innerContainer);
+          div.appendChild(controlsDiv);
+          
+          assetList.appendChild(div);
+        }
+
+        div.className = `asset-item px-4 py-3 cursor-pointer flex justify-between items-center group relative ${isActive ? 'active' : ''}`;
+
+        const iconSpan = div.querySelector('[data-id="iconSpan"]');
+        iconSpan.textContent = icon;
+
+        const nameSpan = div.querySelector('[data-id="nameSpan"]');
+        nameSpan.className = `text-xs font-mono font-bold truncate ${isActive ? 'text-[#121212]' : 'text-[#666]'} group-hover:text-[#121212] transition-colors`;
+        nameSpan.title = asset.path || asset.name;
+        nameSpan.textContent = displayName;
+
+        const entryBadge = div.querySelector('[data-id="entryBadge"]');
+        if (isEntryPoint) {
+          entryBadge.classList.remove('hidden');
+        } else {
+          entryBadge.classList.add('hidden');
+        }
+
+        const pathSpan = div.querySelector('[data-id="pathSpan"]');
+        if (displayPath) {
+          pathSpan.classList.remove('hidden');
+          pathSpan.classList.add('block');
+          pathSpan.textContent = displayPath;
+        } else {
+          pathSpan.classList.remove('block');
+          pathSpan.classList.add('hidden');
+        }
+
+        const metaSpan = div.querySelector('[data-id="metaSpan"]');
+        metaSpan.textContent = `${sizeStr} • ${asset.type.toUpperCase()}`;
+
+        if (lastNode && div.previousElementSibling !== lastNode) {
+          lastNode.after(div);
+        } else if (!lastNode && assetList.firstElementChild !== div) {
+          assetList.prepend(div);
+        }
+        lastNode = div;
       });
 
-      // Single DOM update
-      assetList.innerHTML = '';
-      assetList.appendChild(frag);
+      existingNodes.forEach((node, id) => {
+        if (!newNodes.has(id)) {
+          node.remove();
+        }
+      });
     };
 
     // --- TOAST SYSTEM ---
@@ -758,6 +1030,19 @@
       addAsset('js', name, '// Script\n', name);
     };
 
+    if (entryHtmlSelect) {
+      entryHtmlSelect.onchange = () => {
+        selectedEntryHtmlId = entryHtmlSelect.value || null;
+        renderAssetList();
+      };
+    }
+    if (includeAllHtmlToggle) {
+      includeAllHtmlToggle.onchange = () => {
+        updateOutputFilenameState();
+        checkModeAvailability();
+      };
+    }
+
     document.getElementById("removeAsset").onclick = () => {
       const removed = assets.find(a => a.id === activeAssetId);
       if (removed) log(`Deleted asset: ${removed.name}`);
@@ -829,19 +1114,31 @@
       return files;
     };
 
+    let dragEnterCount = 0;
+
+    dropBoundary.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      dragEnterCount++;
+      if (dragEnterCount === 1) {
+        dropOverlay.classList.remove('hidden');
+      }
+    });
+
     dropBoundary.addEventListener('dragover', (e) => {
       e.preventDefault();
-      dropOverlay.classList.remove('hidden');
     });
 
     dropBoundary.addEventListener('dragleave', (e) => {
-      if (e.relatedTarget === null || e.relatedTarget === dropBoundary) {
+      e.preventDefault();
+      dragEnterCount--;
+      if (dragEnterCount === 0) {
         dropOverlay.classList.add('hidden');
       }
     });
 
     dropBoundary.addEventListener('drop', async (e) => {
       e.preventDefault();
+      dragEnterCount = 0;
       dropOverlay.classList.add('hidden');
 
       const files = await collectDroppedFiles(e.dataTransfer);
@@ -865,14 +1162,16 @@
 
     // --- CORE FIX: Usage Detection & Protected Build ---
 
-    const normalizeReference = (raw = "") => {
+    const normalizeReference = (raw = "", sourceAsset = null) => {
       const trimmed = (raw || '').trim();
       if (!trimmed) return null;
       if (isExternalRef(trimmed)) return null;
       const base = stripQueryHash(trimmed);
       if (!base) return null;
-      const normalized = normalizePath(base);
-      return normalized || null;
+      if (!looksLikeAssetPath(base)) return null;
+      const baseDir = sourceAsset ? getAssetBaseDir(sourceAsset) : '';
+      const resolved = resolvePath(baseDir, base);
+      return resolved || null;
     };
 
     const extractCssReferences = (css = "") => {
@@ -890,61 +1189,143 @@
       return refs;
     };
 
-    const extractJsReferences = (js = "", options = {}) => {
-      const refs = [];
-      const maxMatches = Number.isFinite(options.maxMatches) ? options.maxMatches : MAX_JS_REFERENCE_MATCHES;
-      const maxStringLength = Number.isFinite(options.maxStringLength) ? options.maxStringLength : MAX_JS_STRING_LENGTH;
-      if (!js) return { refs, capped: false };
+    let acornParser = null;
+    let acornWalker = null;
+    let isLoadingAcorn = false;
 
-      const len = js.length;
-      let capped = false;
-      let i = 0;
-
-      while (i < len) {
-        const quote = js[i];
-        if (quote !== '"' && quote !== "'" && quote !== '`') {
-          i += 1;
-          continue;
-        }
-
-        let j = i + 1;
-        let value = '';
-        let valueTooLong = false;
-        let hasInterpolation = false;
-
-        while (j < len) {
-          const ch = js[j];
-          if (ch === '\\') {
-            j += 2;
-            continue;
-          }
-          if (quote === '`' && ch === '$' && js[j + 1] === '{') {
-            hasInterpolation = true;
-          }
-          if (ch === quote) break;
-          if (!valueTooLong) {
-            if (value.length < maxStringLength) value += ch;
-            else valueTooLong = true;
-          }
-          j += 1;
-        }
-
-        if (!hasInterpolation && !valueTooLong && value && looksLikeAssetPath(value)) {
-          refs.push({ raw: value, kind: 'JS string' });
-          if (refs.length >= maxMatches) {
-            capped = true;
-            break;
-          }
-        }
-
-        i = j + 1;
+    const loadAcorn = async () => {
+      if (acornParser && acornWalker) return;
+      if (isLoadingAcorn) {
+        while (isLoadingAcorn) await new Promise(r => setTimeout(r, 100));
+        return;
       }
+      isLoadingAcorn = true;
+      try {
+        // Prefer window globals from <script src> tags (safe for inline bundling)
+        if (typeof acorn !== 'undefined' && typeof acornWalk !== 'undefined') {
+          acornParser = acorn;
+          acornWalker = acornWalk;
+        } else {
+          // Fallback to dynamic import
+          const [acornMod, walkMod] = await Promise.all([
+            import('./lib/acorn.js'),
+            import('./lib/acorn-walk.js')
+          ]);
+          acornParser = acornMod;
+          acornWalker = walkMod;
+        }
+      } catch (e) {
+        console.error("Failed to load Acorn", e);
+      } finally {
+        isLoadingAcorn = false;
+      }
+    };
 
-      return { refs, capped };
+    const extractJsAstReferences = (js = "") => {
+      const refs = [];
+      const missing = [];
+      let hasModuleSyntax = false;
+      let hasDynamic = false;
+
+      if (!acornParser || !acornWalker) return { refs, missing, hasModuleSyntax, hasDynamic };
+
+      const checkLiteral = (value, kind) => {
+        if (typeof value === 'string' && looksLikeAssetPath(value)) {
+          refs.push({ raw: value, kind });
+          return true;
+        }
+        return false;
+      };
+
+      try {
+        const ast = acornParser.parse(js, { sourceType: "module", ecmaVersion: "latest" });
+
+        acornWalker.simple(ast, {
+          ImportDeclaration(node) {
+            hasModuleSyntax = true;
+            if (node.source && typeof node.source.value === 'string') {
+               checkLiteral(node.source.value, 'JS import');
+            }
+          },
+          ExportNamedDeclaration(node) {
+            if (node.source && typeof node.source.value === 'string') {
+               hasModuleSyntax = true;
+               checkLiteral(node.source.value, 'JS export');
+            }
+          },
+          ExportAllDeclaration(node) {
+            if (node.source && typeof node.source.value === 'string') {
+               hasModuleSyntax = true;
+               checkLiteral(node.source.value, 'JS export');
+            }
+          },
+          ImportExpression(node) {
+            hasDynamic = true;
+            hasModuleSyntax = true;
+            if (node.source && node.source.type === 'Literal') {
+              if (!checkLiteral(node.source.value, 'JS import()')) {
+                 refs.push({ raw: node.source.value, kind: 'JS import()' });
+              }
+            } else {
+              missing.push({ raw: '(dynamic import)', kind: 'JS import()' });
+            }
+          },
+          CallExpression(node) {
+            if (node.callee.type === 'Identifier') {
+              if (node.callee.name === 'require') {
+                if (node.arguments.length && node.arguments[0].type === 'Literal') {
+                  const val = node.arguments[0].value;
+                  if (!checkLiteral(val, 'JS require') && typeof val === 'string') {
+                      refs.push({ raw: val, kind: 'JS require' });
+                  }
+                } else {
+                   missing.push({ raw: '(non-literal require)', kind: 'JS require' });
+                }
+              } else if (node.callee.name === 'importScripts') {
+                node.arguments.forEach(arg => {
+                  if (arg.type === 'Literal') {
+                    if (!checkLiteral(arg.value, 'JS importScripts')) {
+                       refs.push({ raw: arg.value, kind: 'JS importScripts' });
+                    }
+                  } else {
+                    missing.push({ raw: '(non-literal importScripts)', kind: 'JS importScripts' });
+                  }
+                });
+              }
+            }
+          },
+          NewExpression(node) {
+             if (node.callee.type === 'Identifier' && (node.callee.name === 'Worker' || node.callee.name === 'SharedWorker')) {
+                if (node.arguments.length && node.arguments[0].type === 'Literal') {
+                   if (!checkLiteral(node.arguments[0].value, `JS ${node.callee.name}`)) {
+                       refs.push({ raw: node.arguments[0].value, kind: `JS ${node.callee.name}` });
+                   }
+                } else {
+                   missing.push({ raw: `(non-literal ${node.callee.name})`, kind: `JS ${node.callee.name}` });
+                }
+             }
+          },
+          Literal(node) {
+            checkLiteral(node.value, 'JS string');
+          }
+        });
+      } catch (err) {
+         try {
+             const ast = acornParser.parse(js, { sourceType: "script", ecmaVersion: "latest" });
+             acornWalker.simple(ast, {
+                  Literal(node) { checkLiteral(node.value, 'JS string'); }
+             });
+         } catch (e2) {
+             // giving up
+         }
+      }
+      return { refs, missing, hasModuleSyntax, hasDynamic };
     };
 
     const extractHtmlReferences = (html = "") => {
       const refs = [];
+      const missing = [];
+      let hasModuleScripts = false;
       const pushRef = (raw, kind) => {
         if (!raw || !looksLikeAssetPath(raw)) return;
         refs.push({ raw, kind });
@@ -982,25 +1363,37 @@
           styleRefs.forEach(ref => pushRef(ref.raw, `HTML <style> (${ref.kind})`));
         });
 
-        doc.querySelectorAll('script:not([src])').forEach(scriptTag => {
-          const { refs: scriptRefs } = extractJsReferences(scriptTag.textContent || '');
-          scriptRefs.forEach(ref => pushRef(ref.raw, `HTML <script> (${ref.kind})`));
-        });
+        for (const scriptTag of Array.from(doc.querySelectorAll('script:not([src])'))) {
+          const scriptType = (scriptTag.getAttribute('type') || '').toLowerCase();
+          if (scriptType === 'module') hasModuleScripts = true;
+          const astScan = extractJsAstReferences(scriptTag.textContent || '');
+          if (astScan.hasModuleSyntax) hasModuleScripts = true;
+          astScan.refs.forEach(ref => pushRef(ref.raw, `HTML <script> (${ref.kind})`));
+          astScan.missing.forEach(ref => missing.push({ raw: ref.raw, kind: `HTML <script> (${ref.kind})` }));
+        }
       } catch (err) {
         // Fallback: best-effort regex scans if DOM parsing fails
         extractCssReferences(html).forEach(ref => pushRef(ref.raw, `HTML fallback (${ref.kind})`));
-        const { refs: fallbackRefs } = extractJsReferences(html);
-        fallbackRefs.forEach(ref => pushRef(ref.raw, `HTML fallback (${ref.kind})`));
+        const astScan = extractJsAstReferences(html);
+        if (astScan.hasModuleSyntax) hasModuleScripts = true;
+        astScan.refs.forEach(ref => pushRef(ref.raw, `HTML fallback (${ref.kind})`));
+        astScan.missing.forEach(ref => missing.push({ raw: ref.raw, kind: `HTML fallback (${ref.kind})` }));
       }
 
-      return refs;
+      return { refs, missing, hasModuleScripts };
     };
 
-    const collectAssetReferences = () => {
+    const collectAssetReferences = async () => {
       const references = [];
       const warnings = [];
+      const missing = [];
+      const moduleInfo = {
+        hasModules: false,
+        sources: new Set()
+      };
+
       const pushRef = (ref, asset, sourceType) => {
-        const normalized = normalizeReference(ref.raw);
+        const normalized = normalizeReference(ref.raw, asset);
         if (!normalized) return;
         references.push({
           raw: ref.raw,
@@ -1012,24 +1405,41 @@
         });
       };
 
-      assets.forEach(asset => {
+      const pushMissing = (ref, asset, sourceType) => {
+        missing.push({
+          raw: ref.raw,
+          normalized: null,
+          sourceId: asset.id,
+          sourceType,
+          sourceName: asset.path || asset.name,
+          kind: ref.kind
+        });
+      };
+
+      for (const asset of assets) {
         if (asset.type === 'html') {
-          extractHtmlReferences(asset.content).forEach(ref => pushRef(ref, asset, 'HTML'));
+          const htmlRefs = await extractHtmlReferences(asset.content);
+          htmlRefs.refs.forEach(ref => pushRef(ref, asset, 'HTML'));
+          htmlRefs.missing.forEach(ref => pushMissing(ref, asset, 'HTML'));
+          if (htmlRefs.hasModuleScripts) {
+            moduleInfo.hasModules = true;
+            moduleInfo.sources.add(asset.id);
+          }
         } else if (asset.type === 'css') {
           extractCssReferences(asset.content).forEach(ref => pushRef(ref, asset, 'CSS'));
         } else if (asset.type === 'js') {
-          let jsContent = asset.content || '';
-          if (jsContent.length > MAX_JS_REFERENCE_SCAN) {
-            warnings.push(`JS reference scan limited for ${asset.path || asset.name} (${formatBytes(jsContent.length)}).`);
-            jsContent = jsContent.slice(0, MAX_JS_REFERENCE_SCAN);
+          let moduleContent = asset.content || '';
+          const moduleScan = extractJsAstReferences(moduleContent);
+          if (moduleScan.hasModuleSyntax) {
+            moduleInfo.hasModules = true;
+            moduleInfo.sources.add(asset.id);
           }
-          const { refs: jsRefs, capped } = extractJsReferences(jsContent, { maxMatches: MAX_JS_REFERENCE_MATCHES });
-          jsRefs.forEach(ref => pushRef(ref, asset, 'JS'));
-          if (capped) warnings.push(`JS reference scan hit the match limit for ${asset.path || asset.name}.`);
+          moduleScan.refs.forEach(ref => pushRef(ref, asset, 'JS'));
+          moduleScan.missing.forEach(ref => pushMissing(ref, asset, 'JS'));
         }
-      });
+      }
 
-      return { references, warnings };
+      return { references, warnings, missing, moduleInfo };
     };
 
     const buildAssetIndex = (assetList = assets) => {
@@ -1062,14 +1472,24 @@
       if (stripped && index.byPath.has(stripped)) return index.byPath.get(stripped);
       if (stripped && index.byName.has(stripped)) return index.byName.get(stripped);
 
+      if (!hasFileExtension(normalizedRef)) {
+        const extensions = ['.js', '.mjs', '.cjs', '.css', '.html'];
+        for (const ext of extensions) {
+          const candidate = `${normalizedRef}${ext}`;
+          if (index.byPath.has(candidate)) return index.byPath.get(candidate);
+          if (index.byName.has(candidate)) return index.byName.get(candidate);
+        }
+      }
+
       const base = getBasename(normalizedRef);
       const baseMatches = index.byBase.get(base);
       if (baseMatches && baseMatches.length) return baseMatches[0];
       return null;
     };
 
-    const scanProjectReferences = () => {
-      const { references, warnings } = collectAssetReferences();
+    const scanProjectReferences = async () => {
+      await loadAcorn();
+      const { references, warnings, missing: missingExplicit, moduleInfo } = await collectAssetReferences();
       const index = buildAssetIndex(assets);
       const usedAssetIds = new Set();
       const matched = [];
@@ -1085,8 +1505,9 @@
         }
       });
 
+      const allMissing = [...missing, ...missingExplicit];
       const missingMap = new Map();
-      missing.forEach(ref => {
+      allMissing.forEach(ref => {
         const key = ref.normalized || ref.raw;
         if (!missingMap.has(key)) {
           missingMap.set(key, { ...ref, sources: new Set([ref.sourceName]) });
@@ -1100,7 +1521,22 @@
         sources: Array.from(item.sources)
       }));
 
-      return { references, usedAssetIds, matched, missing: missingList, warnings };
+      const graph = new Map();
+      matched.forEach(({ ref, asset }) => {
+        if (!graph.has(ref.sourceId)) graph.set(ref.sourceId, new Set());
+        graph.get(ref.sourceId).add(asset.id);
+      });
+
+      return {
+        references,
+        usedAssetIds,
+        matched,
+        missing: missingList,
+        warnings,
+        graph,
+        hasModules: moduleInfo.hasModules,
+        moduleSources: Array.from(moduleInfo.sources)
+      };
     };
 
     const reportScanWarnings = (warnings = []) => {
@@ -1109,7 +1545,7 @@
       });
     };
 
-    const summarizeAssetUsage = (scanResult, entryHtmlId = null) => {
+    const summarizeAssetUsage = (scanResult, entryHtmlId = null, includeAllHtml = true) => {
       const usedIds = new Set(scanResult.usedAssetIds);
       if (entryHtmlId) usedIds.add(entryHtmlId);
 
@@ -1134,18 +1570,31 @@
           detail: info ? Array.from(info.detail) : []
         };
 
-        if (entryHtmlId && asset.type === 'html' && asset.id !== entryHtmlId) {
-          unused.push({
-            ...usagePayload,
-            detail: ['Non-entry HTML file (ignored).']
-          });
+        if (asset.type === 'html') {
+          if (!includeAllHtml && entryHtmlId && asset.id !== entryHtmlId) {
+            unused.push({
+              ...usagePayload,
+              detail: ['Non-entry HTML file (ignored).']
+            });
+            return;
+          }
+          if (usedIds.has(asset.id) || (includeAllHtml && asset.id !== entryHtmlId)) {
+            if (asset.id === entryHtmlId && usagePayload.detail.length === 0) {
+              usagePayload.detail = ['Entry HTML selected.'];
+            } else if (includeAllHtml && asset.id !== entryHtmlId && usagePayload.detail.length === 0) {
+              usagePayload.detail = ['Additional HTML page included.'];
+            }
+            used.push(usagePayload);
+          } else {
+            unused.push({
+              ...usagePayload,
+              detail: ['Orphaned HTML page (not referenced).']
+            });
+          }
           return;
         }
 
         if (usedIds.has(asset.id)) {
-          if (asset.id === entryHtmlId && usagePayload.detail.length === 0) {
-            usagePayload.detail = ['Entry HTML selected.'];
-          }
           used.push(usagePayload);
         } else {
           unused.push({
@@ -1178,7 +1627,7 @@
         : `<div class="w-12 h-12 flex items-center justify-center border border-[#333] text-[10px] font-bold" style="background:${badge.color}; color:${badge.color === '#121212' ? '#fff' : '#121212'}">${badge.label}</div>`;
 
       const foundIn = asset.foundIn && asset.foundIn.length ? `Found in ${escapeHtml(asset.foundIn.join(' + '))}` : (isUsed ? 'Referenced' : 'No reference detected');
-      const detailText = asset.detail && asset.detail.length ? escapeHtml(asset.detail.slice(0, 2).join(' • ')) : '';
+      const detailText = asset.detail && asset.detail.length ? escapeHtml(asset.detail.slice(0, 2).join(' â€¢ ')) : '';
 
       div.className = isUsed
         ? 'flex items-center gap-4 bg-white border-[3px] border-[#121212] p-3 shadow-[3px_3px_0_#000]'
@@ -1218,9 +1667,10 @@
         const div = document.createElement('div');
         div.className = 'border border-[#121212] bg-white p-3 shadow-[3px_3px_0_#121212]';
         const sources = ref.sources && ref.sources.length ? ref.sources.join(', ') : ref.sourceName;
+        const kind = ref.kind ? ` • ${ref.kind}` : '';
         div.innerHTML = `
           <div class="font-bold text-xs font-mono text-[#121212]">${escapeHtml(ref.raw)}</div>
-          <div class="text-[9px] font-mono text-[#666] mt-1">${escapeHtml(ref.sourceType)} • ${escapeHtml(sources || '')}</div>
+          <div class="text-[9px] font-mono text-[#666] mt-1">${escapeHtml(ref.sourceType)}${escapeHtml(kind)} • ${escapeHtml(sources || '')}</div>
         `;
         missingRefsList.appendChild(div);
       });
@@ -1291,16 +1741,13 @@
         return null;
       }
 
+      const config = getBuildConfig();
       const htmlAssets = assets.filter(a => a.type === 'html');
-      let entryHtmlId = htmlAssets.length === 1 ? htmlAssets[0].id : null;
-      if (htmlAssets.length > 1) {
-        entryHtmlId = await promptForEntryHtml(htmlAssets);
-        if (!entryHtmlId) return null;
-      }
+      let entryHtmlId = getSelectedEntryHtmlId();
 
       let scan;
       try {
-        scan = scanProjectReferences();
+        scan = await scanProjectReferences();
       } catch (err) {
         console.error("Reference scan failed:", err);
         log(`<span class="text-[#FF3366]">Scan failed:</span> ${escapeHtml(err?.message || String(err))}`);
@@ -1322,11 +1769,13 @@
         await showMissingRefsModal(scan.missing);
       }
 
-      const { used, unused } = summarizeAssetUsage(scan, entryHtmlId);
-      const forcedExcludeIds = entryHtmlId ? htmlAssets.filter(a => a.id !== entryHtmlId).map(a => a.id) : [];
-      const excludedIds = Array.from(new Set([...unused.map(u => u.id), ...forcedExcludeIds]));
+      const includeAllHtml = config.includeAllHtml;
+      const { used, unused } = summarizeAssetUsage(scan, entryHtmlId, includeAllHtml);
+      const excludedIds = includeAllHtml
+        ? unused.filter(asset => asset.type !== 'html').map(asset => asset.id)
+        : unused.map(asset => asset.id);
 
-      return { used, unused, excludedIds, entryHtmlId };
+      return { used, unused, excludedIds, entryHtmlId, includeAllHtml, scan };
     };
 
     modalCancel.onclick = () => {
@@ -1341,7 +1790,12 @@
       if (excludedCount) {
         log(`<span class="text-[#FF3366] font-bold">Excluding ${excludedCount} unused asset(s) from output.</span>`);
       }
-      executeBuild(pendingBuildContext.excludedIds, pendingBuildContext.entryHtmlId);
+      executeBuild(
+        pendingBuildContext.excludedIds,
+        pendingBuildContext.entryHtmlId,
+        pendingBuildContext.scan,
+        pendingBuildContext.includeAllHtml
+      );
       pendingBuildContext = null;
     };
 
@@ -1354,7 +1808,7 @@
         }
         let scan;
         try {
-          scan = scanProjectReferences();
+          scan = await scanProjectReferences();
         } catch (err) {
           console.error("Reference scan failed:", err);
           log(`<span class="text-[#FF3366]">Scan failed:</span> ${escapeHtml(err?.message || String(err))}`);
@@ -1380,7 +1834,7 @@
         pendingBuildContext = ctx;
         showUsageModal(ctx.used, ctx.unused);
       } else {
-        executeBuild(ctx.excludedIds, ctx.entryHtmlId);
+        executeBuild(ctx.excludedIds, ctx.entryHtmlId, ctx.scan, ctx.includeAllHtml);
       }
     };
 
@@ -1553,7 +2007,8 @@
         comments: document.getElementById("optComments").checked,
         console: document.getElementById("optConsole").checked,
         useCDN: isCDN,
-        linkZip: document.getElementById("optLinkZip").checked
+        linkZip: document.getElementById("optLinkZip").checked,
+        includeAllHtml: includeAllHtmlToggle ? includeAllHtmlToggle.checked : false
       };
     };
 
@@ -1574,14 +2029,15 @@
     const resolveReferenceReplacement = (raw, sourceAssetId, outputPathMap, assetIndex) => {
       if (!raw || !looksLikeAssetPath(raw) || isExternalRef(raw)) return raw;
       const { base, suffix } = splitRefParts(raw);
-      const normalized = normalizePath(base);
+      const sourceAsset = assets.find(a => a.id === sourceAssetId);
+      const normalized = normalizeReference(base, sourceAsset);
       const targetAsset = resolveReferenceAsset(normalized, assetIndex);
       if (!targetAsset) return raw;
 
       const targetPath = outputPathMap.get(targetAsset.id) || getAssetPath(targetAsset);
-      const sourceAsset = assets.find(a => a.id === sourceAssetId);
       const sourcePath = outputPathMap.get(sourceAssetId) || getAssetPath(sourceAsset);
-      const relative = sourcePath ? getRelativePath(getDirname(sourcePath), targetPath) : targetPath;
+      const baseDir = getOutputBaseDir(sourceAsset, sourcePath);
+      const relative = baseDir ? getRelativePath(baseDir, targetPath) : targetPath;
       const safePath = relative || getBasename(targetPath) || targetPath;
       return `${safePath}${suffix || ''}`;
     };
@@ -1600,13 +2056,44 @@
     };
 
     const rewriteJsReferences = (js = "", sourceAssetId, outputPathMap, assetIndex) => {
-      return (js || "").replace(/(['"`])((?:\\.|(?!\1).)*?)\1/g, (match, quote, value) => {
-        if (!value || value.includes('${')) return match;
-        if (!looksLikeAssetPath(value) || isExternalRef(value)) return match;
-        const newValue = resolveReferenceReplacement(value, sourceAssetId, outputPathMap, assetIndex);
-        if (newValue === value) return match;
-        return `${quote}${newValue}${quote}`;
-      });
+      if (!js) return "";
+      let result = '';
+      for (let i = 0; i < js.length; i++) {
+        const char = js[i];
+        if (char === "'" || char === '"' || char === '`') {
+          const quote = char;
+          let stringContent = '';
+          let isEscaped = false;
+          let j = i + 1;
+          for (; j < js.length; j++) {
+            const nextChar = js[j];
+            if (isEscaped) {
+              stringContent += '\\' + nextChar;
+              isEscaped = false;
+            } else if (nextChar === '\\') {
+              isEscaped = true;
+            } else if (nextChar === quote) {
+              break;
+            } else {
+              stringContent += nextChar;
+            }
+          }
+          if (j < js.length) {
+            let processedContent = stringContent;
+            if (stringContent && !stringContent.includes('${') && looksLikeAssetPath(stringContent) && !isExternalRef(stringContent)) {
+               const newValue = resolveReferenceReplacement(stringContent, sourceAssetId, outputPathMap, assetIndex);
+               if (newValue !== stringContent) {
+                   processedContent = newValue;
+               }
+            }
+            result += quote + processedContent + quote;
+            i = j;
+            continue;
+          }
+        }
+        result += char;
+      }
+      return result;
     };
 
     const rewriteHtmlReferences = (html = "", sourceAssetId, outputPathMap, assetIndex) => {
@@ -1692,7 +2179,46 @@
       return { rewrittenAssets, outputPathMap, collisions };
     };
 
-    const executeBuild = async (excludedIds = [], entryHtmlId = null) => {
+    const filterGraph = (graph, includedIds) => {
+      const filtered = new Map();
+      graph.forEach((targets, sourceId) => {
+        if (!includedIds.has(sourceId)) return;
+        const kept = new Set();
+        targets.forEach(targetId => {
+          if (includedIds.has(targetId)) kept.add(targetId);
+        });
+        if (kept.size) filtered.set(sourceId, kept);
+      });
+      return filtered;
+    };
+
+    const buildDependencyClosure = (entryId, graph, includedIds) => {
+      const visited = new Set();
+      if (!entryId) return visited;
+      const stack = [entryId];
+      while (stack.length) {
+        const current = stack.pop();
+        if (visited.has(current)) continue;
+        if (includedIds && !includedIds.has(current)) continue;
+        visited.add(current);
+        const targets = graph.get(current);
+        if (targets) {
+          targets.forEach(targetId => {
+            if (!visited.has(targetId)) stack.push(targetId);
+          });
+        }
+      }
+      return visited;
+    };
+
+    const computeHtmlOutputPath = (asset, config, multiHtmlOutput) => {
+      if (!multiHtmlOutput) return outNameH.value.trim() || 'index.min.html';
+      let path = getAssetPath(asset) || asset.name || 'index.html';
+      if (config.minifyHTML) path = path.replace(/\.html?$/i, match => `.min${match}`);
+      return path;
+    };
+
+    const executeBuild = async (excludedIds = [], entryHtmlId = null, scanResult = null, includeAllHtmlOverride = null) => {
       syncActiveEditorToAsset();
       const config = getBuildConfig();
       const buildStartedAt = performance.now();
@@ -1708,9 +2234,12 @@
         diffCacheState
       }));
 
+      const includeAllHtml = includeAllHtmlOverride !== null ? includeAllHtmlOverride : config.includeAllHtml;
+
       // Filter excluded assets
       let buildAssets = assets.filter(a => !excludedIds.includes(a.id));
       let htmlAssetsForBuild = buildAssets.filter(a => a.type === 'html');
+      if (!entryHtmlId) entryHtmlId = getSelectedEntryHtmlId();
       if (entryHtmlId) {
         const preferred = htmlAssetsForBuild.find(a => a.id === entryHtmlId);
         if (preferred) {
@@ -1722,8 +2251,8 @@
       let workerCountUsed = 0;
       let sourceAssets = buildAssets;
 
-      if (htmlAssetsForBuild.length > 1 && config.mode !== 'batch') {
-        log(`<span class='text-yellow-500'>Warning:</span> Multiple HTML files detected. Only the first (<span class="font-bold">${htmlSource.name}</span>) will be used as the Bundle entry point.`);
+      if (htmlAssetsForBuild.length > 1 && !includeAllHtml) {
+        log(`<span class='text-yellow-500'>Warning:</span> Multiple HTML files detected. Only the entry HTML (<span class="font-bold">${htmlSource.name}</span>) will be included.`);
       }
 
       if (buildAssets.length === 0) {
@@ -2032,7 +2561,11 @@
             secondaryHtmlIds: [],
             excludedAssetIds: [...excludedIds],
             generatedEntry,
+            entryHtmlId: htmlSource ? htmlSource.id : null,
             entryHtmlName: htmlSource ? htmlSource.name : '',
+            includeAllHtml,
+            multiHtml: false,
+            outputHtmlNames: [],
             configSnapshot: { ...config },
             report: {
               mode: 'BATCH',
@@ -2052,113 +2585,109 @@
           };
 
         } else {
-          // Bundle or Inline
+          // Bundle or Inline (multi-page aware)
           loadingSubtext.innerText = "Aggregating transformed CSS and JS...";
           loadingProgressBar.style.width = "70%";
           loadingProgressText.innerText = "70%";
           await new Promise(r => setTimeout(r, 10));
 
+          const processedById = new Map(processedAssets.map(asset => [asset.id, asset]));
           let combinedCSS = processedAssets.filter(a => a.type === 'css').map(a => a.content).join('\n');
           let combinedJS = processedAssets.filter(a => a.type === 'js').map(a => a.content).join('\n');
-
-          let processedHtmlAsset = processedAssets.find(a => a.type === 'html');
-          let baseHTML = processedHtmlAsset ? processedHtmlAsset.content : (htmlSource ? htmlSource.content : "");
 
           // Prepare Originals for Diff (Raw Concatenation of inputs)
           originals.css = sourceAssets.filter(a => a.type === 'css').map(a => a.content).join('\n');
           originals.js = sourceAssets.filter(a => a.type === 'js').map(a => a.content).join('\n');
           originals.html = htmlSource ? htmlSource.content : "";
 
-          // Inline Images Handling (Affects both HTML and CSS content)
           const mediaAssets = buildAssets.filter(a => a.type === 'media');
-          if (config.mode === 'inline' && mediaAssets.length > 0) {
-            loadingSubtext.innerText = `Inlining ${mediaAssets.length} media asset(s)...`;
-            loadingProgressBar.style.width = "75%";
-            loadingProgressText.innerText = "75%";
-            await new Promise(r => setTimeout(r, 10));
+          const scan = scanResult || scanProjectReferences();
+          const includedIds = new Set(buildAssets.map(a => a.id));
+          const graph = scan && scan.graph ? filterGraph(scan.graph, includedIds) : new Map();
+          const assetIndexForBuild = buildAssetIndex(buildAssets);
 
-            baseHTML = replaceMediaReferences(baseHTML, mediaAssets);
-            combinedCSS = replaceMediaReferences(combinedCSS, mediaAssets);
-          }
-
-          // Processing HTML (Minify wrapper if needed)
-          if (config.minifyHTML && _minifyHTML) {
-            loadingSubtext.innerText = "Performing final HTML optimization pass...";
-            await new Promise(r => setTimeout(r, 10));
-
-            const jsOpts = config.minifyJS ? { compress: { drop_console: config.console } } : false;
-            const cssOpts = config.minifyCSS ? { level: 1, rebase: false } : false;
-            try {
-              baseHTML = await _minifyHTML(baseHTML, {
-                collapseWhitespace: config.minifyHTML, // Use config.minifyHTML dynamically instead of true
-                removeComments: config.comments,
-                minifyCSS: cssOpts, // Ensure internal CSS is minified without URL rebasing
-                minifyJS: jsOpts,            // Ensure internal JS is minified
-                ignoreCustomFragments: [/<script type="x-shader\/.*?"[\s\S]*?<\/script>/gi] // Preserve GLSL shaders
-              });
-            } catch (err) {
-              console.error("Final HTML pass error:", err);
-            }
-          }
-
-          let finalHTML = baseHTML;
+          const includedHtmlAssets = includeAllHtml ? htmlAssetsForBuild : (htmlSource ? [htmlSource] : []);
+          const multiHtmlOutput = includeAllHtml && includedHtmlAssets.length > 1;
 
           if (config.mode === 'inline') {
-            loadingSubtext.innerText = "Injecting styles and scripts into master HTML...";
-            await new Promise(r => setTimeout(r, 10));
-
             log("Mode: Inline Assembly");
-            if (combinedCSS && finalHTML) {
-              finalHTML = injectIntoHead(finalHTML, `<style>\n${combinedCSS}\n</style>`);
-            }
-            if (combinedJS && finalHTML) {
-              finalHTML = injectBeforeBodyEnd(finalHTML, `<script>\n${combinedJS}\n<\/script>`);
-            }
           } else if (config.mode === 'bundle') {
             log("Mode: Bundle Assembly");
-            const cssFilename = outNameC.value.trim() || 'styles.min.css';
-            const jsFilename = outNameJ.value.trim() || 'scripts.min.js';
-
-            if (finalHTML) {
-              if (combinedCSS) finalHTML = injectIntoHead(finalHTML, `<link rel="stylesheet" href="${cssFilename}">`);
-              if (combinedJS) finalHTML = injectBeforeBodyEnd(finalHTML, `<script src="${jsFilename}"><\/script>`);
-            }
           }
 
-          outputs = { html: finalHTML, css: combinedCSS, js: combinedJS };
-          finals = { ...outputs, bundle: finalHTML };
+          const htmlOutputs = [];
+          includedHtmlAssets.forEach(htmlAsset => {
+            let pageHtml = (processedById.get(htmlAsset.id)?.content || htmlAsset.content || '');
 
+            if (config.mode === 'inline') {
+              const closureIds = buildDependencyClosure(htmlAsset.id, graph, includedIds);
+              const closureAssets = buildAssets.filter(asset => closureIds.has(asset.id));
+              const closureCss = closureAssets.filter(asset => asset.type === 'css').map(asset => (processedById.get(asset.id) || asset).content).join('\n');
+              const closureJs = closureAssets.filter(asset => asset.type === 'js').map(asset => (processedById.get(asset.id) || asset).content).join('\n');
+              const closureMedia = closureAssets.filter(asset => asset.type === 'media');
+
+              let pageCss = closureCss;
+              let pageJs = closureJs;
+
+              if (closureMedia.length > 0) {
+                pageHtml = replaceMediaReferences(pageHtml, closureMedia);
+                pageCss = replaceMediaReferences(pageCss, closureMedia);
+              }
+
+              const closureIndex = buildAssetIndex(closureAssets);
+              pageHtml = stripLocalAssetTags(pageHtml, { assetIndex: closureIndex, sourceAssetId: htmlAsset.id, treatFileAsLocal: true });
+
+              if (pageCss && pageHtml) {
+                pageHtml = injectIntoHead(pageHtml, `<style>\n${pageCss}\n</style>`);
+              }
+              if (pageJs && pageHtml) {
+                const escapedPageJs = pageJs.replace(/<\/(script)/gi, '<\\/$1');
+                pageHtml = injectBeforeBodyEnd(pageHtml, `<script>\n${escapedPageJs}\n<` + `/script>`);
+              }
+            } else if (config.mode === 'bundle') {
+              const cssFilename = outNameC.value.trim() || 'styles.min.css';
+              const jsFilename = outNameJ.value.trim() || 'scripts.min.js';
+
+              pageHtml = stripLocalAssetTags(pageHtml, { assetIndex: assetIndexForBuild, sourceAssetId: htmlAsset.id, treatFileAsLocal: true });
+
+              if (combinedCSS && pageHtml) {
+                pageHtml = injectIntoHead(pageHtml, `<link rel="stylesheet" href="${cssFilename}">`);
+              }
+              if (combinedJS && pageHtml) {
+                pageHtml = injectBeforeBodyEnd(pageHtml, `<script src="${jsFilename}"><` + `/script>`);
+              }
+            }
+
+            const outputPath = computeHtmlOutputPath(htmlAsset, config, multiHtmlOutput);
+            htmlOutputs.push({ id: htmlAsset.id, name: htmlAsset.name, path: outputPath, content: pageHtml, type: htmlAsset.type });
+          });
+
+          const entryOutput = htmlOutputs.find(file => htmlSource && file.id === htmlSource.id) || htmlOutputs[0] || null;
+          outputs = { html: entryOutput ? entryOutput.content : "", css: combinedCSS, js: combinedJS };
+          outputHtmlName = entryOutput ? entryOutput.path : (outNameH.value.trim() || 'index.min.html');
+
+          finals = { ...outputs, bundle: outputs.html };
           originals.bundle = originals.html;
-          finals.bundle = finalHTML;
+          finals.bundle = outputs.html;
+          finals.html = outputs.html;
 
-          if (config.mode === 'inline') {
-            const minifiedHtmlAsset = processedAssets.find(a => a.type === 'html');
-            if (minifiedHtmlAsset) {
-              finals.html = minifiedHtmlAsset.content;
-            } else {
-              finals.html = processedAssets.find(a => a.id === htmlSource.id)?.content || '';
-            }
-          } else {
-            finals.html = finalHTML;
-          }
-
-          const secondaryHtmlOutputs = config.mode === 'bundle'
-            ? processedHtml.filter(asset => asset.id !== htmlSource.id)
-            : [];
-          bundleHtmlOutputs = secondaryHtmlOutputs.map(asset => ({ id: asset.id, name: asset.name, path: asset.path || asset.name, content: asset.content, type: asset.type }));
+          const secondaryHtmlOutputs = htmlOutputs.filter(file => !entryOutput || file.id !== entryOutput.id);
+          bundleHtmlOutputs = secondaryHtmlOutputs.map(file => ({ ...file, path: file.path || file.name }));
 
           const previewMediaAssets = config.mode === 'bundle'
             ? mediaAssets
-            : mediaAssets.filter(asset => finals.bundle.includes(asset.content));
-          previewHtml = buildPreviewDocument(config, finalHTML, combinedCSS, combinedJS, previewMediaAssets);
+            : mediaAssets.filter(asset => outputs.html.includes(asset.content));
+          previewHtml = config.mode === 'bundle'
+            ? buildPreviewDocument(config, outputs.html, combinedCSS, combinedJS, previewMediaAssets)
+            : outputs.html;
 
           const externalArtifactCount = config.mode === 'bundle'
             ? mediaAssets.length + secondaryHtmlOutputs.length
-            : 0;
+            : secondaryHtmlOutputs.length;
           const externalArtifactBytes = config.mode === 'bundle'
             ? mediaAssets.reduce((sum, asset) => sum + getAssetByteSize(asset), 0) +
               secondaryHtmlOutputs.reduce((sum, asset) => sum + getAssetByteSize(asset), 0)
-            : 0;
+            : secondaryHtmlOutputs.reduce((sum, asset) => sum + getAssetByteSize(asset), 0);
 
           const emittedArtifacts = [
             outputs.html ? 1 : 0,
@@ -2173,14 +2702,15 @@
             externalArtifactBytes;
 
           const notes = [
-            generatedEntry ? `Generated ${htmlSource.name} because no HTML entry file was provided.` : `Using ${htmlSource.name} as the entry HTML file.`,
+            generatedEntry ? `Generated ${htmlSource.name} because no HTML entry file was provided.` : `Using ${htmlSource ? htmlSource.name : 'entry HTML'} as the primary HTML.`,
+            includeAllHtml && multiHtmlOutput ? `Including ${includedHtmlAssets.length} HTML pages in output.` : 'Single HTML output selected.',
             excludedIds.length ? `Excluded ${excludedIds.length} potentially unused asset(s).` : 'No assets were excluded.',
             secondaryHtmlOutputs.length ? `Preserved ${secondaryHtmlOutputs.length} additional HTML file(s) as separate output artifacts.` : 'No extra HTML pages needed separate output.',
             config.mode === 'bundle'
               ? 'Preview uses an in-memory merged document so external bundle files render correctly.'
               : 'Preview mirrors the generated inline HTML output.',
             'Diffs are generated on demand when each tab is opened.'
-          ];
+          ].filter(Boolean);
 
           buildMeta = {
             ...createEmptyBuildMeta(),
@@ -2190,7 +2720,11 @@
             secondaryHtmlIds: secondaryHtmlOutputs.map(a => a.id),
             excludedAssetIds: [...excludedIds],
             generatedEntry,
+            entryHtmlId: htmlSource ? htmlSource.id : null,
             entryHtmlName: htmlSource ? htmlSource.name : '',
+            includeAllHtml,
+            multiHtml: multiHtmlOutput,
+            outputHtmlNames: htmlOutputs.map(file => file.path || file.name),
             configSnapshot: { ...config },
             report: {
               mode: config.mode.toUpperCase(),
@@ -2218,6 +2752,7 @@
 
         previewFrame.srcdoc = getPreviewDocument(config);
         renderBuildReport();
+        updateFilenameLabels();
         updateDownloadUI(config);
         loadingProgressBar.style.width = '100%';
         loadingProgressText.innerText = '100%';
@@ -2294,7 +2829,7 @@
       return Boolean(outputs.html || outputs.css || outputs.js || getBuiltMediaAssets().length || bundleHtmlOutputs.length);
     };
 
-    document.getElementById("downH").onclick = () => dl(outNameH.value.trim() || 'index.min.html', outputs.html);
+    document.getElementById("downH").onclick = () => dl(outputHtmlName || outNameH.value.trim() || 'index.min.html', outputs.html);
     document.getElementById("downC").onclick = () => dl(outNameC.value.trim() || 'styles.min.css', outputs.css);
     document.getElementById("downJ").onclick = () => dl(outNameJ.value.trim() || 'scripts.min.js', outputs.js);
 
@@ -2310,9 +2845,9 @@
         return;
       }
 
-        const zip = new JSZip();
-        const mode = getBuiltMode();
-        const htmlName = outNameH.value.trim() || 'index.min.html';
+      const zip = new JSZip();
+      const mode = getBuiltMode();
+      const htmlName = outputHtmlName || outNameH.value.trim() || 'index.min.html';
       const cssName = outNameC.value.trim() || 'styles.min.css';
       const jsName = outNameJ.value.trim() || 'scripts.min.js';
 
@@ -2320,28 +2855,30 @@
       if (outputs.css && mode !== 'batch') zip.file(cssName, outputs.css);
       if (outputs.js && mode !== 'batch') zip.file(jsName, outputs.js);
 
-        if (mode === 'bundle') {
-          const mediaAssets = getBuiltMediaAssets();
-          mediaAssets.forEach(media => {
-            const base64Data = media.content.split(',')[1];
-            const mediaName = getAssetPath(media) || media.name;
-            zip.file(mediaName, base64Data, { base64: true });
-          });
+      if (mode === 'bundle') {
+        const mediaAssets = getBuiltMediaAssets();
+        mediaAssets.forEach(media => {
+          const base64Data = media.content.split(',')[1];
+          const mediaName = getAssetPath(media) || media.name;
+          zip.file(mediaName, base64Data, { base64: true });
+        });
+      }
 
-          bundleHtmlOutputs.forEach(file => zip.file(file.path || file.name, file.content));
-        }
+      if (mode !== 'batch') {
+        bundleHtmlOutputs.forEach(file => zip.file(file.path || file.name, file.content));
+      }
 
-        if (mode === 'batch') {
-          batchFiles.forEach(f => {
-            const name = f.outputPath || f.path || f.name;
-            if (f.type !== 'media') {
-              zip.file(name, f.content);
-              return;
-            }
-            const base64Data = f.content.split(',')[1];
-            zip.file(name, base64Data, { base64: true });
-          });
-        }
+      if (mode === 'batch') {
+        batchFiles.forEach(f => {
+          const name = f.outputPath || f.path || f.name;
+          if (f.type !== 'media') {
+            zip.file(name, f.content);
+            return;
+          }
+          const base64Data = f.content.split(',')[1];
+          zip.file(name, base64Data, { base64: true });
+        });
+      }
 
       const content = await zip.generateAsync({ type: 'blob' });
       const url = URL.createObjectURL(content);
@@ -2359,13 +2896,15 @@
 
       const mode = getBuiltMode();
       const artifacts = [];
-      if (outputs.html) artifacts.push({ kind: 'text', name: outNameH.value.trim() || 'index.min.html', content: outputs.html });
-        if (outputs.css) artifacts.push({ kind: 'text', name: outNameC.value.trim() || 'styles.min.css', content: outputs.css });
-        if (outputs.js) artifacts.push({ kind: 'text', name: outNameJ.value.trim() || 'scripts.min.js', content: outputs.js });
-        if (mode === 'bundle') {
-          bundleHtmlOutputs.forEach(file => artifacts.push({ kind: 'text', name: file.path || file.name, content: file.content }));
-          getBuiltMediaAssets().forEach(media => artifacts.push({ kind: 'dataUrl', name: getAssetPath(media) || media.name, content: media.content }));
-        }
+      if (outputs.html) artifacts.push({ kind: 'text', name: outputHtmlName || outNameH.value.trim() || 'index.min.html', content: outputs.html });
+      if (outputs.css) artifacts.push({ kind: 'text', name: outNameC.value.trim() || 'styles.min.css', content: outputs.css });
+      if (outputs.js) artifacts.push({ kind: 'text', name: outNameJ.value.trim() || 'scripts.min.js', content: outputs.js });
+      if (mode !== 'batch') {
+        bundleHtmlOutputs.forEach(file => artifacts.push({ kind: 'text', name: file.path || file.name, content: file.content }));
+      }
+      if (mode === 'bundle') {
+        getBuiltMediaAssets().forEach(media => artifacts.push({ kind: 'dataUrl', name: getAssetPath(media) || media.name, content: media.content }));
+      }
 
       if (!artifacts.length) {
         showToast("No downloadable artifacts are available.", "error");
@@ -2565,10 +3104,10 @@
              <div class="w-3 h-3 rounded-full border border-black" style="background:${visualColor}"></div>
              <div>
                 <div class="font-bold text-sm font-mono text-[#121212]">${asset.name}</div>
-                <div class="text-[10px] text-[#888] font-mono">${formatBytes(sizeBytes)} • ${asset.type.toUpperCase()}</div>
+                <div class="text-[10px] text-[#888] font-mono">${formatBytes(sizeBytes)} â€¢ ${asset.type.toUpperCase()}</div>
              </div>
           </div>
-          <button class="bg-[#121212] flex items-center gap-1 text-white hover:bg-[#FF3366] text-[10px] px-3 py-2 font-bold tracking-wider uppercase" onclick="downloadExtractedAsset(${asset.id})"><span>⬇</span> Save</button>
+          <button class="bg-[#121212] flex items-center gap-1 text-white hover:bg-[#FF3366] text-[10px] px-3 py-2 font-bold tracking-wider uppercase" onclick="downloadExtractedAsset(${asset.id})"><span>â¬‡</span> Save</button>
         `;
         frag.appendChild(row);
       });
@@ -2670,6 +3209,8 @@
         bundleHtmlOutputs,
         buildMeta,
         precomputedDiffs,
+        selectedEntryHtmlId,
+        outputHtmlName,
         config: getBuildConfig(),
         filenames: {
           h: outNameH.value,
@@ -2714,6 +3255,8 @@
       bundleHtmlOutputs = (session.bundleHtmlOutputs || []).map(file => ({ ...file, path: file.path || file.name }));
       buildMeta = session.buildMeta || createEmptyBuildMeta();
       precomputedDiffs = session.precomputedDiffs || { html: null, css: null, js: null, bundle: null };
+      selectedEntryHtmlId = session.selectedEntryHtmlId || null;
+      outputHtmlName = session.outputHtmlName || '';
       diffCacheState = {
         html: precomputedDiffs.html ? 'ready' : 'stale',
         css: precomputedDiffs.css ? 'ready' : 'stale',
@@ -2736,6 +3279,7 @@
         if (session.config.console !== undefined) document.getElementById("optConsole").checked = session.config.console;
         if (session.config.useCDN !== undefined) document.getElementById("optCDN").checked = session.config.useCDN;
         if (session.config.linkZip !== undefined) document.getElementById("optLinkZip").checked = session.config.linkZip;
+        if (session.config.includeAllHtml !== undefined && includeAllHtmlToggle) includeAllHtmlToggle.checked = session.config.includeAllHtml;
       }
 
       assetSizeCache.clear();
@@ -2908,3 +3452,5 @@
     log(`System initialized. Detected <span class="text-[#58CC02] font-bold">${cores}</span> logical CPU cores available for parallel processing.`);
     renderAssetList();
   
+
+

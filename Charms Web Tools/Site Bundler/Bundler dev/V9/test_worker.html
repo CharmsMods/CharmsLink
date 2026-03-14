@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head><title>Test Terser v9</title></head>
+<body>
+<pre id="log"></pre>
+<script>
+    const log = msg => document.getElementById('log').textContent += msg + '\n';
+    log('Loading terser...');
+    const workerScript = `
+        self.onmessage = async function(e) {
+            importScripts("http://127.0.0.1:5500/Charms%20Web%20Tools/Site%20Bundler/Bundler%20dev/V9/lib/terser.js");
+            try {
+                const result = await self.Terser.minify(e.data.content, { compress: { drop_console: false }});
+                self.postMessage({ id: 1, content: result.code });
+            } catch(err) {
+                self.postMessage({ id: 1, error: err.toString() });
+            }
+        };
+    `;
+    const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
+    const workerUrl = URL.createObjectURL(workerBlob);
+    const worker = new Worker(workerUrl);
+
+    fetch('v9.js').then(r=>r.text()).then(content => {
+        log('Fetched v9.js, sending to worker...');
+        worker.postMessage({ action: 'minifyJS', content });
+    });
+
+    worker.onmessage = e => {
+        const { error, content } = e.data;
+        if(error) log('WORKER ERROR: ' + error);
+        else log('WORKER SUCCESS! Length: ' + content.length);
+    };
+    worker.onerror = e => log('WORKER FATAL ERROR: ' + e.message);
+</script>
+</body>
+</html>

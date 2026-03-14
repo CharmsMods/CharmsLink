@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Glass Path Tracer</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.183.2/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.183.2/examples/jsm/",
+          "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.24/src/index.js",
+          "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.9/src/index.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="viewport" aria-label="Path traced preview"></canvas>
+
+      <section id="overlay" class="panel">
+        <div class="panel-row">
+          <h1>Glass Path Tracer</h1>
+          <button id="themeToggle" class="ghost">Theme</button>
+        </div>
+
+        <div class="panel-block">
+          <label class="file-button">
+            Load Model
+            <input id="modelInput" type="file" accept=".glb,.gltf,.obj,.fbx,.ply" />
+          </label>
+          <div class="hint">Drag & drop a model anywhere.</div>
+          <label class="field">
+            Exclude Mesh Names
+            <input id="excludeMeshes" type="text" placeholder="comma-separated names" />
+          </label>
+          <div id="fileInfo" class="hint"></div>
+        </div>
+
+        <div class="panel-block">
+          <h2>Glass</h2>
+          <div class="field">
+            <label>Transmission</label>
+            <input id="transmission" type="range" min="0" max="1" step="0.01" value="1" />
+            <output id="transmissionOut"></output>
+          </div>
+          <div class="field">
+            <label>Opacity</label>
+            <input id="opacity" type="range" min="0" max="255" step="1" value="255" />
+            <div class="readout">
+              <span id="opacityRaw"></span>
+              <span id="opacityPct"></span>
+              <span id="opacityNorm"></span>
+            </div>
+          </div>
+          <div class="field">
+            <label>Index of Refraction</label>
+            <input id="ior" type="range" min="1" max="2.5" step="0.01" value="1.5" />
+            <output id="iorOut"></output>
+          </div>
+          <div class="field">
+            <label>Surface Roughness</label>
+            <input id="roughness" type="range" min="0" max="1" step="0.01" value="0" />
+            <output id="roughnessOut"></output>
+          </div>
+          <div class="field">
+            <label>Thickness / Absorption</label>
+            <input id="thickness" type="range" min="0" max="1" step="0.01" value="0.1" />
+            <output id="thicknessOut"></output>
+          </div>
+          <div class="field">
+            <label>Tint Color</label>
+            <input id="tintColor" type="color" value="#ffffff" />
+          </div>
+          <div class="field">
+            <label>Normal Map Intensity</label>
+            <input id="normalIntensity" type="range" min="0" max="1" step="0.01" value="0" />
+            <output id="normalOut"></output>
+          </div>
+        </div>
+
+        <div class="panel-block">
+          <h2>Texture Overlay</h2>
+          <label class="file-button">
+            Load Texture
+            <input id="textureInput" type="file" accept="image/*" />
+          </label>
+          <div class="field">
+            <label>Texture Alpha</label>
+            <input id="textureAlpha" type="range" min="0" max="255" step="1" value="255" />
+            <div class="readout">
+              <span id="textureAlphaRaw"></span>
+              <span id="textureAlphaPct"></span>
+              <span id="textureAlphaNorm"></span>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label>Scale X</label>
+              <input id="texScaleX" type="number" min="0.01" max="10" step="0.01" value="1" />
+            </div>
+            <div class="field">
+              <label>Scale Y</label>
+              <input id="texScaleY" type="number" min="0.01" max="10" step="0.01" value="1" />
+            </div>
+            <div class="field">
+              <label>Offset X</label>
+              <input id="texOffsetX" type="number" min="-1" max="1" step="0.01" value="0" />
+            </div>
+            <div class="field">
+              <label>Offset Y</label>
+              <input id="texOffsetY" type="number" min="-1" max="1" step="0.01" value="0" />
+            </div>
+            <div class="field">
+              <label>Rotation</label>
+              <input id="texRotation" type="number" min="-3.1416" max="3.1416" step="0.01" value="0" />
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-block">
+          <h2>Path Tracing</h2>
+          <div class="field">
+            <label>Samples: <span id="sampleCount">0</span></label>
+          </div>
+          <div class="button-row">
+            <button id="startBtn">Start</button>
+            <button id="pauseBtn">Pause</button>
+            <button id="stopBtn" class="ghost">Stop</button>
+            <button id="resetBtn" class="ghost">Reset Samples</button>
+          </div>
+          <div class="field">
+            <label>Max Samples</label>
+            <input id="maxSamples" type="number" min="1" step="1" value="512" />
+          </div>
+          <div class="field">
+            <label>Render Scale (DPR)</label>
+            <input id="renderScale" type="range" min="0.25" max="1" step="0.01" value="1" />
+            <output id="renderScaleOut"></output>
+          </div>
+          <div class="button-row">
+            <button id="reduceScale" class="ghost">Reduce Render Scale 50%</button>
+            <button id="reduceGeometry" class="ghost">Reduce Geometry 50%</button>
+          </div>
+        </div>
+
+        <div class="panel-block">
+          <h2>Export</h2>
+          <div class="field">
+            <label>Resolution</label>
+            <select id="resolutionPreset">
+              <option value="512">512</option>
+              <option value="1024">1024</option>
+              <option value="2048" selected>2048</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label>Width</label>
+              <input id="exportWidth" type="number" min="64" step="1" value="2048" />
+            </div>
+            <div class="field">
+              <label>Height</label>
+              <input id="exportHeight" type="number" min="64" step="1" value="2048" />
+            </div>
+          </div>
+          <div class="button-row">
+            <button id="exportCurrent">Export Current</button>
+            <button id="exportHighRes" class="ghost">Export High-Res</button>
+          </div>
+          <div class="field">
+            <label class="inline">
+              <input id="autoExport" type="checkbox" />
+              Auto Export
+            </label>
+          </div>
+          <div class="field">
+            <label>Auto Export at Samples >= N</label>
+            <input id="autoExportSamples" type="number" min="1" step="1" value="512" />
+          </div>
+        </div>
+
+        <div class="panel-block">
+          <h2>Status</h2>
+          <div id="statusLog" class="status-log"></div>
+        </div>
+      </section>
+
+      <section id="dropHint" class="drop-hint hidden">Drop your model to load</section>
+    </main>
+
+    <noscript>This app requires JavaScript to run.</noscript>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

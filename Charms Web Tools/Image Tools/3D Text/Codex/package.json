@@ -1,0 +1,12 @@
+{
+  "name": "glass-path-tracer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Client-side glass path tracer (no build required).",
+  "license": "MIT",
+  "dependencies": {
+    "three": "0.183.2",
+    "three-gpu-pathtracer": "0.0.24",
+    "three-mesh-bvh": "0.9.9"
+  }
+}
