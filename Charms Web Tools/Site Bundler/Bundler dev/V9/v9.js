@@ -160,11 +160,13 @@
     const KNOWN_ASSET_EXTENSIONS = new Set([
       'html', 'htm', 'css', 'js', 'json', 'map', 'webmanifest', 'wasm',
       'mjs', 'cjs',
+      'frag', 'vert', 'glsl',
       'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp', 'avif',
       'woff', 'woff2', 'ttf', 'otf', 'eot',
       'mp4', 'webm', 'ogg', 'mp3', 'wav', 'm4a',
       'pdf', 'txt', 'csv', 'xml'
     ]);
+    const TEXT_ASSET_EXTENSIONS = new Set(['json', 'frag', 'vert', 'glsl']);
 
     // UI Elements
     const logBox = document.getElementById("logBox");
@@ -756,6 +758,7 @@
         if (asset.type === 'css') icon = '🎨';
         if (asset.type === 'js') icon = '⚡';
         if (asset.type === 'media') icon = '🖼️';
+        if (asset.type === 'text') icon = '📋';
 
         const isEntryPoint = asset.id === firstHtmlId;
         const displayName = escapeHtml(asset.name || 'untitled');
@@ -1156,6 +1159,7 @@
           if (['html', 'htm'].includes(ext)) addAsset('html', baseName, text, relativePath);
           else if (ext === 'css') addAsset('css', baseName, text, relativePath);
           else if (ext === 'js') addAsset('js', baseName, text, relativePath);
+          else if (TEXT_ASSET_EXTENSIONS.has(ext)) addAsset('text', baseName, text, relativePath);
         }
       }
     });
@@ -2323,7 +2327,8 @@
         const cssAssets = buildAssets.filter(a => a.type === 'css');
         const jsAssets = buildAssets.filter(a => a.type === 'js');
         const htmlAssets = buildAssets.filter(a => a.type === 'html');
-        const otherAssets = buildAssets.filter(a => !['css', 'js', 'html'].includes(a.type));
+        const textAssets = buildAssets.filter(a => a.type === 'text');
+        const otherAssets = buildAssets.filter(a => !['css', 'js', 'html', 'text'].includes(a.type));
 
         const getBaseUrl = () => {
           const href = window.location.href;
@@ -2407,6 +2412,13 @@
                   }
                 }
                 self.postMessage({ id, content });
+              } else if (action === 'minifyText') {
+                self.postMessage({ id, report: "Processing text: " + asset.name });
+                let content = asset.content;
+                if (/\.json$/i.test(asset.name)) {
+                  try { content = JSON.stringify(JSON.parse(content)); } catch (e) { /* keep original if invalid JSON */ }
+                }
+                self.postMessage({ id, content });
               }
             } catch (err) {
               self.postMessage({ id, error: err.message });
@@ -2421,10 +2433,12 @@
         cssAssets.forEach(asset => tasks.push({ action: 'minifyCSS', asset }));
         jsAssets.forEach(asset => tasks.push({ action: 'minifyJS', asset }));
         htmlAssets.forEach(asset => tasks.push({ action: 'minifyHTML', asset }));
+        textAssets.forEach(asset => tasks.push({ action: 'minifyText', asset }));
 
         let processedCss = [];
         let processedJs = [];
         let processedHtml = [];
+        let processedText = [];
 
         if (tasks.length > 0) {
           log("Spawning Web Workers for parallel processing...");
@@ -2446,6 +2460,7 @@
               if (action === 'minifyCSS') processedCss.push(processed);
               else if (action === 'minifyJS') processedJs.push(processed);
               else if (action === 'minifyHTML') processedHtml.push(processed);
+              else if (action === 'minifyText') processedText.push(processed);
             };
 
             const cleanup = () => {
@@ -2528,7 +2543,8 @@
         processedJs = sortById(processedJs, jsAssets);
         processedHtml = sortById(processedHtml, htmlAssets);
 
-        const processedAssets = [...processedCss, ...processedJs, ...processedHtml, ...otherAssets];
+        processedText = sortById(processedText, textAssets);
+        const processedAssets = [...processedCss, ...processedJs, ...processedHtml, ...processedText, ...otherAssets];
 
         // --- 3. ASSEMBLY PHASE ---
 
@@ -2625,6 +2641,7 @@
               const closureCss = closureAssets.filter(asset => asset.type === 'css').map(asset => (processedById.get(asset.id) || asset).content).join('\n');
               const closureJs = closureAssets.filter(asset => asset.type === 'js').map(asset => (processedById.get(asset.id) || asset).content).join('\n');
               const closureMedia = closureAssets.filter(asset => asset.type === 'media');
+              const closureText = closureAssets.filter(asset => asset.type === 'text');
 
               let pageCss = closureCss;
               let pageJs = closureJs;
@@ -2643,6 +2660,15 @@
               if (pageJs && pageHtml) {
                 const escapedPageJs = pageJs.replace(/<\/(script)/gi, '<\\/$1');
                 pageHtml = injectBeforeBodyEnd(pageHtml, `<script>\n${escapedPageJs}\n<` + `/script>`);
+              }
+              if (closureText.length > 0 && pageHtml) {
+                closureText.forEach(textAsset => {
+                  const processed = processedById.get(textAsset.id) || textAsset;
+                  const scriptType = getTextAssetScriptType(textAsset.name);
+                  const safeId = (textAsset.name || 'data').replace(/[^a-zA-Z0-9_-]/g, '-');
+                  const escapedContent = processed.content.replace(/<\/(script)/gi, '<\\/$1');
+                  pageHtml = injectBeforeBodyEnd(pageHtml, `<script type="${scriptType}" id="${safeId}">\n${escapedContent}\n<` + `/script>`);
+                });
               }
             } else if (config.mode === 'bundle') {
               const cssFilename = outNameC.value.trim() || 'styles.min.css';
@@ -2791,6 +2817,15 @@
       if (/\.css$/i.test(filename)) return 'text/css';
       if (/\.js$/i.test(filename)) return 'application/javascript';
       if (/\.json$/i.test(filename)) return 'application/json';
+      if (/\.(frag|vert|glsl)$/i.test(filename)) return 'text/plain';
+      return 'text/plain';
+    };
+
+    const getTextAssetScriptType = (filename) => {
+      if (/\.json$/i.test(filename)) return 'application/json';
+      if (/\.frag$/i.test(filename)) return 'x-shader/x-fragment';
+      if (/\.vert$/i.test(filename)) return 'x-shader/x-vertex';
+      if (/\.glsl$/i.test(filename)) return 'x-shader/x-fragment';
       return 'text/plain';
     };
 
@@ -3095,6 +3130,7 @@
         if (asset.type === 'html') visualColor = '#121212';
         else if (asset.type === 'css') visualColor = '#0055ff';
         else if (asset.type === 'js') visualColor = '#eebb00';
+        else if (asset.type === 'text') visualColor = '#44bb88';
         else if (asset.type === 'glsl') visualColor = '#9900ff';
 
         const row = document.createElement('div');
