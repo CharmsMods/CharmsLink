@@ -2907,4 +2907,437 @@
     const cores = navigator.hardwareConcurrency || 4;
     log(`System initialized. Detected <span class="text-[#58CC02] font-bold">${cores}</span> logical CPU cores available for parallel processing.`);
     renderAssetList();
-  
+
+    // =============================================
+    // IMAGE CONVERTER TAB — SELF-CONTAINED MODULE
+    // =============================================
+    (function initImageConverter() {
+      // State
+      const convFiles = [];
+      let convRunning = false;
+      let convIsFolderUpload = false;
+      let convIncludeNonImage = true;
+      let convPreserveStructure = false;
+
+      // DOM
+      const convDropZone = document.getElementById('conv-drop-zone');
+      const convHiddenInput = document.getElementById('conv-hidden-file-input');
+      const convFileList = document.getElementById('conv-file-list');
+      const convConvertBtn = document.getElementById('conv-convert-btn');
+      const convExportZipBtn = document.getElementById('conv-export-zip-btn');
+      const convFileCount = document.getElementById('conv-file-count');
+      const convMsgContainer = document.getElementById('conv-message-container');
+      const convClearBtn = document.getElementById('conv-clear-all-btn');
+      const convSelectAll = document.getElementById('conv-select-all');
+      const convGlobalFormat = document.getElementById('conv-global-format');
+      const convStatus = document.getElementById('conv-system-status');
+      const convFolderControls = document.getElementById('conv-folder-controls');
+      const convIncludeNonImageCb = document.getElementById('conv-include-non-image');
+      const convPreserveOption = document.getElementById('conv-preserve-structure-option');
+      const convPreserveCb = document.getElementById('conv-preserve-structure');
+
+      const CONV_MIMES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
+      // Populate global format dropdown
+      Object.keys(CONV_MIMES).forEach(mime => {
+        const opt = document.createElement('option');
+        opt.value = mime;
+        opt.textContent = CONV_MIMES[mime].toUpperCase();
+        convGlobalFormat.appendChild(opt);
+      });
+      convGlobalFormat.value = 'image/png';
+
+      function convSetStatus(text, type) {
+        convStatus.textContent = text;
+        convStatus.style.color = type === 'ERROR' ? 'var(--accent-color)' : 'inherit';
+      }
+
+      function convShowMsg(message, type = 'info') {
+        const box = document.createElement('div');
+        box.className = `converter-message ${type}`;
+        box.textContent = `> ${message}`;
+        if (convMsgContainer.children.length >= 3) convMsgContainer.removeChild(convMsgContainer.children[0]);
+        convMsgContainer.appendChild(box);
+      }
+
+      function convIsImage(mimeType) {
+        return mimeType && mimeType.startsWith('image/');
+      }
+
+      function convUpdateControls() {
+        const hasFiles = convFiles.length > 0;
+        const hasImages = convFiles.some(f => f.isImage);
+        const emptyState = document.getElementById('conv-empty-state');
+        if (emptyState) emptyState.style.display = hasFiles ? 'none' : 'block';
+
+        convFileCount.textContent = convFiles.length;
+
+        const hasToConvert = convFiles.some(f => f.isImage && f.shouldConvert);
+        convConvertBtn.disabled = !hasToConvert || convRunning;
+
+        const hasConvertedBlobs = convFiles.some(f => f.convertedBlob || (f.file && !f.shouldConvert));
+        convExportZipBtn.disabled = convRunning || !hasConvertedBlobs;
+
+        convClearBtn.disabled = !hasFiles;
+        convGlobalFormat.disabled = !hasImages;
+
+        // Select All state
+        const imageFiles = convFiles.filter(f => f.isImage);
+        const checkedImages = imageFiles.filter(f => f.shouldConvert);
+        if (imageFiles.length > 0) {
+          convSelectAll.disabled = false;
+          convSelectAll.checked = (checkedImages.length === imageFiles.length);
+        } else {
+          convSelectAll.disabled = true;
+          convSelectAll.checked = false;
+        }
+
+        // Folder controls
+        convFolderControls.classList.toggle('hidden', !convIsFolderUpload);
+        convPreserveOption.classList.toggle('hidden', convIncludeNonImage);
+      }
+
+      function convAddFile(file, relativePath) {
+        if (convFiles.some(f => f.relativePath === relativePath)) return;
+        const isImage = convIsImage(file.type);
+        const initialMime = isImage ? convGlobalFormat.value : 'N/A';
+        const shouldConvert = isImage ? convSelectAll.checked : false;
+
+        convFiles.push({
+          file, relativePath, isImage, shouldConvert,
+          targetMimeType: initialMime,
+          convertedBlob: null,
+          conversionStatus: shouldConvert ? 'Pending' : (isImage ? 'Skipped' : 'N/A'),
+          originalName: file.name
+        });
+
+        if (relativePath && relativePath.includes('/')) convIsFolderUpload = true;
+      }
+
+      function convProcessDir(entry) {
+        convIsFolderUpload = true;
+        return new Promise((resolve, reject) => {
+          const reader = entry.createReader();
+          function readAll() {
+            reader.readEntries(async (results) => {
+              if (!results.length) { resolve(); return; }
+              for (const item of results) {
+                if (item.isFile) {
+                  await new Promise(r => item.file(f => { convAddFile(f, item.fullPath.substring(1)); r(); }));
+                } else if (item.isDirectory) {
+                  await convProcessDir(item);
+                }
+              }
+              readAll();
+            }, reject);
+          }
+          readAll();
+        });
+      }
+
+      function convHandleItems(items) {
+        convIsFolderUpload = false;
+        const arr = Array.from(items);
+        arr.forEach(item => {
+          const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+          if (entry) {
+            if (entry.isFile) {
+              item.getAsFile(file => { if (file) { convAddFile(file, file.name); convRenderList(); } });
+            } else if (entry.isDirectory) {
+              convShowMsg(`Scanning Directory: ${entry.name}...`, 'info');
+              convProcessDir(entry).then(() => { convShowMsg('Directory Scan Complete', 'success'); convRenderList(); });
+            }
+          } else if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file) { convAddFile(file, file.webkitRelativePath || file.name); convRenderList(); }
+          }
+        });
+      }
+
+      function convRenderList() {
+        const existing = Array.from(convFileList.children).map(li => li.getAttribute('data-rp'));
+        convFileList.innerHTML = '';
+
+        convFiles.forEach((item, idx) => {
+          const li = document.createElement('li');
+          li.id = `conv-item-${idx}`;
+          li.setAttribute('data-rp', item.relativePath);
+          li.className = 'converter-file-item';
+          if (!existing.includes(item.relativePath)) li.classList.add('conv-file-list-enter');
+
+          // Path display
+          const pathDiv = document.createElement('div');
+          pathDiv.className = 'font-mono text-xs overflow-hidden whitespace-nowrap text-ellipsis pr-4';
+          pathDiv.innerHTML = `<span class="opacity-50 mr-2">${idx + 1}.</span> ${item.relativePath}`;
+
+          // Format controls
+          const ctrlDiv = document.createElement('div');
+          ctrlDiv.className = 'flex items-center justify-end gap-2';
+
+          if (item.isImage) {
+            const sel = document.createElement('select');
+            sel.id = `conv-sel-${idx}`;
+            sel.className = 'converter-format-select';
+            Object.keys(CONV_MIMES).forEach(mime => {
+              const o = document.createElement('option');
+              o.value = mime; o.textContent = CONV_MIMES[mime].toUpperCase();
+              sel.appendChild(o);
+            });
+            sel.value = item.targetMimeType;
+            sel.disabled = !item.shouldConvert;
+            sel.addEventListener('change', e => {
+              item.targetMimeType = e.target.value;
+              item.conversionStatus = 'Pending';
+              item.convertedBlob = null;
+              const st = document.getElementById(`conv-st-${idx}`);
+              if (st) st.textContent = '(Pending)';
+              convUpdateControls();
+            });
+
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'converter-checkbox';
+            cb.checked = item.shouldConvert;
+            cb.id = `conv-cb-${idx}`;
+            cb.addEventListener('change', e => {
+              item.shouldConvert = e.target.checked;
+              sel.disabled = !item.shouldConvert;
+              item.conversionStatus = item.shouldConvert ? 'Pending' : 'Skipped';
+              if (!item.shouldConvert) item.convertedBlob = null;
+              const st = document.getElementById(`conv-st-${idx}`);
+              if (st) st.textContent = `(${item.conversionStatus})`;
+              convUpdateControls();
+            });
+
+            ctrlDiv.appendChild(cb);
+            ctrlDiv.appendChild(sel);
+          } else {
+            const d = document.createElement('div');
+            d.textContent = 'NO ACTION';
+            d.className = 'text-xs font-bold uppercase tracking-wider opacity-50';
+            ctrlDiv.appendChild(d);
+          }
+
+          // Status + remove
+          const statusDiv = document.createElement('div');
+          statusDiv.className = 'flex items-center justify-end gap-2 min-w-[100px]';
+
+          const stSpan = document.createElement('span');
+          stSpan.id = `conv-st-${idx}`;
+          stSpan.className = 'text-[10px] font-mono uppercase whitespace-nowrap';
+          stSpan.textContent = `(${item.conversionStatus})`;
+          if (item.conversionStatus === 'Success') stSpan.style.color = '#58CC02';
+          if (item.conversionStatus === 'Error') stSpan.style.color = 'var(--accent-color)';
+
+          if (!convIsFolderUpload && item.conversionStatus === 'Success' && item.isImage) {
+            const dlBtn = document.createElement('button');
+            dlBtn.innerHTML = '↓';
+            dlBtn.title = 'Download';
+            dlBtn.className = 'w-6 h-6 flex items-center justify-center border-2 border-[#121212] font-bold text-xs hover:bg-[#121212] hover:text-white transition-colors';
+            dlBtn.onclick = () => {
+              if (item.convertedBlob) {
+                const url = URL.createObjectURL(item.convertedBlob);
+                const a = document.createElement('a');
+                a.href = url; a.download = item.relativePath.split('/').pop();
+                a.click(); URL.revokeObjectURL(url);
+                convShowMsg(`Downloaded: ${a.download}`, 'success');
+              }
+            };
+            statusDiv.appendChild(dlBtn);
+          }
+
+          const rmBtn = document.createElement('button');
+          rmBtn.innerHTML = '✕';
+          rmBtn.title = 'Remove';
+          rmBtn.className = 'w-6 h-6 flex items-center justify-center border-2 border-[#121212] font-bold text-xs hover:bg-[#FF3366] hover:text-white transition-colors';
+          rmBtn.onclick = () => {
+            const el = document.getElementById(`conv-item-${idx}`);
+            if (el) { el.style.transform = 'translateX(100%)'; el.style.opacity = '0'; }
+            setTimeout(() => {
+              convFiles.splice(idx, 1);
+              convIsFolderUpload = convFiles.some(f => f.relativePath.includes('/'));
+              convRenderList();
+            }, 300);
+          };
+
+          statusDiv.appendChild(stSpan);
+          statusDiv.appendChild(rmBtn);
+
+          li.appendChild(pathDiv);
+          li.appendChild(ctrlDiv);
+          li.appendChild(statusDiv);
+          convFileList.appendChild(li);
+        });
+        convUpdateControls();
+      }
+
+      function convConvertFile(file, targetMime) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = img.width; c.height = img.height;
+            c.getContext('2d').drawImage(img, 0, 0);
+            c.toBlob(blob => blob ? resolve(blob) : reject(new Error('Blob creation failed.')), targetMime, 0.92);
+          };
+          img.onerror = () => reject(new Error('Image load failed.'));
+          const r = new FileReader();
+          r.onload = e => img.src = e.target.result;
+          r.onerror = () => reject(new Error('File read failed.'));
+          r.readAsDataURL(file);
+        });
+      }
+
+      // --- Event Listeners ---
+
+      convSelectAll.addEventListener('change', e => {
+        convFiles.forEach(item => {
+          if (item.isImage) {
+            item.shouldConvert = e.target.checked;
+            item.conversionStatus = e.target.checked ? 'Pending' : 'Skipped';
+          }
+        });
+        convRenderList();
+      });
+
+      convGlobalFormat.addEventListener('change', e => {
+        convFiles.forEach(item => {
+          if (item.isImage) {
+            item.targetMimeType = e.target.value;
+            item.conversionStatus = 'Pending';
+            item.convertedBlob = null;
+          }
+        });
+        convRenderList();
+      });
+
+      convIncludeNonImageCb.addEventListener('change', e => { convIncludeNonImage = e.target.checked; convUpdateControls(); });
+      convPreserveCb.addEventListener('change', e => { convPreserveStructure = e.target.checked; });
+
+      convConvertBtn.addEventListener('click', async () => {
+        if (convRunning) return;
+        convRunning = true;
+        convSetStatus('PROCESSING...', 'BUSY');
+        convUpdateControls();
+
+        const toConvert = convFiles.filter(f => f.isImage && f.shouldConvert);
+        if (!toConvert.length) { convShowMsg('No images selected.', 'info'); convRunning = false; convUpdateControls(); return; }
+
+        convShowMsg(`Initializing conversion batch: ${toConvert.length} units.`, 'info');
+        let ok = 0, err = 0;
+
+        for (let i = 0; i < convFiles.length; i++) {
+          const item = convFiles[i];
+          const st = document.getElementById(`conv-st-${i}`);
+          if (!item.isImage || !item.shouldConvert) continue;
+
+          item.conversionStatus = 'Processing...';
+          if (st) { st.textContent = '(Busy...)'; st.style.color = 'orange'; }
+
+          try {
+            item.convertedBlob = await convConvertFile(item.file, item.targetMimeType);
+            item.relativePath = item.relativePath.replace(/\.[^/.]+$/, '') + '.' + CONV_MIMES[item.targetMimeType];
+            item.conversionStatus = 'Success';
+            ok++;
+            convRenderList();
+          } catch (e) {
+            item.conversionStatus = 'Error';
+            item.convertedBlob = null;
+            err++;
+            convShowMsg(`Conversion Fail: ${item.relativePath}`, 'error');
+          }
+        }
+        convRunning = false;
+        convSetStatus('READY', 'NORMAL');
+        convUpdateControls();
+        convShowMsg(`Batch Complete: ${ok} OK, ${err} ERR.`, 'success');
+      });
+
+      convExportZipBtn.addEventListener('click', () => {
+        const zip = new JSZip();
+        let count = 0;
+        const contentFolders = new Set();
+        const excludedFolders = new Set();
+
+        const addParents = (rp, set) => {
+          let cur = '';
+          rp.split('/').slice(0, -1).forEach(p => { cur = cur ? `${cur}/${p}` : p; set.add(cur); });
+        };
+
+        convFiles.forEach(item => {
+          let blob = item.file, include = false;
+          if (item.isImage) { blob = item.convertedBlob || item.file; include = true; }
+          else if (convIncludeNonImage) include = true;
+
+          if (include) {
+            if (item.isImage && item.shouldConvert && !item.convertedBlob) return;
+            zip.file(item.relativePath, blob);
+            count++;
+            addParents(item.relativePath, contentFolders);
+          }
+          if (!item.isImage && !include) addParents(item.relativePath, excludedFolders);
+        });
+
+        if (convIsFolderUpload && !convIncludeNonImage && convPreserveStructure) {
+          excludedFolders.forEach(f => { if (!contentFolders.has(f)) zip.folder(f); });
+        }
+
+        convSetStatus('GENERATING ZIP...', 'BUSY');
+        zip.generateAsync({ type: 'blob' }).then(content => {
+          if (content.size > 0 || count > 0) {
+            saveAs(content, convIsFolderUpload ? 'brutal_archive.zip' : 'converted_files.zip');
+            convShowMsg(`Archive Generated: ${count} files.`, 'success');
+          } else {
+            convShowMsg('Archive Empty.', 'error');
+          }
+          convSetStatus('READY', 'NORMAL');
+        }).catch(e => {
+          convShowMsg(`Zip Error: ${e.message}`, 'error');
+          convSetStatus('ERROR', 'ERROR');
+        });
+      });
+
+      convClearBtn.addEventListener('click', () => {
+        if (convRunning) { convShowMsg('System Busy. Wait for conversion.', 'error'); return; }
+        convFiles.length = 0;
+        convIsFolderUpload = false;
+        convIncludeNonImage = true;
+        convIncludeNonImageCb.checked = true;
+        convPreserveStructure = false;
+        convPreserveCb.checked = false;
+        convMsgContainer.innerHTML = '';
+
+        const items = Array.from(convFileList.children);
+        items.forEach((li, i) => {
+          setTimeout(() => { li.style.opacity = '0'; li.style.transform = 'translateX(-20px)'; }, i * 50);
+        });
+        setTimeout(() => { convRenderList(); convShowMsg('Memory Purged.', 'info'); convSetStatus('READY', 'NORMAL'); }, 300);
+      });
+
+      // Drag & Drop
+      convDropZone.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); convDropZone.classList.add('dragover'); e.dataTransfer.dropEffect = 'copy'; });
+      convDropZone.addEventListener('dragleave', e => { e.preventDefault(); e.stopPropagation(); convDropZone.classList.remove('dragover'); });
+      convDropZone.addEventListener('drop', e => {
+        e.preventDefault(); e.stopPropagation();
+        convDropZone.classList.remove('dragover');
+        if (e.dataTransfer.items.length > 0) {
+          convFiles.length = 0;
+          convFileList.innerHTML = '';
+          convHandleItems(e.dataTransfer.items);
+        }
+      });
+
+      convDropZone.addEventListener('click', () => convHiddenInput.click());
+      convHiddenInput.addEventListener('change', e => {
+        if (e.target.files.length > 0) {
+          convFiles.length = 0;
+          convFileList.innerHTML = '';
+          convIsFolderUpload = false;
+          Array.from(e.target.files).forEach(file => convAddFile(file, file.webkitRelativePath || file.name));
+          convRenderList();
+          e.target.value = '';
+        }
+      });
+
+      convUpdateControls();
+    })();

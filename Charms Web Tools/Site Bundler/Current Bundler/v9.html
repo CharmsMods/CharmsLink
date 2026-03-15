@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -11,6 +11,7 @@
   <script src="lib/terser.js"></script>
   <script src="lib/diff.js"></script>
   <script src="lib/jzip.min.js"></script>
+  <script src="lib/FileSaver.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -64,19 +65,28 @@
   <div class="flex-1 max-w-7xl mx-auto w-full p-4 md:p-6 flex flex-col gap-6">
 
     <!-- NAV TABS -->
-    <nav class="flex w-full">
-      <button
-        class="tab-btn active flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] border-l-[3px] rounded-t-md"
-        data-tab="workspace">Workspace</button>
-      <button
-        class="tab-btn flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] rounded-t-md"
-        data-tab="output">Build Output</button>
+    <nav class="flex w-full items-end">
+      <!-- Bundler group -->
+      <div class="tab-group flex">
+        <button
+          class="tab-btn active flex-1 py-4 text-sm md:text-base border-t-[3px] border-l-[3px] border-r-[3px] border-[#121212] rounded-t-md"
+          data-tab="workspace">Workspace</button>
+        <button
+          class="tab-btn flex-1 py-4 text-sm md:text-base border-t-[3px] border-r-[3px] border-[#121212] rounded-t-md"
+          data-tab="output">Build Output</button>
+      </div>
+      <!-- Separator -->
+      <div class="tab-group-separator"></div>
+      <!-- Utility tabs -->
       <button
         class="tab-btn flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] rounded-t-md"
         data-tab="extractor">Extract Output</button>
       <button
         class="tab-btn flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] rounded-t-md"
         data-tab="cleaner">Folder Cleaner</button>
+      <button
+        class="tab-btn flex-1 py-4 text-sm md:text-base border-r-[3px] border-[#121212] border-t-[3px] rounded-t-md"
+        data-tab="converter">Image Converter</button>
       <button
         class="tab-btn flex-1 py-4 text-sm md:text-base border-t-[3px] border-r-[3px] border-l-[3px] border-[#121212] rounded-t-md"
         data-tab="log">Process Logs</button>
@@ -492,6 +502,97 @@
             class="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed bg-[#F0F0EB] text-[#333]">
             <div class="text-center text-[#888] italic mt-8">Waiting for directory selection...</div>
           </div>
+        </div>
+      </section>
+
+      <!-- IMAGE CONVERTER SECTION -->
+      <section id="converter" class="tab-content hidden p-6 md:p-10 flex flex-col gap-6 bg-[#F8F8F3] overflow-y-auto" style="max-height:800px;">
+
+        <!-- Drop Zone -->
+        <input type="file" id="conv-hidden-file-input" multiple class="hidden" accept="image/jpeg,image/png,image/webp">
+        <div id="conv-drop-zone" class="converter-drop-zone">
+          <div class="pointer-events-none">
+            <p class="text-2xl md:text-4xl font-bold mb-2 uppercase tracking-tighter">Initiate Upload</p>
+            <p class="font-mono text-sm border-t-2 border-[#121212] inline-block pt-1 mt-2">
+              DRAG FILES/FOLDERS HERE OR CLICK TO BROWSE
+            </p>
+            <div class="mt-4 text-xs uppercase tracking-widest opacity-60">
+              [Supported: JPG, PNG, WEBP]
+            </div>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <button id="conv-convert-btn" class="converter-btn-secondary w-full" disabled>
+            // EXECUTE CONVERSION
+          </button>
+          <button id="conv-export-zip-btn" class="converter-btn-primary w-full" disabled>
+            // EXPORT ZIP ARCHIVE
+          </button>
+        </div>
+
+        <!-- Global Controls -->
+        <div id="conv-global-controls" class="border-[3px] border-[#121212] bg-white p-4 relative shadow-[4px_4px_0_#121212]">
+          <div class="absolute -top-3 left-4 bg-[#121212] text-white px-2 text-xs font-bold uppercase tracking-widest">
+            Global Config
+          </div>
+          <div class="flex flex-col md:flex-row justify-between items-center gap-6">
+            <div class="flex items-center space-x-4">
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="conv-select-all" class="converter-checkbox" disabled>
+                <label for="conv-select-all" class="font-bold text-sm uppercase">Select All</label>
+              </div>
+            </div>
+            <div class="flex items-center space-x-3 w-full md:w-auto">
+              <label for="conv-global-format" class="text-xs font-bold uppercase whitespace-nowrap">Target Format:</label>
+              <select id="conv-global-format" class="converter-format-select w-full md:w-auto flex-grow" disabled>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Folder Controls -->
+        <div id="conv-folder-controls" class="hidden">
+          <h3 class="text-lg font-bold uppercase mb-3 flex items-center">
+            <span class="w-2 h-2 bg-[#121212] mr-2"></span> Folder Logic
+          </h3>
+          <div class="flex flex-col space-y-3 border-l-4 border-[#121212] pl-4 ml-1">
+            <div class="flex items-center space-x-3 bg-white p-2">
+              <input type="checkbox" id="conv-include-non-image" class="converter-checkbox" checked>
+              <label for="conv-include-non-image" class="text-sm cursor-pointer">Attach non-image files (PDF, TXT, etc.) to archive?</label>
+            </div>
+            <div id="conv-preserve-structure-option" class="hidden flex items-center space-x-3 pl-4 border-l-2 border-dashed border-gray-400 py-1">
+              <input type="checkbox" id="conv-preserve-structure" class="converter-checkbox">
+              <label for="conv-preserve-structure" class="text-xs font-mono opacity-80">Retain directory tree for excluded assets?</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- File List Header -->
+        <div class="flex justify-between items-end border-b-4 border-[#121212] pb-2 mb-0">
+          <h2 class="text-2xl font-bold uppercase">Files Found: <span id="conv-file-count" class="font-mono text-[#FF3366]">0</span></h2>
+          <div class="text-xs font-bold tracking-widest uppercase opacity-70">
+            Status: <span id="conv-system-status">READY</span>
+          </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="conv-message-container"></div>
+
+        <!-- File List -->
+        <div class="border-[3px] border-[#121212] border-t-0 bg-white shadow-[4px_4px_0_#121212]">
+          <ul id="conv-file-list">
+            <li id="conv-empty-state" class="p-8 text-center font-mono text-sm opacity-50 uppercase">
+              [ No Data Loaded ]
+            </li>
+          </ul>
+        </div>
+
+        <div class="flex justify-center">
+          <button id="conv-clear-all-btn" class="converter-btn-secondary text-sm px-6 py-2" disabled>
+            PURGE ALL DATA
+          </button>
         </div>
       </section>
 
