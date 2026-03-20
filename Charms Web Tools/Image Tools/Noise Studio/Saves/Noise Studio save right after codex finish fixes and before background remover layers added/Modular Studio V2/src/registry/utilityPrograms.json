@@ -7,8 +7,6 @@
     "colorMask": "Shaders/colorMask.frag",
     "invert": "Shaders/invert.frag",
     "composite": "Shaders/composite.frag",
-    "radial": "Shaders/radial.frag",
-    "brush": "Shaders/brush.frag",
-    "alphaProtect": "Shaders/alphaProtect.frag"
+    "radial": "Shaders/radial.frag"
   }
 }

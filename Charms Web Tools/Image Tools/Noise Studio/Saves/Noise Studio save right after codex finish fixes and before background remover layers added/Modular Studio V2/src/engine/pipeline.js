@@ -79,31 +79,6 @@ function drawImageContained(ctx, image, width, height) {
     ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
 }
 
-function drawImagePlaced(ctx, image, width, height, placement) {
-    ctx.clearRect(0, 0, width, height);
-    if (!image || width <= 0 || height <= 0) return;
-    if (!placement) {
-        drawImageContained(ctx, image, width, height);
-        return;
-    }
-    ctx.drawImage(image, placement.x, placement.y, placement.w, placement.h);
-}
-
-function applyAlphaProtection(gl, runtime, inputTex, processedTex, outputFbo, mode) {
-    if (!mode) return processedTex;
-    const program = runtime.programs.alphaProtect;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
-    gl.useProgram(program);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, inputTex);
-    gl.uniform1i(gl.getUniformLocation(program, 'u_input'), 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, processedTex);
-    gl.uniform1i(gl.getUniformLocation(program, 'u_processed'), 1);
-    gl.uniform1i(gl.getUniformLocation(program, 'u_mode'), mode);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-}
-
 export class NoiseStudioEngine {
     constructor(registry, hooks = {}) {
         this.registry = registry;
@@ -117,7 +92,6 @@ export class NoiseStudioEngine {
             fbos: {},
             fboPools: {},
             layerResolutions: {},
-            layerLayouts: {},
             thumbnailFBO: null,
             analysisFBO: null,
             thumbTempCanvas: null,
@@ -142,8 +116,7 @@ export class NoiseStudioEngine {
             selectedLayerOutput: null,
             timeSeconds: 0,
             initialRes: { w: 1, h: 1 },
-            hasRenderableLayers: false,
-            sourcePlacement: { x: 0, y: 0, w: 1, h: 1 }
+            hasRenderableLayers: false
         };
     }
 
@@ -214,7 +187,6 @@ export class NoiseStudioEngine {
         this.runtime.textures.base = createTexture(gl, image);
         this.runtime.fboPools = {};
         this.runtime.layerResolutions = {};
-        this.runtime.layerLayouts = {};
         this.runtime.selectedLayerContext = null;
         this.runtime.selectedLayerOutput = null;
         this.hooks.onSourceLoaded?.({
@@ -271,73 +243,33 @@ export class NoiseStudioEngine {
         let currentHeightFloat = this.runtime.sourceHeight * baseScale;
         let currentWidth = Math.max(1, Math.round(currentWidthFloat));
         let currentHeight = Math.max(1, Math.round(currentHeightFloat));
-        let sourcePlacement = { x: 0, y: 0, w: currentWidthFloat, h: currentHeightFloat };
         this.runtime.initialRes = { w: currentWidth, h: currentHeight };
 
         const required = new Set([this.getPoolKey(currentWidth, currentHeight)]);
         this.runtime.layerResolutions = {};
-        this.runtime.layerLayouts = {};
 
         documentState.layerStack.forEach((instance) => {
             if (!instance.visible || !instance.enabled) {
                 this.runtime.layerResolutions[instance.instanceId] = { w: currentWidth, h: currentHeight };
-                this.runtime.layerLayouts[instance.instanceId] = {
-                    canvasWidth: currentWidth,
-                    canvasHeight: currentHeight,
-                    sourcePlacement: { ...sourcePlacement }
-                };
                 required.add(this.getPoolKey(currentWidth, currentHeight));
                 return;
             }
             if (instance.layerId === 'scale') {
                 const scale = Math.max(0.1, parseFloat(instance.params.scaleMultiplier || 1));
-                sourcePlacement = {
-                    x: sourcePlacement.x * scale,
-                    y: sourcePlacement.y * scale,
-                    w: sourcePlacement.w * scale,
-                    h: sourcePlacement.h * scale
-                };
                 currentWidthFloat *= scale;
                 currentHeightFloat *= scale;
                 const clamp = clampScale(currentWidthFloat, currentHeightFloat, maxDim);
-                sourcePlacement = {
-                    x: sourcePlacement.x * clamp,
-                    y: sourcePlacement.y * clamp,
-                    w: sourcePlacement.w * clamp,
-                    h: sourcePlacement.h * clamp
-                };
                 currentWidthFloat *= clamp;
                 currentHeightFloat *= clamp;
                 currentWidth = Math.max(1, Math.round(currentWidthFloat));
                 currentHeight = Math.max(1, Math.round(currentHeightFloat));
-            } else if (instance.layerId === 'expander') {
-                const requestedPadding = Math.max(0, Math.round(Number(instance.params.expanderPadding || 0)));
-                const maxPaddingX = Math.max(0, Math.floor((maxDim - currentWidthFloat) * 0.5));
-                const maxPaddingY = Math.max(0, Math.floor((maxDim - currentHeightFloat) * 0.5));
-                const appliedPadding = Math.max(0, Math.min(requestedPadding, maxPaddingX, maxPaddingY));
-                currentWidthFloat += appliedPadding * 2;
-                currentHeightFloat += appliedPadding * 2;
-                sourcePlacement = {
-                    x: sourcePlacement.x + appliedPadding,
-                    y: sourcePlacement.y + appliedPadding,
-                    w: sourcePlacement.w,
-                    h: sourcePlacement.h
-                };
-                currentWidth = Math.max(1, Math.round(currentWidthFloat));
-                currentHeight = Math.max(1, Math.round(currentHeightFloat));
             }
             this.runtime.layerResolutions[instance.instanceId] = { w: currentWidth, h: currentHeight };
-            this.runtime.layerLayouts[instance.instanceId] = {
-                canvasWidth: currentWidth,
-                canvasHeight: currentHeight,
-                sourcePlacement: { ...sourcePlacement }
-            };
             required.add(this.getPoolKey(currentWidth, currentHeight));
         });
 
         this.runtime.renderWidth = currentWidth;
         this.runtime.renderHeight = currentHeight;
-        this.runtime.sourcePlacement = { ...sourcePlacement };
 
         [...required].forEach((key) => {
             const [w, h] = key.split('x').map(Number);
@@ -440,12 +372,6 @@ export class NoiseStudioEngine {
         this.runtime.hasRenderableLayers = hasRenderableLayers(this.registry, documentState);
         this.runtime.renderWidth = this.runtime.initialRes.w;
         this.runtime.renderHeight = this.runtime.initialRes.h;
-        this.runtime.sourcePlacement = {
-            x: 0,
-            y: 0,
-            w: this.runtime.initialRes.w,
-            h: this.runtime.initialRes.h
-        };
 
         if (!this.runtime.hasRenderableLayers) {
             this.runtime.selectedLayerContext = null;
@@ -477,14 +403,6 @@ export class NoiseStudioEngine {
         }
 
         let currentTex = initialPool.pingPong0.tex;
-        let currentResolution = { w: this.runtime.initialRes.w, h: this.runtime.initialRes.h };
-        let currentPlacement = {
-            x: 0,
-            y: 0,
-            w: this.runtime.initialRes.w,
-            h: this.runtime.initialRes.h
-        };
-        let alphaHandlingMode = 0;
         this.runtime.selectedLayerContext = null;
         this.runtime.selectedLayerOutput = null;
 
@@ -493,12 +411,10 @@ export class NoiseStudioEngine {
             const layerDef = this.registry.byId[instance.layerId];
             if (!layerDef) return;
             const resolution = this.runtime.layerResolutions[instance.instanceId] || this.runtime.initialRes;
-            const outputPlacement = this.runtime.layerLayouts[instance.instanceId]?.sourcePlacement || currentPlacement;
             const pool = this.ensurePool(resolution.w, resolution.h);
             this.updateFixedPoolRefs(pool);
             this.runtime.renderWidth = resolution.w;
             this.runtime.renderHeight = resolution.h;
-            this.runtime.sourcePlacement = outputPlacement;
             gl.viewport(0, 0, resolution.w, resolution.h);
 
             if (documentState.selection.layerInstanceId === instance.instanceId) {
@@ -506,55 +422,14 @@ export class NoiseStudioEngine {
                     layerDef,
                     instance,
                     inputTex: currentTex,
-                    resolution: { ...currentResolution },
-                    inputPlacement: { ...currentPlacement },
-                    inputCanvasPlacement: {
-                        x: 0,
-                        y: 0,
-                        w: currentResolution.w,
-                        h: currentResolution.h
-                    },
+                    resolution,
                     pool
                 };
             }
 
             const outputBuffer = pool.writeIdx === 0 ? pool.pingPong1 : pool.pingPong0;
-            const inputTexture = currentTex;
-            const inputResolution = { ...currentResolution };
-            renderLayer(gl, this.runtime, layerDef, instance, currentTex, outputBuffer.fbo, documentState, {
-                inputResolution
-            });
+            renderLayer(gl, this.runtime, layerDef, instance, currentTex, outputBuffer.fbo, documentState);
             currentTex = outputBuffer.tex;
-            if (instance.enabled && layerDef.layerId === 'alpha') {
-                alphaHandlingMode = instance.params.alphaExcludeAll
-                    ? 2
-                    : instance.params.alphaExcludeTransparentOnly
-                        ? 1
-                        : 0;
-            } else if (
-                alphaHandlingMode &&
-                instance.enabled &&
-                !['scale', 'expander', 'alpha'].includes(layerDef.layerId)
-            ) {
-                applyAlphaProtection(gl, this.runtime, inputTexture, outputBuffer.tex, pool.preview.fbo, alphaHandlingMode);
-                currentTex = pool.preview.tex;
-            }
-            if (this.runtime.selectedLayerContext && instance.enabled) {
-                const selectedCanvasPlacement = this.runtime.selectedLayerContext.inputCanvasPlacement;
-                if (selectedCanvasPlacement && layerDef.layerId === 'scale') {
-                    const scaleX = resolution.w / Math.max(1, inputResolution.w || 1);
-                    const scaleY = resolution.h / Math.max(1, inputResolution.h || 1);
-                    selectedCanvasPlacement.x *= scaleX;
-                    selectedCanvasPlacement.y *= scaleY;
-                    selectedCanvasPlacement.w *= scaleX;
-                    selectedCanvasPlacement.h *= scaleY;
-                } else if (selectedCanvasPlacement && layerDef.layerId === 'expander') {
-                    selectedCanvasPlacement.x += Math.max(0, (resolution.w - inputResolution.w) * 0.5);
-                    selectedCanvasPlacement.y += Math.max(0, (resolution.h - inputResolution.h) * 0.5);
-                }
-            }
-            currentResolution = { w: resolution.w, h: resolution.h };
-            currentPlacement = { ...outputPlacement };
             pool.writeIdx = 1 - pool.writeIdx;
 
             if (documentState.selection.layerInstanceId === instance.instanceId) {
@@ -654,10 +529,10 @@ export class NoiseStudioEngine {
             canvas.width = this.refs.canvas.width;
             canvas.height = this.refs.canvas.height;
         }
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { alpha: false });
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        drawImagePlaced(ctx, this.runtime.baseImage, canvas.width, canvas.height, this.runtime.sourcePlacement);
+        drawImageContained(ctx, this.runtime.baseImage, canvas.width, canvas.height);
     }
 
     renderCaFalloff(instance, pool) {
@@ -751,10 +626,11 @@ export class NoiseStudioEngine {
         const processedCanvas = refs.processedCanvas || refs.compareProcessed;
         const infoEl = refs.infoEl || refs.compareInfo;
         if (!originalCanvas || !processedCanvas) return;
+        const aspect = this.runtime.sourceWidth / this.runtime.sourceHeight;
         originalCanvas.width = 640;
-        originalCanvas.height = Math.round(640 / (this.runtime.sourceWidth / this.runtime.sourceHeight));
+        originalCanvas.height = Math.round(640 / aspect);
         processedCanvas.width = 640;
-        processedCanvas.height = Math.round(640 / (this.runtime.renderWidth / this.runtime.renderHeight));
+        processedCanvas.height = Math.round(640 / aspect);
         originalCanvas.getContext('2d').drawImage(this.runtime.baseImage, 0, 0, originalCanvas.width, originalCanvas.height);
         processedCanvas.getContext('2d').drawImage(processedLayers ? this.getActiveDisplayCanvas() : this.runtime.baseImage, 0, 0, processedCanvas.width, processedCanvas.height);
         if (infoEl) {
@@ -767,13 +643,13 @@ export class NoiseStudioEngine {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         if (mode === 'side') {
-            canvas.width = originalCanvas.width + processedCanvas.width;
-            canvas.height = Math.max(originalCanvas.height, processedCanvas.height);
+            canvas.width = originalCanvas.width * 2;
+            canvas.height = originalCanvas.height;
             ctx.drawImage(originalCanvas, 0, 0);
             ctx.drawImage(processedCanvas, originalCanvas.width, 0);
         } else {
-            canvas.width = Math.max(originalCanvas.width, processedCanvas.width);
-            canvas.height = originalCanvas.height + processedCanvas.height;
+            canvas.width = originalCanvas.width;
+            canvas.height = originalCanvas.height * 2;
             ctx.drawImage(originalCanvas, 0, 0);
             ctx.drawImage(processedCanvas, 0, originalCanvas.height);
         }
@@ -812,7 +688,7 @@ export class NoiseStudioEngine {
         popupCanvas.getContext('2d').drawImage(sourceCanvas, 0, 0);
     }
 
-    pickPixelAtUv(u, v) {
+    pickColorAtUv(u, v) {
         const xRatio = Math.max(0, Math.min(1, u));
         const yRatio = Math.max(0, Math.min(1, v));
         if (!this.runtime.hasRenderableLayers && this.refs.sourcePreviewCanvas) {
@@ -821,308 +697,13 @@ export class NoiseStudioEngine {
             const x = Math.max(0, Math.min(canvas.width - 1, Math.floor(xRatio * canvas.width)));
             const y = Math.max(0, Math.min(canvas.height - 1, Math.floor(yRatio * canvas.height)));
             const pixel = ctx.getImageData(x, y, 1, 1).data;
-            return {
-                r: pixel[0],
-                g: pixel[1],
-                b: pixel[2],
-                a: pixel[3],
-                hex: `#${[pixel[0], pixel[1], pixel[2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`
-            };
+            return `#${[pixel[0], pixel[1], pixel[2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
         }
         const { gl } = this.runtime;
-        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         const x = Math.max(0, Math.min(this.refs.canvas.width - 1, Math.floor(xRatio * this.refs.canvas.width)));
         const y = Math.max(0, Math.min(this.refs.canvas.height - 1, Math.floor((1 - yRatio) * this.refs.canvas.height)));
         const pixel = new Uint8Array(4);
         gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-        return {
-            r: pixel[0],
-            g: pixel[1],
-            b: pixel[2],
-            a: pixel[3],
-            hex: `#${[pixel[0], pixel[1], pixel[2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`
-        };
-    }
-
-    getSelectedLayerInputMetrics(instanceId = null) {
-        const context = this.runtime.selectedLayerContext;
-        if (!context?.inputTex || !context?.resolution) return null;
-        if (instanceId && context.instance?.instanceId !== instanceId) return null;
-
-        const width = Math.max(1, context.resolution.w || 1);
-        const height = Math.max(1, context.resolution.h || 1);
-        return {
-            width,
-            height,
-            inputCanvasPlacement: { ...(context.inputCanvasPlacement || { x: 0, y: 0, w: width, h: height }) },
-            finalResolution: {
-                w: Math.max(1, this.runtime.renderWidth || this.refs.canvas?.width || width),
-                h: Math.max(1, this.runtime.renderHeight || this.refs.canvas?.height || height)
-            }
-        };
-    }
-
-    getLayerInputMetrics(documentState, instanceId) {
-        const selectedMetrics = this.getSelectedLayerInputMetrics(instanceId);
-        if (selectedMetrics) return selectedMetrics;
-
-        const context = this.getLayerInputSampleContext(documentState, instanceId);
-        if (!context?.resolution) return null;
-
-        const width = Math.max(1, context.resolution.w || 1);
-        const height = Math.max(1, context.resolution.h || 1);
-        return {
-            width,
-            height,
-            inputCanvasPlacement: { ...(context.inputCanvasPlacement || { x: 0, y: 0, w: width, h: height }) },
-            finalResolution: {
-                w: Math.max(1, context.finalResolution?.w || width),
-                h: Math.max(1, context.finalResolution?.h || height)
-            }
-        };
-    }
-
-    getLayerInputSampleContext(documentState, instanceId) {
-        if (!this.runtime.baseImage || !instanceId) return null;
-        const targetIndex = documentState?.layerStack?.findIndex((instance) => instance.instanceId === instanceId) ?? -1;
-        if (targetIndex === -1) return null;
-
-        this.reallocateBuffers(documentState, false);
-        this.runtime.hasRenderableLayers = hasRenderableLayers(this.registry, documentState);
-        if (!this.runtime.hasRenderableLayers) return null;
-
-        const finalResolution = {
-            w: Math.max(1, this.runtime.renderWidth || 1),
-            h: Math.max(1, this.runtime.renderHeight || 1)
-        };
-        const finalSourcePlacement = this.runtime.sourcePlacement ? { ...this.runtime.sourcePlacement } : null;
-        const { gl } = this.runtime;
-
-        Object.values(this.runtime.fboPools).forEach((pool) => {
-            pool.writeIdx = 0;
-        });
-
-        const initialPool = this.ensurePool(this.runtime.initialRes.w, this.runtime.initialRes.h);
-        gl.viewport(0, 0, this.runtime.initialRes.w, this.runtime.initialRes.h);
-        const baseTex = this.uploadBaseTexture(false);
-        renderPreviewTexture(gl, { ...this.runtime, currentPool: initialPool }, baseTex, initialPool.pingPong0.fbo, 0);
-
-        let currentTex = initialPool.pingPong0.tex;
-        let currentResolution = { w: this.runtime.initialRes.w, h: this.runtime.initialRes.h };
-        let targetContext = null;
-
-        for (let index = 0; index < documentState.layerStack.length; index += 1) {
-            const instance = documentState.layerStack[index];
-            if (!instance?.visible) continue;
-            const layerDef = this.registry.byId[instance.layerId];
-            if (!layerDef) continue;
-
-            if (instance.instanceId === instanceId) {
-                targetContext = {
-                    inputTex: currentTex,
-                    resolution: { ...currentResolution }
-                };
-                break;
-            }
-
-            const resolution = this.runtime.layerResolutions[instance.instanceId] || currentResolution;
-            const pool = this.ensurePool(resolution.w, resolution.h);
-            this.updateFixedPoolRefs(pool);
-            this.runtime.renderWidth = resolution.w;
-            this.runtime.renderHeight = resolution.h;
-            gl.viewport(0, 0, resolution.w, resolution.h);
-
-            const outputBuffer = pool.writeIdx === 0 ? pool.pingPong1 : pool.pingPong0;
-            renderLayer(gl, this.runtime, layerDef, instance, currentTex, outputBuffer.fbo, documentState, {
-                inputResolution: { ...currentResolution }
-            });
-            currentTex = outputBuffer.tex;
-            currentResolution = { w: resolution.w, h: resolution.h };
-            pool.writeIdx = 1 - pool.writeIdx;
-        }
-
-        if (!targetContext) {
-            this.runtime.renderWidth = finalResolution.w;
-            this.runtime.renderHeight = finalResolution.h;
-            if (finalSourcePlacement) this.runtime.sourcePlacement = finalSourcePlacement;
-            return null;
-        }
-
-        const inputCanvasPlacement = {
-            x: 0,
-            y: 0,
-            w: targetContext.resolution.w,
-            h: targetContext.resolution.h
-        };
-        let stageResolution = { ...targetContext.resolution };
-
-        for (let index = targetIndex + 1; index < documentState.layerStack.length; index += 1) {
-            const instance = documentState.layerStack[index];
-            if (!instance?.visible) continue;
-            const layerDef = this.registry.byId[instance.layerId];
-            if (!layerDef) continue;
-            const resolution = this.runtime.layerResolutions[instance.instanceId] || stageResolution;
-
-            if (instance.enabled) {
-                if (layerDef.layerId === 'scale') {
-                    const scaleX = resolution.w / Math.max(1, stageResolution.w || 1);
-                    const scaleY = resolution.h / Math.max(1, stageResolution.h || 1);
-                    inputCanvasPlacement.x *= scaleX;
-                    inputCanvasPlacement.y *= scaleY;
-                    inputCanvasPlacement.w *= scaleX;
-                    inputCanvasPlacement.h *= scaleY;
-                } else if (layerDef.layerId === 'expander') {
-                    inputCanvasPlacement.x += Math.max(0, (resolution.w - stageResolution.w) * 0.5);
-                    inputCanvasPlacement.y += Math.max(0, (resolution.h - stageResolution.h) * 0.5);
-                }
-            }
-
-            stageResolution = { w: resolution.w, h: resolution.h };
-        }
-
-        this.runtime.renderWidth = finalResolution.w;
-        this.runtime.renderHeight = finalResolution.h;
-        if (finalSourcePlacement) this.runtime.sourcePlacement = finalSourcePlacement;
-
-        return {
-            ...targetContext,
-            inputCanvasPlacement,
-            finalResolution
-        };
-    }
-
-    pickLayerInputAtUv(documentState, instanceId, u, v) {
-        const context = this.getLayerInputSampleContext(documentState, instanceId);
-        if (!context?.inputTex || !context?.resolution) return null;
-
-        const width = Math.max(1, context.resolution.w || 1);
-        const height = Math.max(1, context.resolution.h || 1);
-        const normalizedU = Math.max(0, Math.min(1, Number(u) || 0));
-        const normalizedV = Math.max(0, Math.min(1, Number(v) || 0));
-        const finalWidth = Math.max(1, context.finalResolution?.w || width);
-        const finalHeight = Math.max(1, context.finalResolution?.h || height);
-        const previewX = normalizedU * finalWidth;
-        const previewY = normalizedV * finalHeight;
-        const placement = context.inputCanvasPlacement || { x: 0, y: 0, w: width, h: height };
-
-        if (
-            placement.w <= 0
-            || placement.h <= 0
-            || previewX < placement.x
-            || previewX > placement.x + placement.w
-            || previewY < placement.y
-            || previewY > placement.y + placement.h
-        ) {
-            return null;
-        }
-
-        const localU = (previewX - placement.x) / placement.w;
-        const localV = (previewY - placement.y) / placement.h;
-        const x = Math.max(0, Math.min(width - 1, Math.floor(localU * width)));
-        const y = Math.max(0, Math.min(height - 1, Math.floor(localV * height)));
-        const pixelObj = new Float32Array(4);
-        const pool = this.ensurePool(width, height);
-        const { gl } = this.runtime;
-
-        gl.viewport(0, 0, width, height);
-        renderPreviewTexture(gl, this.runtime, context.inputTex, pool.preview.fbo, 0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, pool.preview.fbo);
-        gl.readPixels(x, Math.max(0, height - 1 - y), 1, 1, gl.RGBA, gl.FLOAT, pixelObj);
-
-        const pixel = [
-            Math.round(Math.max(0, Math.min(1, pixelObj[0])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[1])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[2])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[3])) * 255)
-        ];
-
-        return {
-            x,
-            y,
-            width,
-            height,
-            r: pixel[0],
-            g: pixel[1],
-            b: pixel[2],
-            a: pixel[3],
-            hex: `#${[pixel[0], pixel[1], pixel[2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`
-        };
-    }
-
-    pickSelectedLayerInputAtUv(instanceIdOrU, maybeU, maybeV) {
-        const context = this.runtime.selectedLayerContext;
-        if (!context?.inputTex || !context?.resolution || !context?.pool) return null;
-        let instanceId = null;
-        let u = instanceIdOrU;
-        let v = maybeU;
-
-        if (typeof instanceIdOrU === 'string') {
-            instanceId = instanceIdOrU;
-            u = maybeU;
-            v = maybeV;
-        }
-        if (instanceId && context.instance?.instanceId !== instanceId) return null;
-
-        const { gl } = this.runtime;
-        const width = Math.max(1, context.resolution.w || 1);
-        const height = Math.max(1, context.resolution.h || 1);
-        const normalizedU = Math.max(0, Math.min(1, Number(u) || 0));
-        const normalizedV = Math.max(0, Math.min(1, Number(v) || 0));
-        const inputCanvasPlacement = context.inputCanvasPlacement || {
-            x: 0,
-            y: 0,
-            w: width,
-            h: height
-        };
-        const finalWidth = Math.max(1, this.runtime.renderWidth || this.refs.canvas?.width || width);
-        const finalHeight = Math.max(1, this.runtime.renderHeight || this.refs.canvas?.height || height);
-        const previewX = normalizedU * finalWidth;
-        const previewY = normalizedV * finalHeight;
-
-        if (
-            inputCanvasPlacement.w <= 0
-            || inputCanvasPlacement.h <= 0
-            || previewX < inputCanvasPlacement.x
-            || previewX > inputCanvasPlacement.x + inputCanvasPlacement.w
-            || previewY < inputCanvasPlacement.y
-            || previewY > inputCanvasPlacement.y + inputCanvasPlacement.h
-        ) {
-            return null;
-        }
-
-        const localU = (previewX - inputCanvasPlacement.x) / inputCanvasPlacement.w;
-        const localV = (previewY - inputCanvasPlacement.y) / inputCanvasPlacement.h;
-        const x = Math.max(0, Math.min(width - 1, Math.floor(localU * width)));
-        const y = Math.max(0, Math.min(height - 1, Math.floor(localV * height)));
-        const pixelObj = new Float32Array(4);
-        const pool = this.ensurePool(width, height);
-
-        gl.viewport(0, 0, width, height);
-        renderPreviewTexture(gl, this.runtime, context.inputTex, pool.preview.fbo, 0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, pool.preview.fbo);
-        gl.readPixels(x, Math.max(0, height - 1 - y), 1, 1, gl.RGBA, gl.FLOAT, pixelObj);
-        
-        const pixel = [
-            Math.round(Math.max(0, Math.min(1, pixelObj[0])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[1])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[2])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[3])) * 255)
-        ];
-
-        return {
-            x,
-            y,
-            width,
-            height,
-            r: pixel[0],
-            g: pixel[1],
-            b: pixel[2],
-            a: pixel[3],
-            hex: `#${[pixel[0], pixel[1], pixel[2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`
-        };
-    }
-
-    pickColorAtUv(u, v) {
-        return this.pickPixelAtUv(u, v)?.hex || '#000000';
+        return `#${[pixel[0], pixel[1], pixel[2]].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
     }
 }

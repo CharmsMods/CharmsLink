@@ -41,79 +41,6 @@
       "extraPrograms": []
     },
     {
-      "layerId": "bgPatcher",
-      "label": "Background Remover & Patcher",
-      "technicalLabel": "Background Remover & Patcher",
-      "group": "base",
-      "description": "Color-key transparency removal with protected colors, contiguous masking, and square patch tools.",
-      "executor": "manual",
-      "programKey": "bgPatcher",
-      "shader": "Shaders/bgPatcher.frag",
-      "animated": false,
-      "supportsMultiInstance": true,
-      "enableKey": "bgPatcherEnable",
-      "enableDefault": true,
-      "controls": [
-        {
-          "type": "bgPatcherEditor",
-          "defaults": {
-            "bgPatcherTargetColor": "#000000",
-            "bgPatcherOpacity": 0,
-            "bgPatcherFloodFill": false,
-            "bgPatcherTolerance": 10,
-            "bgPatcherSmoothing": 10,
-            "bgPatcherEdgeShift": 0,
-            "bgPatcherDefringe": 50,
-            "bgPatcherAaEnabled": false,
-            "bgPatcherAaRadius": 0,
-            "bgPatcherShowMask": false,
-            "bgPatcherProtectedColors": [],
-            "bgPatcherPatchEnabled": false,
-            "bgPatcherPatches": [],
-            "bgPatcherSelectedPatchIndex": -1,
-            "bgPatcherSampleX": -1,
-            "bgPatcherSampleY": -1,
-            "bgPatcherCheckerEnabled": false,
-            "bgPatcherCheckerTone": "white"
-          }
-        }
-      ],
-      "mask": null,
-      "bindings": [],
-      "extraPrograms": []
-    },
-    {
-      "layerId": "expander",
-      "label": "Expander",
-      "technicalLabel": "Expander",
-      "group": "base",
-      "description": "Adds equal outfill on every side without scaling the image content.",
-      "executor": "manual",
-      "programKey": "expander",
-      "shader": "Shaders/expander.frag",
-      "animated": false,
-      "supportsMultiInstance": false,
-      "enableKey": "expanderEnable",
-      "enableDefault": true,
-      "controls": [
-        {
-          "type": "expanderEditor",
-          "defaults": {
-            "expanderPadding": 0,
-            "expanderColor": {
-              "r": 255,
-              "g": 255,
-              "b": 255,
-              "a": 255
-            }
-          }
-        }
-      ],
-      "mask": null,
-      "bindings": [],
-      "extraPrograms": []
-    },
-    {
       "layerId": "noise",
       "label": "Noise",
       "technicalLabel": "Noise",
@@ -358,7 +285,7 @@
       "label": "Alpha Handling",
       "technicalLabel": "Alpha Channel",
       "group": "base",
-      "description": "Protects transparent pixels from later edits, either for fully transparent pixels only or for all partially transparent pixels.",
+      "description": "Adjusts how source alpha is preserved or ignored during compositing.",
       "executor": "manual",
       "programKey": "alpha",
       "animated": false,
@@ -368,20 +295,18 @@
       "controls": [
         {
           "type": "checkbox",
-          "label": "Exclude Exclusive Alpha Only",
+          "label": "Ignore Alpha",
           "default": true,
-          "key": "alphaExcludeTransparentOnly"
+          "key": "ignoreAlphaToggle"
         },
         {
-          "type": "checkbox",
-          "label": "Exclude All Alpha",
-          "default": false,
-          "key": "alphaExcludeAll"
-        },
-        {
-          "type": "message",
-          "tone": "muted",
-          "text": "Transparent-only protects fully empty pixels. All Alpha protects any pixel with alpha below 1.0."
+          "type": "range",
+          "label": "Strength",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 100,
+          "key": "ignoreAlphaStrength"
         }
       ],
       "mask": null,

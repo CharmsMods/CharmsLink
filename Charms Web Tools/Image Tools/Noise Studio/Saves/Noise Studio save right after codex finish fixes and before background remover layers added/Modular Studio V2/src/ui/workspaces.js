@@ -47,57 +47,6 @@ function rgbToHex(r, g, b) {
     return `#${[r, g, b].map((value) => clamp(Math.round(value), 0, 255).toString(16).padStart(2, '0')).join('')}`;
 }
 
-function clampByte(value) {
-    return clamp(Math.round(Number(value) || 0), 0, 255);
-}
-
-function normalizeRgbaColor(color) {
-    if (!color || typeof color !== 'object') {
-        return { r: 255, g: 255, b: 255, a: 255 };
-    }
-    return {
-        r: clampByte(color.r ?? 255),
-        g: clampByte(color.g ?? 255),
-        b: clampByte(color.b ?? 255),
-        a: clampByte(color.a ?? 255)
-    };
-}
-
-function rgbaToCss(color) {
-    const normalized = normalizeRgbaColor(color);
-    return `rgba(${normalized.r}, ${normalized.g}, ${normalized.b}, ${(normalized.a / 255).toFixed(3)})`;
-}
-
-function rgbaToLabel(color) {
-    const normalized = normalizeRgbaColor(color);
-    return `RGBA ${normalized.r}, ${normalized.g}, ${normalized.b}, ${normalized.a}`;
-}
-
-function computeResolutionThroughInstance(state, stopInstanceId = null) {
-    let width = Math.max(1, Number(state.document.source.width) || 1);
-    let height = Math.max(1, Number(state.document.source.height) || 1);
-
-    for (const stackItem of state.document.layerStack) {
-        if (stackItem.visible !== false && stackItem.enabled !== false) {
-            if (stackItem.layerId === 'scale') {
-                const factor = Math.max(0.1, parseFloat(stackItem.params.scaleMultiplier || 1));
-                width = Math.max(1, Math.round(width * factor));
-                height = Math.max(1, Math.round(height * factor));
-            } else if (stackItem.layerId === 'expander') {
-                const padding = Math.max(0, Math.round(Number(stackItem.params.expanderPadding || 0)));
-                width += padding * 2;
-                height += padding * 2;
-            }
-        }
-
-        if (stopInstanceId && stackItem.instanceId === stopInstanceId) {
-            break;
-        }
-    }
-
-    return { width, height };
-}
-
 function rgbToHsv(r, g, b) {
     const red = r / 255;
     const green = g / 255;
@@ -244,170 +193,6 @@ function renderThreeWayWheel(instance, control) {
     `;
 }
 
-function renderBgPatcherEditor(instance) {
-    const params = instance.params || {};
-    const targetColor = params.bgPatcherTargetColor || '#000000';
-    const protectedColors = params.bgPatcherProtectedColors || [];
-    const patches = params.bgPatcherPatches || [];
-    const selectedPatchIndex = Number(params.bgPatcherSelectedPatchIndex ?? -1);
-    const selectedPatch = selectedPatchIndex >= 0 ? patches[selectedPatchIndex] : null;
-
-    return `
-        <div class="custom-layer-editor">
-            <div class="info-banner">Pick a background color from the preview, refine the matte, and optionally cover leftovers with square patches.</div>
-            <section class="custom-group">
-                <div class="panel-heading">Selection</div>
-                <div class="custom-picker-row">
-                    <button type="button" class="secondary-button compact-button" data-action="bg-patcher-pick-main" data-instance="${instance.instanceId}">Pick Color To Remove</button>
-                    <span class="grade-swatch large-swatch checker-swatch" style="--swatch:${targetColor}"></span>
-                    <code>${String(targetColor).toUpperCase()}</code>
-                </div>
-                ${rangeRow(instance, 'bgPatcherOpacity', 'Opacity To Transparent', 0, 100, 1, 0)}
-                <label class="check-row"><input type="checkbox" ${params.bgPatcherFloodFill ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherFloodFill"><span>Contiguous Mode (Flood Fill)</span></label>
-            </section>
-            <section class="custom-group">
-                <div class="panel-heading">Tolerance & Edges</div>
-                ${rangeRow(instance, 'bgPatcherTolerance', 'Color Tolerance', 0, 100, 1, 0)}
-                <div style="margin: 4px 16px 16px; position: relative;">
-                    <span style="display: block; font-size: 10px; color: rgba(255,255,255,0.5); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">Range of colors currently Affected</span>
-                    <canvas class="tolerance-spectrum-canvas" data-instance="${instance.instanceId}" style="width: 100%; height: 12px; border-radius: 4px; cursor: crosshair; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 0 0 1px rgba(0,0,0,0.5);"></canvas>
-                </div>
-                ${rangeRow(instance, 'bgPatcherSmoothing', 'Edge Smoothing', 0, 100, 1, 0)}
-                ${rangeRow(instance, 'bgPatcherEdgeShift', 'Edge Shift (px)', 0, 10, 0.1, 0)}
-                ${rangeRow(instance, 'bgPatcherDefringe', 'Defringe', 0, 100, 1, 0)}
-                <label class="check-row"><input type="checkbox" ${params.bgPatcherAaEnabled ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherAaEnabled"><span>Enable Anti-Aliasing</span></label>
-                ${params.bgPatcherAaEnabled ? rangeRow(instance, 'bgPatcherAaRadius', 'Spread Radius (px)', 0, 10, 0.1, 0) : ''}
-            </section>
-            <section class="custom-group">
-                <div class="panel-heading">Manual Brush Mask</div>
-                <label class="check-row"><input type="checkbox" ${params.bgPatcherBrushEnabled ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherBrushEnabled"><span>Enable Brush Tool</span></label>
-                ${params.bgPatcherBrushEnabled ? `
-                    <div class="control-row">
-                        <div class="control-row-top"><label>Brush Mode</label></div>
-                        <select class="custom-select" data-control-instance="${instance.instanceId}" data-control-key="bgPatcherBrushMode">
-                            <option value="remove" ${params.bgPatcherBrushMode !== 'keep' ? 'selected' : ''}>Remove (Transparent)</option>
-                            <option value="keep" ${params.bgPatcherBrushMode === 'keep' ? 'selected' : ''}>Keep (Opaque)</option>
-                        </select>
-                    </div>
-                    ${rangeRow(instance, 'bgPatcherBrushRadius', 'Brush Radius (px)', 1, 500, 1, 20)}
-                    ${rangeRow(instance, 'bgPatcherBrushHardness', 'Brush Hardness', 0, 100, 1, 50)}
-                    <div class="button-cluster" style="margin-top: 8px;">
-                        <button type="button" class="mini-button danger" data-action="bg-patcher-clear-brush" data-instance="${instance.instanceId}">Clear Strokes</button>
-                    </div>
-                ` : ''}
-            </section>
-            <section class="custom-group">
-                <div class="panel-heading">Protected Colors</div>
-                <div class="button-cluster">
-                    <button type="button" class="mini-button" data-action="bg-patcher-add-protected" data-instance="${instance.instanceId}" ${protectedColors.length >= 8 ? 'disabled' : ''}>+ Add Protected Color</button>
-                </div>
-                <div class="custom-stack">
-                    ${protectedColors.length ? protectedColors.map((entry, index) => `
-                        <div class="custom-list-item">
-                            <div class="custom-list-row">
-                                <div class="custom-picker-row">
-                                    <span class="grade-swatch checker-swatch" style="--swatch:${entry.color || '#808080'}"></span>
-                                    <code>${String(entry.color || '#808080').toUpperCase()}</code>
-                                </div>
-                                <div class="button-cluster">
-                                    <button type="button" class="mini-button" data-action="bg-patcher-pick-protected" data-instance="${instance.instanceId}" data-index="${index}">Pick Color</button>
-                                    <button type="button" class="mini-button danger" data-action="bg-patcher-remove-protected" data-instance="${instance.instanceId}" data-index="${index}">Delete</button>
-                                </div>
-                            </div>
-                            <div class="control-row">
-                                <div class="control-row-top"><label>Protection Radius</label><span class="control-value">${formatNumber(entry.tolerance ?? 0)}</span></div>
-                                <input type="range" min="0" max="100" step="1" value="${entry.tolerance ?? 0}" data-bg-protected-instance="${instance.instanceId}" data-bg-protected-index="${index}">
-                            </div>
-                        </div>
-                    `).join('') : '<div class="empty-inline">No protected colors.</div>'}
-                </div>
-            </section>
-            <section class="custom-group">
-                <div class="panel-heading">Patching</div>
-                <label class="check-row"><input type="checkbox" ${params.bgPatcherPatchEnabled ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherPatchEnabled"><span>Enable Patching Mode</span></label>
-                ${params.bgPatcherPatchEnabled ? `
-                    <div class="button-cluster">
-                        <button type="button" class="mini-button" data-action="bg-patcher-add-patch" data-instance="${instance.instanceId}" ${patches.length >= 32 ? 'disabled' : ''}>+ Add New Patch</button>
-                        <span class="scope-selection">Drag on preview to move. Hold Shift while dragging to resize.</span>
-                    </div>
-                    <div class="custom-stack">
-                        ${patches.length ? patches.map((patch, index) => `
-                            <button type="button" class="custom-list-item custom-list-button ${selectedPatchIndex === index ? 'is-selected' : ''}" data-action="bg-patcher-select-patch" data-instance="${instance.instanceId}" data-index="${index}">
-                                <span class="custom-picker-row"><span class="grade-swatch checker-swatch" style="--swatch:${patch.color || '#ff0000'}"></span><strong>Patch ${index + 1}</strong></span>
-                                <span class="scope-selection">${formatNumber(patch.size ?? 64)}px</span>
-                            </button>
-                        `).join('') : '<div class="empty-inline">No patches.</div>'}
-                    </div>
-                    ${selectedPatch ? `
-                        <div class="custom-list-item">
-                            <div class="panel-heading">Selected Patch</div>
-                            <div class="color-row">
-                                <input type="color" value="${selectedPatch.color || '#ff0000'}" data-bg-patch-color-instance="${instance.instanceId}" data-bg-patch-color-index="${selectedPatchIndex}">
-                                <button type="button" class="mini-button" data-action="bg-patcher-pick-patch" data-instance="${instance.instanceId}" data-index="${selectedPatchIndex}">Pick Color</button>
-                                <button type="button" class="mini-button danger" data-action="bg-patcher-delete-patch" data-instance="${instance.instanceId}" data-index="${selectedPatchIndex}">Delete Selected Patch</button>
-                            </div>
-                            <div class="control-row">
-                                <div class="control-row-top"><label>Patch Size</label><span class="control-value">${formatNumber(selectedPatch.size ?? 64)}px</span></div>
-                                <input type="range" min="10" max="2048" step="1" value="${selectedPatch.size ?? 64}" data-bg-patch-size-instance="${instance.instanceId}" data-bg-patch-size-index="${selectedPatchIndex}">
-                            </div>
-                        </div>
-                    ` : ''}
-                ` : ''}
-            </section>
-            <section class="custom-group">
-                <div class="panel-heading">View</div>
-                <label class="check-row"><input type="checkbox" ${params.bgPatcherShowMask ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherShowMask"><span>Highlight Removed Areas</span></label>
-                <label class="check-row"><input type="checkbox" ${params.bgPatcherCheckerEnabled ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherCheckerEnabled"><span>Transparency Checker</span></label>
-                ${params.bgPatcherCheckerEnabled ? `
-                    <div class="control-row">
-                        <div class="control-row-top"><label>Checker Tone</label></div>
-                        <select data-control-instance="${instance.instanceId}" data-control-key="bgPatcherCheckerTone">
-                            <option value="white" ${params.bgPatcherCheckerTone !== 'black' ? 'selected' : ''}>White</option>
-                            <option value="black" ${params.bgPatcherCheckerTone === 'black' ? 'selected' : ''}>Black</option>
-                        </select>
-                    </div>
-                ` : ''}
-                <div class="button-cluster">
-                    <button type="button" class="mini-button" data-action="bg-patcher-reset" data-instance="${instance.instanceId}">Reset Layer</button>
-                    <button type="button" class="mini-button" data-action="export-current">Export PNG</button>
-                </div>
-            </section>
-        </div>
-    `;
-}
-
-function renderExpanderEditor(instance, state) {
-    const color = normalizeRgbaColor(instance.params?.expanderColor);
-    const resolution = computeResolutionThroughInstance(state, instance.instanceId);
-
-    return `
-        <div class="custom-layer-editor">
-            <div class="info-banner">Adds equal canvas space around the image without scaling the image content. Pick a preview pixel or dial in RGBA directly.</div>
-            <section class="custom-group">
-                <div class="panel-heading">Fill Color</div>
-                <div class="custom-picker-row">
-                    <button type="button" class="secondary-button compact-button" data-action="expander-pick-color" data-instance="${instance.instanceId}">Select Color</button>
-                    <span class="grade-swatch large-swatch checker-swatch" style="--swatch:${rgbaToCss(color)}"></span>
-                    <code>${rgbaToLabel(color)}</code>
-                </div>
-                <div class="rgba-grid">
-                    ${['r', 'g', 'b', 'a'].map((channel) => `
-                        <label class="control-row compact-control">
-                            <div class="control-row-top"><span>${channel.toUpperCase()}</span></div>
-                            <input type="number" min="0" max="255" step="1" value="${color[channel]}" data-expander-instance="${instance.instanceId}" data-expander-channel="${channel}">
-                        </label>
-                    `).join('')}
-                </div>
-            </section>
-            <section class="custom-group">
-                <div class="panel-heading">Canvas Growth</div>
-                ${rangeRow(instance, 'expanderPadding', 'Padding Per Side (px)', 0, 4096, 1, 0)}
-                <div class="info-banner is-data"><span>Resulting Resolution</span><strong>${resolution.width} x ${resolution.height}</strong></div>
-            </section>
-        </div>
-    `;
-}
-
 function layerHasControlKey(layerDef, key) {
     const walk = (controls = []) => controls.some((control) => {
         if (!control || typeof control !== 'object') return false;
@@ -440,7 +225,16 @@ function renderControl(instance, control, state, layerDef) {
             return renderColorRow(instance, control);
         case 'message':
             if (control.dynamic === 'resolution') {
-                const { width, height } = computeResolutionThroughInstance(state, instance.instanceId);
+                let width = state.document.source.width || 1;
+                let height = state.document.source.height || 1;
+                for (const stackItem of state.document.layerStack) {
+                    if (stackItem.layerId === 'scale' && stackItem.enabled && stackItem.visible) {
+                        const factor = Math.max(0.1, parseFloat(stackItem.params.scaleMultiplier || 1));
+                        width = Math.round(width * factor);
+                        height = Math.round(height * factor);
+                    }
+                    if (stackItem.instanceId === instance.instanceId) break;
+                }
                 return `<div class="info-banner is-data"><span>${control.text}</span><strong>${width} x ${height}</strong></div>`;
             }
             return `<div class="info-banner ${control.tone === 'section' ? 'is-section' : ''}">${control.text || layerDef.description}</div>`;
@@ -469,10 +263,6 @@ function renderControl(instance, control, state, layerDef) {
                     </div>
                 </div>
             `;
-        case 'bgPatcherEditor':
-            return renderBgPatcherEditor(instance);
-        case 'expanderEditor':
-            return renderExpanderEditor(instance, state);
         default:
             return '';
     }
@@ -707,9 +497,8 @@ export function createWorkspaceUI(root, registry, actions) {
                     <div class="preview-shell" id="previewShell">
                         <div class="preview-empty" id="previewEmpty"><strong>No image loaded</strong><span>Load an image to start editing.</span></div>
                         <div class="preview-stage" id="previewStage">
-                            <div class="preview-scale-wrap" id="previewScaleWrap"><canvas id="sourcePreviewCanvas"></canvas><canvas id="displayCanvas"></canvas><canvas id="hoverPreviewCanvas" class="hover-preview-canvas"></canvas><div class="ca-pin-overlay" id="caPinOverlay"></div><div id="previewBrushCursor" style="display: none; position: absolute; pointer-events: none; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,0.7), inset 0 0 0 1px rgba(0,0,0,0.5); z-index: 100; transform: translate(-50%, -50%); border: 1px dashed rgba(255,255,255,0.3);"></div></div>
+                            <div class="preview-scale-wrap" id="previewScaleWrap"><canvas id="sourcePreviewCanvas"></canvas><canvas id="displayCanvas"></canvas><canvas id="hoverPreviewCanvas" class="hover-preview-canvas"></canvas><div class="ca-pin-overlay" id="caPinOverlay"></div></div>
                         </div>
-                        <div class="preview-loupe" id="previewLoupe"><canvas id="previewLoupeCanvas" width="88" height="88"></canvas></div>
                     </div>
                 </section>
             </div>
@@ -717,7 +506,6 @@ export function createWorkspaceUI(root, registry, actions) {
             <input id="stateInput" type="file" accept=".json,.mns.json" hidden>
             <input id="paletteImageInput" type="file" accept="image/*" hidden>
             <div class="dialog" id="compareDialog"><div class="dialog-panel compare-panel"><div class="dialog-header"><div><div class="eyebrow">Comparison</div><h3>Original vs Processed</h3></div><button type="button" class="icon-button" data-action="compare-close">Close</button></div><div class="dialog-body"><div class="compare-grid"><div class="scope-card"><div class="scope-card-header">Original</div><canvas id="compareOriginal" width="640" height="360"></canvas></div><div class="scope-card"><div class="scope-card-header">Processed</div><canvas id="compareProcessed" width="640" height="360"></canvas></div></div><div class="scope-meta-line" id="compareInfo">Source -- | Render --</div><div class="button-cluster"><button type="button" class="secondary-button" data-action="compare-export" data-mode="side">Export Side</button><button type="button" class="secondary-button" data-action="compare-export" data-mode="stack">Export Stack</button></div></div></div></div>
-            <div id="toleranceTooltip" style="display: none; position: fixed; pointer-events: none; z-index: 1000; background: #222; color: #fff; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px; transform: translate(-50%, -100%); margin-top: -8px;"></div>
             <div id="batchSlot"></div>
         </div>
     `;
@@ -735,7 +523,6 @@ export function createWorkspaceUI(root, registry, actions) {
         hoverPreviewCanvas: root.querySelector('#hoverPreviewCanvas'),
         previewStage: root.querySelector('#previewStage'),
         previewScaleWrap: root.querySelector('#previewScaleWrap'),
-        previewBrushCursor: root.querySelector('#previewBrushCursor'),
         previewTitle: root.querySelector('#previewTitle'),
         previewZoomRange: root.querySelector('#previewZoomRange'),
         previewZoomLabel: root.querySelector('#previewZoomLabel'),
@@ -748,137 +535,17 @@ export function createWorkspaceUI(root, registry, actions) {
         compareOriginal: root.querySelector('#compareOriginal'),
         compareProcessed: root.querySelector('#compareProcessed'),
         compareInfo: root.querySelector('#compareInfo'),
-        caPinOverlay: root.querySelector('#caPinOverlay'),
-        previewLoupe: root.querySelector('#previewLoupe'),
-        previewLoupeCanvas: root.querySelector('#previewLoupeCanvas'),
-        toleranceTooltip: root.querySelector('#toleranceTooltip')
+        caPinOverlay: root.querySelector('#caPinOverlay')
     };
     let dragSourceId = null;
     let wheelDrag = null;
     let wheelFrame = null;
     let wheelQueued = null;
-    let previewClickSuppressed = false;
-    let previewInteraction = null;
-    let brushInteraction = null;
     let latestState = null;
     let lastSourceSignature = '';
     const viewportState = {
         pointer: { x: 0.5, y: 0.5 }
     };
-    const loupeCtx = refs.previewLoupeCanvas.getContext('2d');
-
-    function getLiveState() {
-        return actions.getState?.() || latestState;
-    }
-
-    function currentSelectedInstance() {
-        const state = getLiveState();
-        return state ? selectedInstance(state) : null;
-    }
-
-    function getPreviewPixelPosition(clientX, clientY) {
-        const activeCanvas = getActivePreviewCanvas(getLiveState());
-        if (!activeCanvas?.width || !activeCanvas?.height) return null;
-        const uv = clientToImageUv(clientX, clientY, refs.previewScaleWrap.getBoundingClientRect());
-        if (!uv) return null;
-        return {
-            x: clamp(Math.floor(uv.x * activeCanvas.width), 0, Math.max(0, activeCanvas.width - 1)),
-            y: clamp(Math.floor(uv.y * activeCanvas.height), 0, Math.max(0, activeCanvas.height - 1)),
-            width: activeCanvas.width,
-            height: activeCanvas.height
-        };
-    }
-
-    function getLayerInputPixelPosition(instanceId, clientX, clientY) {
-        if (!instanceId || !actions.getLayerInputSampleAtClient) return null;
-        const sample = actions.getLayerInputSampleAtClient(instanceId, clientX, clientY);
-        if (!sample) return null;
-        return {
-            x: sample.x,
-            y: sample.y,
-            width: sample.width,
-            height: sample.height
-        };
-    }
-
-    function hitTestBgPatch(instance, pixelX, pixelY) {
-        const patches = instance?.params?.bgPatcherPatches || [];
-        for (let index = patches.length - 1; index >= 0; index -= 1) {
-            const patch = patches[index];
-            const size = Number(patch?.size ?? 0);
-            if (
-                pixelX >= Number(patch?.x ?? 0) &&
-                pixelX < Number(patch?.x ?? 0) + size &&
-                pixelY >= Number(patch?.y ?? 0) &&
-                pixelY < Number(patch?.y ?? 0) + size
-            ) {
-                return { index, patch };
-            }
-        }
-        return null;
-    }
-
-    function hideLoupe() {
-        refs.previewLoupe.style.display = 'none';
-    }
-
-    function updateLoupe(clientX, clientY) {
-        if (previewInteraction) {
-            hideLoupe();
-            return;
-        }
-        const state = getLiveState();
-        const eyedropperKind = state?.eyedropperTarget?.kind;
-        const loupeActive = eyedropperKind === 'bg-patcher-main'
-            || eyedropperKind === 'bg-patcher-protected'
-            || eyedropperKind === 'bg-patcher-patch'
-            || eyedropperKind === 'expander-color';
-        if (!state || !loupeActive || !state.document.source.width) {
-            hideLoupe();
-            return;
-        }
-        const activeCanvas = getActivePreviewCanvas(state);
-        if (!activeCanvas?.width || !activeCanvas?.height) {
-            hideLoupe();
-            return;
-        }
-        const rect = refs.previewScaleWrap.getBoundingClientRect();
-        if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
-            hideLoupe();
-            return;
-        }
-        const pixel = getPreviewPixelPosition(clientX, clientY);
-        if (!pixel) {
-            hideLoupe();
-            return;
-        }
-
-        const zoomWindow = 11;
-        const sampleWidth = Math.min(zoomWindow, activeCanvas.width);
-        const sampleHeight = Math.min(zoomWindow, activeCanvas.height);
-        const sourceX = clamp(pixel.x - Math.floor(sampleWidth / 2), 0, Math.max(0, activeCanvas.width - sampleWidth));
-        const sourceY = clamp(pixel.y - Math.floor(sampleHeight / 2), 0, Math.max(0, activeCanvas.height - sampleHeight));
-        loupeCtx.clearRect(0, 0, refs.previewLoupeCanvas.width, refs.previewLoupeCanvas.height);
-        loupeCtx.imageSmoothingEnabled = false;
-        loupeCtx.drawImage(activeCanvas, sourceX, sourceY, sampleWidth, sampleHeight, 0, 0, refs.previewLoupeCanvas.width, refs.previewLoupeCanvas.height);
-        loupeCtx.strokeStyle = '#ff00ff';
-        loupeCtx.lineWidth = 1;
-        loupeCtx.strokeRect(
-            Math.floor((refs.previewLoupeCanvas.width / sampleWidth) * (pixel.x - sourceX)),
-            Math.floor((refs.previewLoupeCanvas.height / sampleHeight) * (pixel.y - sourceY)),
-            Math.ceil(refs.previewLoupeCanvas.width / sampleWidth),
-            Math.ceil(refs.previewLoupeCanvas.height / sampleHeight)
-        );
-
-        const shellRect = refs.previewShell.getBoundingClientRect();
-        const loupeWidth = refs.previewLoupe.offsetWidth || 96;
-        const loupeHeight = refs.previewLoupe.offsetHeight || 96;
-        const left = clamp(clientX - shellRect.left + 16, 8, Math.max(8, shellRect.width - loupeWidth - 8));
-        const top = clamp(clientY - shellRect.top - (loupeHeight * 0.5), 8, Math.max(8, shellRect.height - loupeHeight - 8));
-        refs.previewLoupe.style.left = `${left}px`;
-        refs.previewLoupe.style.top = `${top}px`;
-        refs.previewLoupe.style.display = 'block';
-    }
 
     function syncDraftControl(target) {
         const row = target.closest('.control-row');
@@ -890,11 +557,11 @@ export function createWorkspaceUI(root, registry, actions) {
         if (valueEl) valueEl.textContent = formatNumber(target.value);
     }
 
-    function hasProcessedPreview(state = getLiveState()) {
+    function hasProcessedPreview(state = latestState) {
         return hasRenderableLayers(registry, state?.document);
     }
 
-    function getActivePreviewCanvas(state = getLiveState()) {
+    function getActivePreviewCanvas(state = latestState) {
         return hasProcessedPreview(state) ? refs.canvas : refs.sourcePreviewCanvas;
     }
 
@@ -956,115 +623,9 @@ export function createWorkspaceUI(root, registry, actions) {
         queueWheelUpdate(wheelDrag.instanceId, wheelDrag.key, buildWheelColor(surface, clientX, clientY));
     }
 
-    function updateBgPatchDrag(clientX, clientY) {
-        if (!previewInteraction) return;
-        const current = currentSelectedInstance();
-        if (!current || current.instanceId !== previewInteraction.instanceId) {
-            previewInteraction = null;
-            return;
-        }
-        const pixel = getLayerInputPixelPosition(previewInteraction.instanceId, clientX, clientY);
-        if (!pixel) return;
-        const patch = current.params.bgPatcherPatches?.[previewInteraction.patchIndex];
-        if (!patch) return;
-
-        if (previewInteraction.mode === 'drag') {
-            const size = Math.max(1, Number(patch.size ?? 64));
-            actions.updateBgPatcherPatch(previewInteraction.instanceId, previewInteraction.patchIndex, {
-                x: clamp(Math.round(pixel.x - previewInteraction.offsetX), 0, Math.max(0, pixel.width - size)),
-                y: clamp(Math.round(pixel.y - previewInteraction.offsetY), 0, Math.max(0, pixel.height - size))
-            }, { render: true, skipViewRender: true });
-        } else if (previewInteraction.mode === 'resize') {
-            const nextSize = clamp(
-                Math.round(Math.max(pixel.x - Number(patch.x ?? 0), pixel.y - Number(patch.y ?? 0))),
-                10,
-                Math.max(10, Math.min(pixel.width - Number(patch.x ?? 0), pixel.height - Number(patch.y ?? 0)))
-            );
-            actions.updateBgPatcherPatch(previewInteraction.instanceId, previewInteraction.patchIndex, { size: nextSize }, { render: true, skipViewRender: true });
-        }
-    }
-
-    function updateBgBrushDrag(clientX, clientY) {
-        if (!brushInteraction) return;
-        const current = currentSelectedInstance();
-        if (!current || current.instanceId !== brushInteraction.instanceId) {
-            brushInteraction = null;
-            return;
-        }
-        const pixel = getLayerInputPixelPosition(brushInteraction.instanceId, clientX, clientY);
-        if (!pixel) return;
-        
-        const pt = { x: Math.round(pixel.x), y: Math.round(pixel.y) };
-        const path = brushInteraction.path;
-        const last = path[path.length - 1];
-        if (Math.abs(pt.x - last.x) > 1 || Math.abs(pt.y - last.y) > 1) {
-            path.push(pt);
-            actions.updateControl(current.instanceId, 'bgPatcherBrushLiveStroke', brushInteraction, { render: true, skipViewRender: true });
-        }
-    }
-
-    function updateBrushCursor(clientX, clientY) {
-        if (!refs.previewBrushCursor) return;
-        const current = currentSelectedInstance();
-        if (!current || current.layerId !== 'bgPatcher' || !current.params.bgPatcherBrushEnabled) {
-            refs.previewBrushCursor.style.display = 'none';
-            return;
-        }
-        const pixel = getLayerInputPixelPosition(current.instanceId, clientX, clientY);
-        if (!pixel) {
-            refs.previewBrushCursor.style.display = 'none';
-            return;
-        }
-        const radius = Number(current.params.bgPatcherBrushRadius ?? 20);
-        const hardness = clamp(Number(current.params.bgPatcherBrushHardness ?? 50), 0, 100) / 100;
-        refs.previewBrushCursor.style.display = 'block';
-        refs.previewBrushCursor.style.width = `${radius * 2}px`;
-        refs.previewBrushCursor.style.height = `${radius * 2}px`;
-        refs.previewBrushCursor.style.left = `${pixel.x}px`;
-        refs.previewBrushCursor.style.top = `${pixel.y}px`;
-        const innerRadius = radius * hardness;
-        refs.previewBrushCursor.style.boxShadow = `0 0 0 1px rgba(255,255,255,0.7), inset 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 0 ${Math.max(0, radius - innerRadius)}px rgba(255,255,255,0.2)`;
-    }
-
-    window.addEventListener('pointermove', (event) => {
-        updateWheelFromPointer(event.clientX, event.clientY);
-        updateBgPatchDrag(event.clientX, event.clientY);
-        updateBgBrushDrag(event.clientX, event.clientY);
-    });
-    window.addEventListener('pointerup', () => {
-        wheelDrag = null;
-        previewInteraction = null;
-        if (brushInteraction) {
-            const current = currentSelectedInstance();
-            if (current && current.instanceId === brushInteraction.instanceId) {
-                const existingStrokes = current.params.bgPatcherBrushStrokes || [];
-                actions.updateInstance(brushInteraction.instanceId, (instance) => ({
-                    ...instance,
-                    params: {
-                        ...instance.params,
-                        bgPatcherBrushStrokes: [...existingStrokes, brushInteraction],
-                        bgPatcherBrushLiveStroke: null
-                    }
-                }), { render: true, skipViewRender: true });
-            }
-            brushInteraction = null;
-        }
-    });
-    window.addEventListener('pointercancel', () => {
-        wheelDrag = null;
-        previewInteraction = null;
-        brushInteraction = null;
-    });
-    window.addEventListener('keydown', (event) => {
-        if (!event.key || (event.key.toLowerCase() !== 'l' && event.code !== 'KeyL')) return;
-        const tag = document.activeElement?.tagName;
-        const type = document.activeElement?.type;
-        if (tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && (type === 'text' || type === 'number' || type === 'search' || type === 'color'))) return;
-        const state = getLiveState();
-        if (!state?.document.source.width || (state.document.view.zoom || 1) <= 1) return;
-        event.preventDefault();
-        actions.toggleZoomLock();
-    });
+    window.addEventListener('pointermove', (event) => updateWheelFromPointer(event.clientX, event.clientY));
+    window.addEventListener('pointerup', () => { wheelDrag = null; });
+    window.addEventListener('pointercancel', () => { wheelDrag = null; });
 
     const handleAction = (node) => {
         const action = node.dataset.action;
@@ -1104,69 +665,16 @@ export function createWorkspaceUI(root, registry, actions) {
             'palette-clear': actions.clearPalette,
             'palette-pick': () => actions.armEyedropper({ kind: 'palette' }),
             'palette-upload': () => refs.paletteImageInput.click(),
-            'arm-eyedropper': () => actions.armEyedropper({ kind: 'control', target: node.dataset.target }),
-            'bg-patcher-pick-main': () => actions.armEyedropper({ kind: 'bg-patcher-main', instanceId: node.dataset.instance }),
-            'bg-patcher-add-protected': () => {
-                const instance = getLiveState()?.document.layerStack.find((item) => item.instanceId === node.dataset.instance);
-                const nextIndex = instance?.params?.bgPatcherProtectedColors?.length || 0;
-                actions.addBgPatcherProtectedColor(node.dataset.instance);
-                actions.armEyedropper({ kind: 'bg-patcher-protected', instanceId: node.dataset.instance, index: nextIndex });
-            },
-            'bg-patcher-pick-protected': () => actions.armEyedropper({ kind: 'bg-patcher-protected', instanceId: node.dataset.instance, index: parseInt(node.dataset.index, 10) }),
-            'bg-patcher-remove-protected': () => actions.removeBgPatcherProtectedColor(node.dataset.instance, parseInt(node.dataset.index, 10)),
-            'bg-patcher-add-patch': () => actions.addBgPatcherPatchAtCenter(node.dataset.instance),
-            'bg-patcher-clear-brush': () => actions.updateControl(node.dataset.instance, 'bgPatcherBrushStrokes', [], { render: true }),
-            'bg-patcher-select-patch': () => actions.selectBgPatcherPatch(node.dataset.instance, parseInt(node.dataset.index, 10)),
-            'bg-patcher-pick-patch': () => actions.armEyedropper({ kind: 'bg-patcher-patch', instanceId: node.dataset.instance, index: parseInt(node.dataset.index, 10) }),
-            'bg-patcher-delete-patch': () => actions.removeBgPatcherPatch(node.dataset.instance, parseInt(node.dataset.index, 10)),
-            'bg-patcher-reset': () => actions.resetBgPatcher(node.dataset.instance),
-            'expander-pick-color': () => actions.armEyedropper({ kind: 'expander-color', instanceId: node.dataset.instance })
+            'arm-eyedropper': () => actions.armEyedropper({ kind: 'control', target: node.dataset.target })
         };
         actionMap[action]?.();
     };
 
     root.addEventListener('click', (event) => {
-        const specCanvas = event.target.closest('.tolerance-spectrum-canvas');
-        if (specCanvas && refs.toleranceTooltip) {
-            const hex = specCanvas.dataset.hoverHex;
-            if (hex) {
-                navigator.clipboard.writeText(hex);
-                refs.toleranceTooltip.textContent = 'Copied!';
-                refs.toleranceTooltip.dataset.copied = 'true';
-                setTimeout(() => { if (refs.toleranceTooltip) refs.toleranceTooltip.dataset.copied = 'false'; }, 1000);
-            }
-            return;
-        }
-
         const target = event.target.closest('[data-action]');
         if (target) return handleAction(target);
         if (event.target === refs.compareDialog) actions.closeCompare();
     });
-    root.addEventListener('pointermove', (event) => {
-        const specCanvas = event.target.closest('.tolerance-spectrum-canvas');
-        if (specCanvas && refs.toleranceTooltip) {
-            const rect = specCanvas.getBoundingClientRect();
-            const x = clamp(Math.floor(((event.clientX - rect.left) / rect.width) * specCanvas.width), 0, specCanvas.width - 1);
-            const ctx = specCanvas.getContext('2d', { willReadFrequently: true });
-            const p = ctx.getImageData(x, Math.floor(specCanvas.height / 2), 1, 1).data;
-            const hex = '#' + [p[0], p[1], p[2]].map(v => v.toString(16).padStart(2, '0')).join('');
-            
-            refs.toleranceTooltip.style.display = 'block';
-            refs.toleranceTooltip.style.left = `${event.clientX}px`;
-            refs.toleranceTooltip.style.top = `${rect.top}px`;
-            if (refs.toleranceTooltip.dataset.copied !== 'true') {
-                refs.toleranceTooltip.textContent = hex.toUpperCase();
-            }
-            specCanvas.dataset.hoverHex = hex.toUpperCase();
-        } else if (refs.toleranceTooltip) {
-            refs.toleranceTooltip.style.display = 'none';
-        }
-    });
-
-    root.addEventListener('pointerleave', () => {
-        if (refs.toleranceTooltip) refs.toleranceTooltip.style.display = 'none';
-    });
-
     root.addEventListener('pointerdown', (event) => {
         const surface = event.target.closest('.grade-wheel-surface');
         if (!surface) return;
@@ -1177,75 +685,14 @@ export function createWorkspaceUI(root, registry, actions) {
         };
         updateWheelFromPointer(event.clientX, event.clientY);
     });
-    refs.previewScaleWrap.addEventListener('pointerdown', (event) => {
-        const liveState = getLiveState();
-        if (liveState?.eyedropperTarget) {
-            previewClickSuppressed = true;
-            actions.handlePreviewClick(event);
-            event.preventDefault();
-            return;
-        }
-        const current = currentSelectedInstance();
-        if (!current || current.layerId !== 'bgPatcher') return;
-        const pixel = getLayerInputPixelPosition(current.instanceId, event.clientX, event.clientY);
-        if (!pixel) return;
-
-        if (current.params.bgPatcherPatchEnabled) {
-            const hit = hitTestBgPatch(current, pixel.x, pixel.y);
-            if (hit) {
-                previewClickSuppressed = true;
-                actions.selectBgPatcherPatch(current.instanceId, hit.index);
-                previewInteraction = {
-                    instanceId: current.instanceId,
-                    patchIndex: hit.index,
-                    mode: event.shiftKey ? 'resize' : 'drag',
-                    offsetX: pixel.x - Number(hit.patch.x ?? 0),
-                    offsetY: pixel.y - Number(hit.patch.y ?? 0)
-                };
-                hideLoupe();
-                event.preventDefault();
-                return;
-            }
-        }
-
-        if (current.params.bgPatcherBrushEnabled) {
-            previewClickSuppressed = true;
-            const path = [{ x: Math.round(pixel.x), y: Math.round(pixel.y) }];
-            brushInteraction = {
-                instanceId: current.instanceId,
-                mode: current.params.bgPatcherBrushMode === 'keep' ? 'keep' : 'remove',
-                radius: Number(current.params.bgPatcherBrushRadius ?? 20),
-                hardness: Number(current.params.bgPatcherBrushHardness ?? 50),
-                path
-            };
-            actions.updateControl(current.instanceId, 'bgPatcherBrushLiveStroke', brushInteraction, { render: true, skipViewRender: true });
-            hideLoupe();
-            event.preventDefault();
-            return;
-        }
-    });
-    refs.previewScaleWrap.addEventListener('click', (event) => {
-        if (previewClickSuppressed) {
-            previewClickSuppressed = false;
-            return;
-        }
-        actions.handlePreviewClick(event);
-    });
+    refs.previewScaleWrap.addEventListener('click', (event) => actions.handlePreviewClick(event));
     refs.previewShell.addEventListener('pointerenter', (event) => {
-        if (!getLiveState()?.document.view.zoomLocked) updateViewportPointer(event.clientX, event.clientY);
+        updateViewportPointer(event.clientX, event.clientY);
         applyPreviewScale();
-        updateLoupe(event.clientX, event.clientY);
-        updateBrushCursor(event.clientX, event.clientY);
     });
     refs.previewShell.addEventListener('pointermove', (event) => {
-        if (!getLiveState()?.document.view.zoomLocked) updateViewportPointer(event.clientX, event.clientY);
+        updateViewportPointer(event.clientX, event.clientY);
         applyPreviewScale();
-        updateLoupe(event.clientX, event.clientY);
-        updateBrushCursor(event.clientX, event.clientY);
-    });
-    refs.previewShell.addEventListener('pointerleave', () => {
-        hideLoupe();
-        if (refs.previewBrushCursor) refs.previewBrushCursor.style.display = 'none';
     });
     root.addEventListener('input', (event) => {
         const target = event.target;
@@ -1258,25 +705,7 @@ export function createWorkspaceUI(root, registry, actions) {
                     target.value,
                     { render: true, skipViewRender: target.dataset.controlKey !== 'extractCount' }
                 );
-                if (target.dataset.controlKey === 'bgPatcherTolerance') {
-                    const state = getLiveState();
-                    if (state) drawToleranceSpectrums(state);
-                }
             }
-        } else if (target.dataset.bgProtectedInstance && target.dataset.bgProtectedIndex) {
-            actions.updateBgPatcherProtectedTolerance(
-                target.dataset.bgProtectedInstance,
-                parseInt(target.dataset.bgProtectedIndex, 10),
-                target.value,
-                { render: true, skipViewRender: true }
-            );
-        } else if (target.dataset.bgPatchSizeInstance && target.dataset.bgPatchSizeIndex) {
-            actions.updateBgPatcherPatch(
-                target.dataset.bgPatchSizeInstance,
-                parseInt(target.dataset.bgPatchSizeIndex, 10),
-                { size: Math.max(10, parseInt(target.value, 10) || 10) },
-                { render: true, skipViewRender: true }
-            );
         } else if (target === refs.previewZoomRange) {
             refs.previewZoomLabel.textContent = `${Number(target.value).toFixed(2)}x`;
         }
@@ -1284,13 +713,6 @@ export function createWorkspaceUI(root, registry, actions) {
     root.addEventListener('change', (event) => {
         const target = event.target;
         if (target.dataset.controlInstance && target.dataset.controlKey) actions.updateControl(target.dataset.controlInstance, target.dataset.controlKey, target.type === 'checkbox' ? target.checked : target.value);
-        else if (target.dataset.bgPatchColorInstance && target.dataset.bgPatchColorIndex) actions.updateBgPatcherPatch(target.dataset.bgPatchColorInstance, parseInt(target.dataset.bgPatchColorIndex, 10), { color: target.value });
-        else if (target.dataset.expanderInstance && target.dataset.expanderChannel) {
-            const instance = getLiveState()?.document.layerStack.find((item) => item.instanceId === target.dataset.expanderInstance);
-            const current = normalizeRgbaColor(instance?.params?.expanderColor);
-            current[target.dataset.expanderChannel] = clampByte(target.value);
-            actions.updateControl(target.dataset.expanderInstance, 'expanderColor', current);
-        }
         else if (target.dataset.paletteIndex) actions.updatePaletteColor(parseInt(target.dataset.paletteIndex, 10), target.value);
         else if (target === refs.previewZoomRange) actions.setZoom(parseFloat(target.value));
         else if (target === refs.highQualityPreviewToggle) actions.setHighQualityPreview(target.checked);
@@ -1303,7 +725,6 @@ export function createWorkspaceUI(root, registry, actions) {
     });
     refs.previewShell.addEventListener('wheel', (event) => {
         event.preventDefault();
-        if (getLiveState()?.document.view.zoomLocked) return;
         updateViewportPointer(event.clientX, event.clientY);
         actions.setZoom(event.deltaY > 0 ? 'out' : 'in');
     }, { passive: false });
@@ -1346,20 +767,7 @@ export function createWorkspaceUI(root, registry, actions) {
         refs.noticeStrip.textContent = state.notice?.text || '';
         refs.noticeStrip.style.display = state.notice ? 'flex' : 'none';
         refs.workspaceShell.className = `workspace-shell mode-${state.document.mode} tab-${state.document.workspace.studioView}`;
-        const sidebarScrollElement = refs.sidebarPanel.querySelector('.sidebar-scroll');
-        const sidebarScrollTop = sidebarScrollElement ? sidebarScrollElement.scrollTop : refs.sidebarPanel.scrollTop;
-
         refs.sidebarPanel.innerHTML = renderSidebar(state, registry);
-
-        const newSidebarScroll = refs.sidebarPanel.querySelector('.sidebar-scroll');
-        if (newSidebarScroll) {
-            newSidebarScroll.scrollTop = sidebarScrollTop;
-        } else {
-            refs.sidebarPanel.scrollTop = sidebarScrollTop;
-        }
-
-        drawToleranceSpectrums(state);
-
         refs.batchSlot.innerHTML = renderBatchDialog(state);
         refs.compareDialog.classList.toggle('is-open', !!state.ui.compareOpen);
         refs.previewTitle.textContent = state.document.source.name || 'No source loaded';
@@ -1369,24 +777,14 @@ export function createWorkspaceUI(root, registry, actions) {
         refs.highQualityPreviewToggle.checked = !!state.document.view.highQualityPreview;
         const hoverCompareToggle = root.querySelector('#hoverCompareToggle');
         if (hoverCompareToggle) hoverCompareToggle.checked = !!state.document.view.hoverCompareEnabled;
-        const current = selectedInstance(state);
-        const suppressHoverCompare = current?.layerId === 'bgPatcher'
-            && (
-                current.params.bgPatcherPatchEnabled
-                || state.eyedropperTarget?.kind === 'bg-patcher-main'
-                || state.eyedropperTarget?.kind === 'bg-patcher-protected'
-                || state.eyedropperTarget?.kind === 'bg-patcher-patch'
-            );
         refs.previewShell.classList.toggle('is-empty', !hasSource);
         refs.previewShell.classList.toggle('has-source', hasSource);
-        refs.previewShell.classList.toggle('compare-enabled', hasSource && processedPreview && !!state.document.view.hoverCompareEnabled && !suppressHoverCompare);
+        refs.previewShell.classList.toggle('compare-enabled', hasSource && processedPreview && !!state.document.view.hoverCompareEnabled);
         refs.previewEmpty.style.display = hasSource ? 'none' : 'flex';
         refs.sourcePreviewCanvas.style.display = hasSource && !processedPreview ? 'block' : 'none';
         refs.canvas.style.display = hasSource && processedPreview ? 'block' : 'none';
         refs.hoverPreviewCanvas.style.display = hasSource && processedPreview ? 'block' : 'none';
-        refs.previewShell.classList.toggle('zoom-locked', !!state.document.view.zoomLocked);
-        refs.previewShell.classList.toggle('checker-active', !!(current?.layerId === 'bgPatcher' && current.params.bgPatcherCheckerEnabled));
-        refs.previewShell.classList.toggle('checker-dark', !!(current?.layerId === 'bgPatcher' && current.params.bgPatcherCheckerEnabled && current.params.bgPatcherCheckerTone === 'black'));
+        const current = selectedInstance(state);
         if (current?.layerId === 'ca' && current.params.caPin && hasSource) {
             refs.caPinOverlay.style.display = 'block';
             refs.caPinOverlay.style.left = `${(current.params.caCenterX ?? 0.5) * 100}%`;
@@ -1394,58 +792,8 @@ export function createWorkspaceUI(root, registry, actions) {
         } else {
             refs.caPinOverlay.style.display = 'none';
         }
-        const loupeEyedropper = state.eyedropperTarget?.kind === 'bg-patcher-main'
-            || state.eyedropperTarget?.kind === 'bg-patcher-protected'
-            || state.eyedropperTarget?.kind === 'bg-patcher-patch'
-            || state.eyedropperTarget?.kind === 'expander-color';
-        if (!hasSource || !loupeEyedropper) {
-            hideLoupe();
-        }
         applyPreviewScale();
         bindPipelineDrag();
-    }
-
-    function destroy() {
-        previewResizeObserver?.disconnect();
-        loupeTicker = null;
-    }
-    
-    function hexToRgb(hex) {
-        if (!hex) return [0, 0, 0];
-        const bigint = parseInt(hex.slice(1), 16);
-        return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255];
-    }
-
-    function drawToleranceSpectrums(state) {
-        const canvases = refs.sidebarPanel.querySelectorAll('.tolerance-spectrum-canvas');
-        canvases.forEach(canvas => {
-            const instanceId = canvas.dataset.instance;
-            const instance = state.document.layerStack.find(l => l.instanceId === instanceId);
-            if (!instance) return;
-            
-            const tol = (clamp(Number(instance.params.bgPatcherTolerance || 0), 0, 100) / 100) * 1.5;
-            const targetColorHex = instance.params.bgPatcherTargetColor || '#000000';
-            const rgb = hexToRgb(targetColorHex).map(v => v / 255);
-            
-            const ctx = canvas.getContext('2d', { willReadFrequently: true });
-            const w = canvas.clientWidth;
-            const h = canvas.clientHeight;
-            if (w === 0 || h === 0) return;
-            if (canvas.width !== w) canvas.width = w;
-            if (canvas.height !== h) canvas.height = h;
-
-            const grad = ctx.createLinearGradient(0, 0, w, 0);
-            for (let i = 0; i <= 4; i++) {
-                const mix = (i / 4.0) * 2.0 - 1.0; 
-                const variance = (tol / Math.sqrt(3)) * mix;
-                const tr = Math.round(clamp(rgb[0] + variance, 0.0, 1.0) * 255);
-                const tg = Math.round(clamp(rgb[1] + variance, 0.0, 1.0) * 255);
-                const tb = Math.round(clamp(rgb[2] + variance, 0.0, 1.0) * 255);
-                grad.addColorStop(i / 4.0, `rgb(${tr},${tg},${tb})`);
-            }
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, w, h);
-        });
     }
 
     return {

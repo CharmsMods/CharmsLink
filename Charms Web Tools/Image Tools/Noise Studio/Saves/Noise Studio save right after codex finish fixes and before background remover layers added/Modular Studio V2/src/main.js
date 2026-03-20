@@ -152,24 +152,6 @@ function coerceValue(existing, rawValue) {
     return rawValue;
 }
 
-function clampByte(value) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return 0;
-    return clamp(Math.round(numeric), 0, 255);
-}
-
-function normalizeRgbaColor(color) {
-    if (!color || typeof color !== 'object') {
-        return { r: 255, g: 255, b: 255, a: 255 };
-    }
-    return {
-        r: clampByte(color.r ?? 255),
-        g: clampByte(color.g ?? 255),
-        b: clampByte(color.b ?? 255),
-        a: clampByte(color.a ?? 255)
-    };
-}
-
 function createPaletteFromImage(image, count) {
     const canvas = document.createElement('canvas');
     const longestEdge = Math.max(image.width || 1, image.height || 1);
@@ -312,37 +294,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         store.setState((state) => ({ ...state, document: mutator(state.document) }), meta);
     }
 
-    function updateInstance(instanceId, updater, meta = { render: true }) {
-        updateDocument((document) => ({
-            ...document,
-            layerStack: document.layerStack.map((instance) => instance.instanceId === instanceId ? updater(instance, registry.byId[instance.layerId]) : instance)
-        }), meta);
-    }
-
-    function buildCanvasPixelSample(pixel, uv, canvas) {
-        if (!pixel || !uv || !canvas?.width || !canvas?.height) return null;
-        return {
-            ...pixel,
-            x: clamp(Math.floor(uv.x * canvas.width), 0, Math.max(0, canvas.width - 1)),
-            y: clamp(Math.floor(uv.y * canvas.height), 0, Math.max(0, canvas.height - 1)),
-            width: canvas.width,
-            height: canvas.height
-        };
-    }
-
-    function getLayerInputSample(instanceId, uv, previewPixel = null) {
-        if (!instanceId || !uv) return null;
-        const activeCanvas = engine.getActiveDisplayCanvas?.();
-        const sampledPreviewPixel = previewPixel || engine.pickPixelAtUv(uv.x, uv.y);
-        const fallbackSample = buildCanvasPixelSample(sampledPreviewPixel, uv, activeCanvas);
-        const layerSample = engine.pickSelectedLayerInputAtUv(instanceId, uv.x, uv.y)
-            || engine.pickLayerInputAtUv(store.getState().document, instanceId, uv.x, uv.y);
-
-        if (layerSample) return layerSample;
-        if (!engine.runtime.hasRenderableLayers) return fallbackSample;
-        return null;
-    }
-
     async function syncImageSource(file, dataUrl) {
         await engine.loadImageFromFile(file, { imageData: dataUrl });
         updateDocument((document) => ({
@@ -385,9 +336,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     const actions = {
-        getState() {
-            return store.getState();
-        },
         setMode(mode) {
             updateDocument((document) => ({
                 ...document,
@@ -521,144 +469,6 @@ window.addEventListener('DOMContentLoaded', async () => {
                 layerStack: document.layerStack.map((instance) => instance.instanceId === instanceId ? { ...instance, params: { ...instance.params, caCenterX: 0.5, caCenterY: 0.5 } } : instance)
             }));
         },
-        setZoomLock(enabled) {
-            updateDocument((document) => ({
-                ...document,
-                view: {
-                    ...document.view,
-                    zoomLocked: !!enabled
-                }
-            }), { render: false });
-        },
-        toggleZoomLock() {
-            updateDocument((document) => ({
-                ...document,
-                view: {
-                    ...document.view,
-                    zoomLocked: !document.view.zoomLocked
-                }
-            }), { render: false });
-        },
-        addBgPatcherProtectedColor(instanceId) {
-            updateInstance(instanceId, (instance) => {
-                const current = Array.isArray(instance.params.bgPatcherProtectedColors) ? instance.params.bgPatcherProtectedColors : [];
-                if (current.length >= 8) return instance;
-                return {
-                    ...instance,
-                    params: {
-                        ...instance.params,
-                        bgPatcherProtectedColors: [...current, { color: '#808080', tolerance: 15 }]
-                    }
-                };
-            });
-        },
-        removeBgPatcherProtectedColor(instanceId, index) {
-            updateInstance(instanceId, (instance) => ({
-                ...instance,
-                params: {
-                    ...instance.params,
-                    bgPatcherProtectedColors: (instance.params.bgPatcherProtectedColors || []).filter((_, itemIndex) => itemIndex !== index)
-                }
-            }));
-        },
-        updateBgPatcherProtectedTolerance(instanceId, index, value, meta = { render: true }) {
-            updateInstance(instanceId, (instance) => ({
-                ...instance,
-                params: {
-                    ...instance.params,
-                    bgPatcherProtectedColors: (instance.params.bgPatcherProtectedColors || []).map((entry, itemIndex) => itemIndex === index
-                        ? { ...entry, tolerance: clamp(Number(value) || 0, 0, 100) }
-                        : entry)
-                }
-            }), meta);
-        },
-        getLayerInputSampleAtClient(instanceId, clientX, clientY) {
-            if (!view) return null;
-            const uv = view.clientToImageUv(clientX, clientY);
-            if (!uv) return null;
-            return getLayerInputSample(instanceId, uv);
-        },
-        addBgPatcherPatchAtCenter(instanceId) {
-            const state = store.getState();
-            const metrics = engine.getLayerInputMetrics(state.document, instanceId);
-            const width = Math.max(1, metrics?.width || state.document.source.width || 256);
-            const height = Math.max(1, metrics?.height || state.document.source.height || 256);
-            const size = Math.max(10, Math.min(128, Math.round(Math.min(width, height) * 0.18)));
-            actions.addBgPatcherPatch(instanceId, {
-                x: Math.round((width - size) * 0.5),
-                y: Math.round((height - size) * 0.5),
-                size,
-                color: '#ff0000'
-            });
-        },
-        selectBgPatcherPatch(instanceId, index) {
-            updateInstance(instanceId, (instance) => ({
-                ...instance,
-                params: {
-                    ...instance.params,
-                    bgPatcherSelectedPatchIndex: index
-                }
-            }), { render: false });
-        },
-        addBgPatcherPatch(instanceId, patch) {
-            updateInstance(instanceId, (instance) => {
-                const current = Array.isArray(instance.params.bgPatcherPatches) ? instance.params.bgPatcherPatches : [];
-                if (current.length >= 32) return instance;
-                const nextPatch = {
-                    x: Math.max(0, Math.round(Number(patch?.x ?? 0))),
-                    y: Math.max(0, Math.round(Number(patch?.y ?? 0))),
-                    size: Math.max(1, Math.round(Number(patch?.size ?? 64))),
-                    color: patch?.color || '#ff0000'
-                };
-                return {
-                    ...instance,
-                    params: {
-                        ...instance.params,
-                        bgPatcherPatchEnabled: true,
-                        bgPatcherPatches: [...current, nextPatch],
-                        bgPatcherSelectedPatchIndex: current.length
-                    }
-                };
-            });
-        },
-        updateBgPatcherPatch(instanceId, index, patch, meta = { render: true }) {
-            updateInstance(instanceId, (instance) => ({
-                ...instance,
-                params: {
-                    ...instance.params,
-                    bgPatcherPatches: (instance.params.bgPatcherPatches || []).map((entry, itemIndex) => itemIndex === index
-                        ? { ...entry, ...patch }
-                        : entry)
-                }
-            }), meta);
-        },
-        removeBgPatcherPatch(instanceId, index) {
-            updateInstance(instanceId, (instance) => {
-                const nextPatches = (instance.params.bgPatcherPatches || []).filter((_, itemIndex) => itemIndex !== index);
-                const currentSelected = Number(instance.params.bgPatcherSelectedPatchIndex ?? -1);
-                let nextSelected = -1;
-                if (nextPatches.length) {
-                    if (currentSelected === index) nextSelected = Math.min(index, nextPatches.length - 1);
-                    else if (currentSelected > index) nextSelected = currentSelected - 1;
-                    else nextSelected = clamp(currentSelected, 0, nextPatches.length - 1);
-                }
-                return {
-                    ...instance,
-                    params: {
-                        ...instance.params,
-                        bgPatcherPatches: nextPatches,
-                        bgPatcherSelectedPatchIndex: nextSelected
-                    }
-                };
-            });
-        },
-        resetBgPatcher(instanceId) {
-            updateInstance(instanceId, (instance, layer) => ({
-                ...instance,
-                enabled: layer?.enableDefault !== false,
-                params: structuredClone(layer?.defaults || instance.params)
-            }));
-        },
         updateControl(instanceId, key, rawValue, meta) {
             updateDocument((document) => ({
                 ...document,
@@ -667,15 +477,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                     const current = instance.params[key];
                     const layer = registry.byId[instance.layerId];
                     const nextValue = coerceValue(current, rawValue);
-                    const nextParams = { ...instance.params, [key]: nextValue };
-                    if (instance.layerId === 'alpha') {
-                        if (key === 'alphaExcludeAll' && nextValue) nextParams.alphaExcludeTransparentOnly = false;
-                        if (key === 'alphaExcludeTransparentOnly' && nextValue) nextParams.alphaExcludeAll = false;
-                    }
                     return {
                         ...instance,
                         enabled: layer?.enableKey === key ? !!nextValue : instance.enabled,
-                        params: nextParams
+                        params: { ...instance.params, [key]: nextValue }
                     };
                 }),
                 palette: key === 'extractCount' && paletteExtractionImage && paletteExtractionOwner === instanceId
@@ -686,14 +491,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         setZoom(mode) {
             updateDocument((document) => {
                 const current = document.view.zoom;
-                let next;
-                if (typeof mode === 'number') {
-                    next = mode;
-                } else if (mode === 'fit') {
-                    next = 1;
-                } else {
-                    next = mode === 'in' ? current * 1.1 : current / 1.1;
-                }
+                const next = typeof mode === 'number' ? mode : mode === 'fit' ? 1 : current + (mode === 'in' ? 0.1 : -0.1);
                 return { ...document, view: { ...document.view, zoom: clamp(next, 1, MAX_PREVIEW_ZOOM) } };
             }, { render: false });
         },
@@ -718,7 +516,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         clearPalette() {
             updateDocument((document) => ({ ...document, palette: [] }));
         },
-        updateInstance,
         armEyedropper(target) {
             store.setState((state) => ({ ...state, eyedropperTarget: target, notice: { text: 'Click the preview to sample a color.', type: 'info' } }), { render: false });
         },
@@ -985,57 +782,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             const uv = view.clientToImageUv(event.clientX, event.clientY);
             if (!uv) return;
             if (state.eyedropperTarget) {
-                const previewPixel = engine.pickPixelAtUv(uv.x, uv.y);
-                const needsLayerInputPick = (
-                    state.eyedropperTarget.kind === 'bg-patcher-main'
-                    || state.eyedropperTarget.kind === 'bg-patcher-protected'
-                    || state.eyedropperTarget.kind === 'bg-patcher-patch'
-                );
-                const layerInputPixel = needsLayerInputPick
-                    ? getLayerInputSample(state.eyedropperTarget.instanceId, uv, previewPixel)
-                    : null;
-                if (needsLayerInputPick && !layerInputPixel) {
-                    setNotice('Click inside the background remover image area to sample this layer.', 'warning', 3200);
-                    return;
-                }
-                const pixel = layerInputPixel || previewPixel;
+                const hex = engine.pickColorAtUv(uv.x, uv.y);
                 if (state.eyedropperTarget.kind === 'palette') {
-                    updateDocument((document) => ({ ...document, palette: [...document.palette, pixel.hex] }));
+                    updateDocument((document) => ({ ...document, palette: [...document.palette, hex] }));
                 } else if (state.eyedropperTarget.kind === 'control') {
                     const [instanceId, key] = state.eyedropperTarget.target.split(':');
-                    actions.updateControl(instanceId, key, pixel.hex);
-                } else if (state.eyedropperTarget.kind === 'bg-patcher-main') {
-                    updateInstance(state.eyedropperTarget.instanceId, (instance) => ({
-                        ...instance,
-                        params: {
-                            ...instance.params,
-                            bgPatcherTargetColor: pixel.hex,
-                            bgPatcherSampleX: layerInputPixel?.x ?? -1,
-                            bgPatcherSampleY: layerInputPixel?.y ?? -1
-                        }
-                    }));
-                } else if (state.eyedropperTarget.kind === 'bg-patcher-protected') {
-                    updateInstance(state.eyedropperTarget.instanceId, (instance) => ({
-                        ...instance,
-                        params: {
-                            ...instance.params,
-                            bgPatcherProtectedColors: (instance.params.bgPatcherProtectedColors || []).map((entry, index) => index === state.eyedropperTarget.index
-                                ? { ...entry, color: pixel.hex }
-                                : entry)
-                        }
-                    }));
-                } else if (state.eyedropperTarget.kind === 'bg-patcher-patch') {
-                    updateInstance(state.eyedropperTarget.instanceId, (instance) => ({
-                        ...instance,
-                        params: {
-                            ...instance.params,
-                            bgPatcherPatches: (instance.params.bgPatcherPatches || []).map((entry, index) => index === state.eyedropperTarget.index
-                                ? { ...entry, color: pixel.hex }
-                                : entry)
-                        }
-                    }));
-                } else if (state.eyedropperTarget.kind === 'expander-color') {
-                    actions.updateControl(state.eyedropperTarget.instanceId, 'expanderColor', normalizeRgbaColor(pixel));
+                    actions.updateControl(instanceId, key, hex);
                 }
                 store.setState((current) => ({ ...current, eyedropperTarget: null, notice: null }), { render: false });
                 return;
