@@ -797,6 +797,43 @@ function renderBgPatcher(gl, runtime, inputTex, outputFbo, instance, options = {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
+function renderTiltShiftBlur(gl, runtime, inputTex, outputFbo, instance, options = {}) {
+    const inputResolution = options.inputResolution || { w: runtime.renderWidth, h: runtime.renderHeight };
+    const params = instance.params || {};
+    const blurAmt = parseFloat(params.tiltShiftAmount ?? 10) / 100.0;
+    
+    if (blurAmt <= 0) {
+        bindCopy(gl, runtime, inputTex, outputFbo, 0);
+        return;
+    }
+
+    const program = runtime.programs.tiltShiftBlur;
+    gl.useProgram(program);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, runtime.fbos.blur2);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, inputTex);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_tex'), 0);
+    
+    gl.uniform1i(gl.getUniformLocation(program, 'u_blurType'), parseInt(params.tiltShiftType || 0, 10));
+    gl.uniform2f(gl.getUniformLocation(program, 'u_center'), parseFloat(params.tiltShiftCenterX ?? 0.5), parseFloat(params.tiltShiftCenterY ?? 0.5));
+    gl.uniform1f(gl.getUniformLocation(program, 'u_focusRadius'), parseFloat(params.tiltShiftRadius ?? 30) / 100.0);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_transition'), parseFloat(params.tiltShiftTransition ?? 30) / 100.0);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_aspect'), inputResolution.w / inputResolution.h);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_rad'), blurAmt * 2.0);
+
+    // Pass 1: Horizontal Blur
+    gl.uniform2f(gl.getUniformLocation(program, 'u_dir'), 1.0 / inputResolution.w, 0.0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    // Pass 2: Vertical Blur
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, runtime.textures.blur2);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_tex'), 0);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_dir'), 0.0, 1.0 / inputResolution.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
 function isEnabled(instance, layerDef) {
     return layerDef.enableKey ? instance.enabled : true;
 }
@@ -847,6 +884,9 @@ export function renderLayer(gl, runtime, layerDef, instance, inputTex, outputFbo
             break;
         case 'expander':
             renderExpander(gl, runtime, inputTex, outputFbo, instance, options);
+            break;
+        case 'tiltShiftBlur':
+            renderTiltShiftBlur(gl, runtime, inputTex, outputFbo, instance, options);
             break;
         default:
             bindCopy(gl, runtime, inputTex, outputFbo, 0);

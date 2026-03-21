@@ -716,7 +716,7 @@ export function createWorkspaceUI(root, registry, actions) {
                     <div class="preview-shell" id="previewShell">
                         <div class="preview-empty" id="previewEmpty"><strong>No image loaded</strong><span>Load an image to start editing.</span></div>
                         <div class="preview-stage" id="previewStage">
-                            <div class="preview-scale-wrap" id="previewScaleWrap"><canvas id="sourcePreviewCanvas"></canvas><canvas id="displayCanvas"></canvas><canvas id="hoverPreviewCanvas" class="hover-preview-canvas"></canvas><div class="ca-pin-overlay" id="caPinOverlay"></div><div id="previewBrushCursor" style="display: none; position: absolute; pointer-events: none; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,0.7), inset 0 0 0 1px rgba(0,0,0,0.5); z-index: 100; transform: translate(-50%, -50%); border: 1px dashed rgba(255,255,255,0.3);"></div></div>
+                            <div class="preview-scale-wrap" id="previewScaleWrap"><canvas id="sourcePreviewCanvas"></canvas><canvas id="displayCanvas"></canvas><canvas id="hoverPreviewCanvas" class="hover-preview-canvas"></canvas><div class="ca-pin-overlay" id="caPinOverlay"></div><div class="ca-pin-overlay" id="tiltShiftPinOverlay" style="border-radius: 50%; box-shadow: 0 0 0 1px #fff, inset 0 0 0 1px rgba(0,0,0,0.5);"></div><div id="previewBrushCursor" style="display: none; position: absolute; pointer-events: none; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,0.7), inset 0 0 0 1px rgba(0,0,0,0.5); z-index: 100; transform: translate(-50%, -50%); border: 1px dashed rgba(255,255,255,0.3);"></div></div>
                         </div>
                         <div class="preview-loupe" id="previewLoupe"><canvas id="previewLoupeCanvas" width="88" height="88"></canvas></div>
                     </div>
@@ -758,6 +758,7 @@ export function createWorkspaceUI(root, registry, actions) {
         compareProcessed: root.querySelector('#compareProcessed'),
         compareInfo: root.querySelector('#compareInfo'),
         caPinOverlay: root.querySelector('#caPinOverlay'),
+        tiltShiftPinOverlay: root.querySelector('#tiltShiftPinOverlay'),
         previewLoupe: root.querySelector('#previewLoupe'),
         previewLoupeCanvas: root.querySelector('#previewLoupeCanvas'),
         toleranceTooltip: root.querySelector('#toleranceTooltip')
@@ -1083,6 +1084,10 @@ export function createWorkspaceUI(root, registry, actions) {
             'open-state': () => refs.stateInput.click(),
             'set-studio-view': () => actions.setStudioView(node.dataset.view),
             'add-layer': () => actions.addLayer(node.dataset.layer),
+            'tilt-shift-pick-focus': () => {
+                const instance = getLiveState()?.document.layerStack.find((item) => item.instanceId === node.dataset.instance);
+                actions.updateControl(node.dataset.instance, 'tiltShiftPin', !instance?.params?.tiltShiftPin, { render: true });
+            },
             'select-layer-family': () => actions.selectLayerFamily(node.dataset.layer),
             'select-instance': () => actions.selectInstance(node.dataset.instance),
             'duplicate-layer': () => actions.duplicateLayer(node.dataset.instance),
@@ -1404,6 +1409,13 @@ export function createWorkspaceUI(root, registry, actions) {
             refs.caPinOverlay.style.top = `${(1 - (current.params.caCenterY ?? 0.5)) * 100}%`;
         } else {
             refs.caPinOverlay.style.display = 'none';
+        }
+        if (current?.layerId === 'tiltShiftBlur' && current.params.tiltShiftPin && hasSource) {
+            refs.tiltShiftPinOverlay.style.display = 'block';
+            refs.tiltShiftPinOverlay.style.left = `${(current.params.tiltShiftCenterX ?? 0.5) * 100}%`;
+            refs.tiltShiftPinOverlay.style.top = `${(1 - (current.params.tiltShiftCenterY ?? 0.5)) * 100}%`;
+        } else {
+            refs.tiltShiftPinOverlay.style.display = 'none';
         }
         const loupeEyedropper = state.eyedropperTarget?.kind === 'bg-patcher-main'
             || state.eyedropperTarget?.kind === 'bg-patcher-protected'

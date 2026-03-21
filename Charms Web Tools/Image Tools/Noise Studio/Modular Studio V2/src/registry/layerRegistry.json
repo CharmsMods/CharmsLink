@@ -904,6 +904,73 @@
       "extraPrograms": []
     },
     {
+      "layerId": "tiltShiftBlur",
+      "label": "Tilt-Shift Blur",
+      "technicalLabel": "Tilt-Shift Blur",
+      "group": "texture",
+      "description": "Adjustable focal point Depth-of-Field blur with variable radius scaling.",
+      "executor": "manual",
+      "programKey": "tiltShiftBlur",
+      "shader": "Shaders/tiltShiftBlur.frag",
+      "animated": false,
+      "enableKey": "tiltShiftEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable Tilt-Shift Blur",
+          "default": true,
+          "key": "tiltShiftEnable"
+        },
+        {
+          "type": "button",
+          "action": "tilt-shift-pick-focus",
+          "label": "Edit Focus Point"
+        },
+        {
+          "type": "select",
+          "label": "Blur Filter Type",
+          "default": "0",
+          "key": "tiltShiftType",
+          "options": [
+            { "value": "0", "label": "Gaussian" },
+            { "value": "1", "label": "Box" },
+            { "value": "2", "label": "Motion" }
+          ]
+        },
+        {
+          "type": "range",
+          "label": "Blur Strength",
+          "default": 10,
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "key": "tiltShiftAmount"
+        },
+        {
+          "type": "range",
+          "label": "Focus Radius",
+          "default": 30,
+          "min": 0,
+          "max": 150,
+          "step": 1,
+          "key": "tiltShiftRadius"
+        },
+        {
+          "type": "range",
+          "label": "Focus Falloff Transition",
+          "default": 30,
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "key": "tiltShiftTransition"
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
       "layerId": "blur",
       "label": "Blur",
       "technicalLabel": "Blur",

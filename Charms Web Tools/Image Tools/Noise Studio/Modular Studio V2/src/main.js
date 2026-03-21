@@ -1058,6 +1058,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ...document,
                     layerStack: document.layerStack.map((instance) => instance.instanceId === current.instanceId ? { ...instance, params: { ...instance.params, caCenterX: x, caCenterY: y } } : instance)
                 }));
+            } else if (current?.layerId === 'tiltShiftBlur' && current.params.tiltShiftPin) {
+                const x = clamp(uv.x, 0, 1);
+                const y = clamp(1 - uv.y, 0, 1);
+                updateDocument((document) => ({
+                    ...document,
+                    layerStack: document.layerStack.map((instance) => instance.instanceId === current.instanceId ? { ...instance, params: { ...instance.params, tiltShiftCenterX: x, tiltShiftCenterY: y } } : instance)
+                }));
             }
         }
     };
