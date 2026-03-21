@@ -262,6 +262,15 @@ function renderBgPatcherEditor(instance) {
                     <span class="grade-swatch large-swatch checker-swatch" style="--swatch:${targetColor}"></span>
                     <code>${String(targetColor).toUpperCase()}</code>
                 </div>
+                ${(params.bgPatcherSamples || []).length > 0 ? `
+                    <div class="info-banner" style="margin: 0px 16px;">${params.bgPatcherSamples.length} Additional Flood Origin(s)</div>
+                ` : ''}
+                <div class="button-cluster" style="margin: 8px 16px;">
+                    <button type="button" class="secondary-button compact-button" data-action="bg-patcher-add-sample" data-instance="${instance.instanceId}">+ Add Pin</button>
+                    ${(params.bgPatcherSamples || []).length > 0 ? `
+                        <button type="button" class="secondary-button danger" data-action="bg-patcher-clear-samples" data-instance="${instance.instanceId}">Clear Pins</button>
+                    ` : ''}
+                </div>
                 ${rangeRow(instance, 'bgPatcherOpacity', 'Opacity To Transparent', 0, 100, 1, 0)}
                 <label class="check-row"><input type="checkbox" ${params.bgPatcherFloodFill ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherFloodFill"><span>Contiguous Mode (Flood Fill)</span></label>
             </section>
@@ -1106,6 +1115,8 @@ export function createWorkspaceUI(root, registry, actions) {
             'palette-upload': () => refs.paletteImageInput.click(),
             'arm-eyedropper': () => actions.armEyedropper({ kind: 'control', target: node.dataset.target }),
             'bg-patcher-pick-main': () => actions.armEyedropper({ kind: 'bg-patcher-main', instanceId: node.dataset.instance }),
+            'bg-patcher-add-sample': () => actions.armEyedropper({ kind: 'bg-patcher-add-sample', instanceId: node.dataset.instance }),
+            'bg-patcher-clear-samples': () => actions.updateControl(node.dataset.instance, 'bgPatcherSamples', [], { render: true }),
             'bg-patcher-add-protected': () => {
                 const instance = getLiveState()?.document.layerStack.find((item) => item.instanceId === node.dataset.instance);
                 const nextIndex = instance?.params?.bgPatcherProtectedColors?.length || 0;

@@ -990,6 +990,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     state.eyedropperTarget.kind === 'bg-patcher-main'
                     || state.eyedropperTarget.kind === 'bg-patcher-protected'
                     || state.eyedropperTarget.kind === 'bg-patcher-patch'
+                    || state.eyedropperTarget.kind === 'bg-patcher-add-sample'
                 );
                 const layerInputPixel = needsLayerInputPick
                     ? getLayerInputSample(state.eyedropperTarget.instanceId, uv, previewPixel)
@@ -1011,7 +1012,16 @@ window.addEventListener('DOMContentLoaded', async () => {
                             ...instance.params,
                             bgPatcherTargetColor: pixel.hex,
                             bgPatcherSampleX: layerInputPixel?.x ?? -1,
-                            bgPatcherSampleY: layerInputPixel?.y ?? -1
+                            bgPatcherSampleY: layerInputPixel?.y ?? -1,
+                            bgPatcherSamples: []
+                        }
+                    }));
+                } else if (state.eyedropperTarget.kind === 'bg-patcher-add-sample') {
+                    updateInstance(state.eyedropperTarget.instanceId, (instance) => ({
+                        ...instance,
+                        params: {
+                            ...instance.params,
+                            bgPatcherSamples: [...(instance.params.bgPatcherSamples || []), { x: layerInputPixel?.x ?? -1, y: layerInputPixel?.y ?? -1 }]
                         }
                     }));
                 } else if (state.eyedropperTarget.kind === 'bg-patcher-protected') {

@@ -139,7 +139,7 @@ function updateBgPatcherFloodMask(gl, runtime, inputTex, instance, inputResoluti
     const upstreamHash = upstreamStack.map(inst => `${inst.instanceId}:${inst.visible}:${inst.enabled}:${JSON.stringify(inst.params || {})}`).join('|') + `|${documentState?.source?.width || 0}x${documentState?.source?.height || 0}`;
 
     const currentParamsStr = JSON.stringify({
-        floodEnabled, sampleX, sampleY, targetColorHex, tolerance, smoothing, 
+        floodEnabled, sampleX, sampleY, samples: params.bgPatcherSamples, targetColorHex, tolerance, smoothing, 
         protectedColors: params.bgPatcherProtectedColors
     });
 
@@ -163,7 +163,11 @@ function updateBgPatcherFloodMask(gl, runtime, inputTex, instance, inputResoluti
     state.texWidth = width;
     state.texHeight = height;
 
-    if (!floodEnabled || sampleX < 0 || sampleY < 0 || sampleX >= width || sampleY >= height) {
+    const allSamples = (params.bgPatcherSamples || []).map(s => ({ x: Math.round(Number(s.x)), y: Math.round(Number(s.y)) }));
+    if (sampleX >= 0 && sampleY >= 0) allSamples.unshift({ x: sampleX, y: sampleY });
+    const validSamples = allSamples.filter(s => s.x >= 0 && s.y >= 0 && s.x < width && s.y < height);
+
+    if (!floodEnabled || validSamples.length === 0) {
         state.floodMaskArray.fill(255);
     } else {
         const pixels = readTexturePixelsTopLeft(gl, runtime, inputTex, width, height, state);
@@ -183,9 +187,13 @@ function updateBgPatcherFloodMask(gl, runtime, inputTex, instance, inputResoluti
 
         let head = 0;
         let tail = 0;
-        const startIndex = (sampleY * width) + sampleX;
-        state.floodQueue[tail++] = startIndex;
-        state.floodMaskArray[startIndex] = 255;
+        for (const sample of validSamples) {
+            const startIndex = (sample.y * width) + sample.x;
+            if (state.floodMaskArray[startIndex] === 0) {
+                state.floodQueue[tail++] = startIndex;
+                state.floodMaskArray[startIndex] = 255;
+            }
+        }
 
         const tryFlood = (pixelIndex) => {
             if (state.floodMaskArray[pixelIndex] !== 0) return;
