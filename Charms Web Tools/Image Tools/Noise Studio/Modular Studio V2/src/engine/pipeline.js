@@ -1,7 +1,8 @@
 import { bootstrapEngine } from './bootstrap.js';
-import { renderLayer, renderMaskPreview, renderPreviewTexture, getLegacyUI } from './executors/index.js';
+import { renderLayer, renderMaskPreview, renderPreviewTexture } from './executors/index.js';
 import { updateHistogram, updateVectorscope, updateParade } from '../analysis/scopes.js';
 import { hasRenderableLayers } from '../state/documentHelpers.js';
+import { getLayerPreviewViews } from './layerPreviewProviders.js';
 
 function createTexture(gl, source, width, height, highPrecision = false) {
     const texture = gl.createTexture();
@@ -173,6 +174,9 @@ export class NoiseStudioEngine {
         this.runtime.thumbTempCtx = this.runtime.thumbTempCanvas.getContext('2d');
         this.runtime.thumbPixelBuffer = new Uint8Array(320 * 320 * 4);
         this.runtime.thumbClampedBuffer = new Uint8ClampedArray(320 * 320 * 4);
+        this.runtime.thumbPixelBufferAlt = new Uint8Array(320 * 320 * 4);
+        this.runtime.thumbClampedBufferAlt = new Uint8ClampedArray(320 * 320 * 4);
+        this.runtime.thumbCompositeBuffer = new Uint8ClampedArray(320 * 320 * 4);
         this.runtime.analysisTempCanvas = document.createElement('canvas');
         this.runtime.analysisTempCanvas.width = 256;
         this.runtime.analysisTempCanvas.height = 256;
@@ -567,6 +571,8 @@ export class NoiseStudioEngine {
             if (documentState.selection.layerInstanceId === instance.instanceId) {
                 renderPreviewTexture(gl, this.runtime, currentTex, pool.chainCapture.fbo, 0);
                 this.runtime.selectedLayerOutput = pool.chainCapture.tex;
+                this.runtime.selectedLayerContext.outputResolution = { w: resolution.w, h: resolution.h };
+                this.runtime.selectedLayerContext.outputPlacement = { ...outputPlacement };
             }
 
             if (documentState.view.isolateActiveLayerChain && documentState.selection.layerInstanceId === instance.instanceId) {
@@ -641,12 +647,10 @@ export class NoiseStudioEngine {
         updateParade(this.refs.paradeCanvas, this.runtime.analysisPixelBuffer, this.runtime.analysisFBO.w, this.runtime.analysisFBO.h);
     }
 
-    drawTextureToThumbnail(texture, canvas) {
-        if (!canvas || !texture) return;
-        const { gl } = this.runtime;
-        const target = this.runtime.thumbnailFBO;
-        
-        const aspect = Math.max(1, this.runtime.renderWidth) / Math.max(1, this.runtime.renderHeight);
+    getThumbnailMetrics(resolution = null) {
+        const width = Math.max(1, Number(resolution?.w) || this.runtime.renderWidth || 1);
+        const height = Math.max(1, Number(resolution?.h) || this.runtime.renderHeight || 1);
+        const aspect = width / height;
         let tw = 320;
         let th = 320;
         if (aspect > 1) {
@@ -656,32 +660,39 @@ export class NoiseStudioEngine {
             tw = Math.max(1, Math.floor(320 * aspect));
             th = 320;
         }
+        return { width, height, aspect, tw, th };
+    }
+
+    readTextureToThumbnailBuffer(texture, resolution = null, pixelBuffer = this.runtime.thumbPixelBuffer, clampedBuffer = this.runtime.thumbClampedBuffer) {
+        if (!texture) return null;
+        const { gl } = this.runtime;
+        const target = this.runtime.thumbnailFBO;
+        const { aspect, tw, th } = this.getThumbnailMetrics(resolution);
 
         gl.viewport(0, 0, tw, th);
         renderPreviewTexture(gl, this.runtime, texture, target.fbo, 0);
-        gl.readPixels(0, 0, tw, th, gl.RGBA, gl.UNSIGNED_BYTE, this.runtime.thumbPixelBuffer);
-        
+        gl.readPixels(0, 0, tw, th, gl.RGBA, gl.UNSIGNED_BYTE, pixelBuffer);
+
         for (let y = 0; y < th; y += 1) {
             const srcOffset = (th - 1 - y) * tw * 4;
             const dstOffset = y * tw * 4;
-            this.runtime.thumbClampedBuffer.set(this.runtime.thumbPixelBuffer.subarray(srcOffset, srcOffset + tw * 4), dstOffset);
+            clampedBuffer.set(pixelBuffer.subarray(srcOffset, srcOffset + tw * 4), dstOffset);
         }
-        
-        const imageData = new ImageData(new Uint8ClampedArray(this.runtime.thumbClampedBuffer.buffer, 0, tw * th * 4), tw, th);
-        this.runtime.thumbTempCanvas.width = tw;
-        this.runtime.thumbTempCanvas.height = th;
-        this.runtime.thumbTempCtx.putImageData(imageData, 0, 0);
-        
+
+        return { aspect, tw, th };
+    }
+
+    drawThumbnailCanvasToCanvas(canvas, aspect) {
         const ctx = canvas.getContext('2d', { alpha: false });
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
+
         const canvasAspect = canvas.width / canvas.height;
         let drawW = canvas.width;
         let drawH = canvas.height;
         let offsetX = 0;
         let offsetY = 0;
-        
+
         if (aspect > canvasAspect) {
             drawH = canvas.width / aspect;
             offsetY = (canvas.height - drawH) * 0.5;
@@ -689,8 +700,62 @@ export class NoiseStudioEngine {
             drawW = canvas.height * aspect;
             offsetX = (canvas.width - drawW) * 0.5;
         }
-        
-        ctx.drawImage(this.runtime.thumbTempCanvas, 0, 0, tw, th, offsetX, offsetY, drawW, drawH);
+
+        ctx.drawImage(this.runtime.thumbTempCanvas, 0, 0, this.runtime.thumbTempCanvas.width, this.runtime.thumbTempCanvas.height, offsetX, offsetY, drawW, drawH);
+    }
+
+    drawTextureToThumbnail(texture, canvas, resolution = null) {
+        if (!canvas || !texture) return;
+        const metrics = this.readTextureToThumbnailBuffer(texture, resolution, this.runtime.thumbPixelBuffer, this.runtime.thumbClampedBuffer);
+        if (!metrics) return;
+        const { aspect, tw, th } = metrics;
+        const imageData = new ImageData(new Uint8ClampedArray(this.runtime.thumbClampedBuffer.buffer, 0, tw * th * 4), tw, th);
+        this.runtime.thumbTempCanvas.width = tw;
+        this.runtime.thumbTempCanvas.height = th;
+        this.runtime.thumbTempCtx.putImageData(imageData, 0, 0);
+        this.drawThumbnailCanvasToCanvas(canvas, aspect);
+    }
+
+    drawChangedPixelsPreview(baseTexture, processedTexture, canvas, resolution = null) {
+        if (!canvas || !baseTexture || !processedTexture) return;
+        const metrics = this.readTextureToThumbnailBuffer(baseTexture, resolution, this.runtime.thumbPixelBuffer, this.runtime.thumbClampedBuffer);
+        if (!metrics) return;
+        const { aspect, tw, th } = metrics;
+        this.readTextureToThumbnailBuffer(processedTexture, resolution, this.runtime.thumbPixelBufferAlt, this.runtime.thumbClampedBufferAlt);
+
+        const total = tw * th * 4;
+        for (let offset = 0; offset < total; offset += 4) {
+            const baseR = this.runtime.thumbClampedBuffer[offset];
+            const baseG = this.runtime.thumbClampedBuffer[offset + 1];
+            const baseB = this.runtime.thumbClampedBuffer[offset + 2];
+            const nextR = this.runtime.thumbClampedBufferAlt[offset];
+            const nextG = this.runtime.thumbClampedBufferAlt[offset + 1];
+            const nextB = this.runtime.thumbClampedBufferAlt[offset + 2];
+
+            const baseLuma = (baseR * 0.2126) + (baseG * 0.7152) + (baseB * 0.0722);
+            const nextLuma = (nextR * 0.2126) + (nextG * 0.7152) + (nextB * 0.0722);
+            const diffMagnitude = Math.sqrt(
+                ((nextR - baseR) * (nextR - baseR))
+                + ((nextG - baseG) * (nextG - baseG))
+                + ((nextB - baseB) * (nextB - baseB))
+            ) / 441.67295593;
+            const overlayStrength = Math.min(1, diffMagnitude * 3.0);
+            const tint = nextLuma >= baseLuma
+                ? [46, 214, 255]
+                : [255, 138, 64];
+            const grayscale = Math.max(0, Math.min(255, Math.round((baseLuma * 0.88) + 12)));
+
+            this.runtime.thumbCompositeBuffer[offset] = Math.round(grayscale + ((tint[0] - grayscale) * overlayStrength));
+            this.runtime.thumbCompositeBuffer[offset + 1] = Math.round(grayscale + ((tint[1] - grayscale) * overlayStrength));
+            this.runtime.thumbCompositeBuffer[offset + 2] = Math.round(grayscale + ((tint[2] - grayscale) * overlayStrength));
+            this.runtime.thumbCompositeBuffer[offset + 3] = 255;
+        }
+
+        const imageData = new ImageData(new Uint8ClampedArray(this.runtime.thumbCompositeBuffer.buffer, 0, total), tw, th);
+        this.runtime.thumbTempCanvas.width = tw;
+        this.runtime.thumbTempCanvas.height = th;
+        this.runtime.thumbTempCtx.putImageData(imageData, 0, 0);
+        this.drawThumbnailCanvasToCanvas(canvas, aspect);
     }
 
     syncHoverPreview() {
@@ -758,7 +823,7 @@ export class NoiseStudioEngine {
         if (layerDef.mask) {
             const maskTex = renderMaskPreview(this.runtime.gl, this.runtime, layerDef, instance, inputTex, documentState);
             const maskCanvas = this.refs.breakdownContainer.querySelector('[data-breakdown-key=\"mask\"] canvas');
-            this.drawTextureToThumbnail(maskTex || this.runtime.textures.black, maskCanvas);
+            this.drawTextureToThumbnail(maskTex || this.runtime.textures.white, maskCanvas);
         }
         if (layerDef.layerId === 'ca') {
             const falloffTex = this.renderCaFalloff(instance, pool);
@@ -772,37 +837,28 @@ export class NoiseStudioEngine {
             return;
         }
 
-        const { layerDef, instance, inputTex, pool } = this.runtime.selectedLayerContext;
         const canvas = this.refs.subLayerCanvas;
         const label = this.refs.subLayerLabel;
+        const availableViews = getLayerPreviewViews(this, documentState, this.runtime.selectedLayerContext);
 
-        let availableViews = [];
-        let viewDraws = [];
-
-        if (layerDef.layerId === 'noise') {
-            availableViews.push('Isolated Noise');
-            viewDraws.push(() => {
-                this.drawTextureToThumbnail(pool.preview.tex, canvas);
-            });
-            
-            if (layerDef.mask) {
-                availableViews.push('Noise Mask');
-                viewDraws.push(() => {
-                    const maskTex = renderMaskPreview(this.runtime.gl, this.runtime, layerDef, instance, inputTex, documentState);
-                    this.drawTextureToThumbnail(maskTex || this.runtime.textures.black, canvas);
-                });
-            }
-        }
-
-        if (availableViews.length === 0) {
-            if (label) label.textContent = 'No Sub-layers available';
+        if (!availableViews.length) {
+            if (label) label.textContent = 'No preview views for this layer yet';
             this.drawTextureToThumbnail(this.runtime.textures.black, canvas);
             return;
         }
 
         const index = (documentState.view.layerPreviewIndex || 0) % availableViews.length;
-        if (label) label.textContent = availableViews[index];
-        viewDraws[index]();
+        const activeView = availableViews[index];
+        if (label) {
+            label.textContent = availableViews.length > 1
+                ? `${activeView.label} (${index + 1}/${availableViews.length})`
+                : activeView.label;
+        }
+        if (typeof activeView.draw === 'function') {
+            activeView.draw(canvas);
+            return;
+        }
+        this.drawTextureToThumbnail(activeView.getTexture?.() || this.runtime.textures.black, canvas, activeView.resolution);
     }
 
     async exportPngBlob(documentState) {

@@ -84,6 +84,10 @@ Important architectural consequence:
 - `src/engine/`
   - Custom WebGL image processing engine.
 
+- `src/engine/layerPreviewProviders.js`
+  - Registry-style provider map for the Layer tab sub-preview canvas.
+  - This is where per-layer custom preview views should be added in the future.
+
 - `src/analysis/scopes.js`
   - Scope/analysis helpers for editor views.
 
@@ -143,6 +147,11 @@ Important fields include:
 - `view`
 - `export`
 - `batch`
+
+Important `view` fields include:
+
+- `layerPreviewsOpen`
+- `layerPreviewIndex`
 
 ### `state.ui`
 
@@ -222,6 +231,81 @@ The current runtime still uses registry helpers for:
 - normalization
 
 `reindexStack(...)` remains important because it rebuilds normalized layer instances from registry defaults and persisted params.
+
+## 8.1 Layer Preview Framework
+
+The Layer tab has a dedicated sub-preview canvas shown under `Sub-Layer Previews`.
+
+This is not the same thing as the main editor preview and it should not rely on random scratch-buffer state.
+
+Current architecture:
+
+- `src/ui/workspaces.js`
+  - Renders the Layer tab sub-preview shell (`subLayerCanvas` / `subLayerLabel`).
+
+- `NoiseStudioEngine.updateSubLayerPreview(...)`
+  - Asks `getLayerPreviewViews(...)` for the currently selected layer.
+  - Draws the currently selected preview view into the sub-preview canvas.
+
+- `src/engine/layerPreviewProviders.js`
+  - Holds the provider map keyed by `layerId`.
+  - Each provider returns preview definitions shaped like:
+    - `key`
+    - `label`
+    - `getTexture()` or `draw(canvas)`
+
+- `NoiseStudioEngine.drawChangedPixelsPreview(...)`
+  - Shared custom-draw helper for change-map style previews.
+  - Draws a grayscale version of the layer input and tints only the pixels that changed.
+  - Warm orange currently indicates darker/lower output shifts and cyan indicates brighter/higher output shifts.
+
+- Provider rendering is done inside the selected layer's own FBO pool / resolution context.
+  - This is important.
+  - The old bug was caused by reading `pool.preview.tex` without guaranteeing it actually contained the requested subview.
+
+Noise layer preview support is now the reference implementation:
+
+- `Isolated Noise`
+  - Renders the standalone generated noise texture.
+
+- `Noise Mask`
+  - Renders the effective mask texture for the noise layer.
+  - If no mask controls are enabled, the preview falls back to white, because that matches the real "full effect area" behavior used by noise compositing.
+
+The Texture group now has provider coverage for:
+
+- `noise`
+- `blur`
+- `hankelBlur`
+- `tiltShiftBlur`
+- `bilateral`
+- `denoise`
+
+Current shared texture-layer view pattern:
+
+- processed layer output
+- changed-pixels view on grayscale input
+- effect mask view when the layer supports masking
+
+Current custom texture-layer labels:
+
+- noise: `Isolated Noise`, `Noise Mask`, `Noise Composite`
+- blur / hankel blur: `Blurred Pixels`
+- tilt-shift blur: `Focus Falloff`
+- bilateral: `Edge-Preserving Change`
+- denoise: `Removed Noise`
+
+Noise rendering is now deterministic per document/layer state:
+
+- The noise executor no longer uses `Math.random()` on every render pass.
+- The seed is derived from source metadata, noise instance identity, and current params.
+- This keeps the main canvas and sub-preview views aligned instead of generating different noise every time a preview is rerendered.
+
+Guidance for future work:
+
+- If a new layer needs custom sub-preview views, add a provider in `src/engine/layerPreviewProviders.js`.
+- Do not hardcode preview labels or scratch-texture assumptions inside `pipeline.js`.
+- If a preview needs a special intermediate texture, expose a small executor/helper for that layer, similar to `renderNoiseSourcePreview(...)`.
 
 ## 9. Library System - New Architecture
 

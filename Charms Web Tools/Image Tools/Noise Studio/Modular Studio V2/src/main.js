@@ -654,6 +654,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         return {
                             ...document,
                             selection: { layerInstanceId: existing.instanceId },
+                            view: { ...document.view, layerPreviewIndex: 0 },
                             workspace: normalizeWorkspace(document.mode, { ...document.workspace, studioView: 'layer' }, true)
                         };
                     }
@@ -664,6 +665,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ...document,
                     layerStack,
                     selection: { layerInstanceId: next.instanceId },
+                    view: { ...document.view, layerPreviewIndex: 0 },
                     workspace: normalizeWorkspace(document.mode, { ...document.workspace, studioView: 'layer' }, true)
                 };
             });
@@ -674,12 +676,17 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return target ? {
                     ...document,
                     selection: { layerInstanceId: target.instanceId },
+                    view: { ...document.view, layerPreviewIndex: 0 },
                     workspace: normalizeWorkspace(document.mode, { ...document.workspace, studioView: 'layer' }, true)
                 } : document;
             });
         },
         selectInstance(instanceId) {
-            updateDocument((document) => ({ ...document, selection: { layerInstanceId: instanceId } }));
+            updateDocument((document) => ({
+                ...document,
+                selection: { layerInstanceId: instanceId },
+                view: { ...document.view, layerPreviewIndex: 0 }
+            }));
         },
         removeLayer(instanceId) {
             if (paletteExtractionOwner === instanceId) {
@@ -693,6 +700,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ...document,
                     layerStack,
                     selection,
+                    view: selection.layerInstanceId === document.selection.layerInstanceId
+                        ? document.view
+                        : { ...document.view, layerPreviewIndex: 0 },
                     workspace: normalizeWorkspace(document.mode, document.workspace, !!selection.layerInstanceId)
                 };
             });
@@ -710,7 +720,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const index = document.layerStack.findIndex((instance) => instance.instanceId === instanceId);
                 const layerStack = [...document.layerStack];
                 layerStack.splice(index + 1, 0, duplicate);
-                return { ...document, layerStack: reindexStack(registry, layerStack), selection: { layerInstanceId: duplicate.instanceId } };
+                return {
+                    ...document,
+                    layerStack: reindexStack(registry, layerStack),
+                    selection: { layerInstanceId: duplicate.instanceId },
+                    view: { ...document.view, layerPreviewIndex: 0 }
+                };
             });
         },
         reorderLayer(sourceId, targetId) {

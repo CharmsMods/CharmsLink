@@ -456,11 +456,35 @@ function renderHdr(gl, runtime, inputTex, outputFbo, ui) {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
-function renderNoise(gl, runtime, inputTex, outputFbo, documentState, ui) {
+function hashNoiseSeed(seedBasis) {
+    let hash = 2166136261;
+    for (let index = 0; index < seedBasis.length; index += 1) {
+        hash ^= seedBasis.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return ((hash >>> 0) / 4294967295) * 1000.0;
+}
+
+function getNoiseSeed(documentState, instance, runtime) {
+    const seedBasis = JSON.stringify({
+        source: {
+            name: documentState?.source?.name || '',
+            width: runtime.sourceWidth || documentState?.source?.width || 0,
+            height: runtime.sourceHeight || documentState?.source?.height || 0
+        },
+        layerId: instance?.layerId || 'noise',
+        instanceId: instance?.instanceId || '',
+        layerOrdinal: Math.max(1, Number(instance?.meta?.instanceIndex) || 1),
+        params: instance?.params || {}
+    });
+    return hashNoiseSeed(seedBasis);
+}
+
+function renderNoiseTexture(gl, runtime, ui, seed) {
     gl.useProgram(runtime.programs.noise);
     gl.bindFramebuffer(gl.FRAMEBUFFER, runtime.fbos.tempNoise);
     gl.uniform1i(gl.getUniformLocation(runtime.programs.noise, 'u_type'), parseInt(ui.noiseType?.value || 0, 10));
-    gl.uniform1f(gl.getUniformLocation(runtime.programs.noise, 'u_seed'), Math.random() * 100.0);
+    gl.uniform1f(gl.getUniformLocation(runtime.programs.noise, 'u_seed'), seed);
     gl.uniform2f(gl.getUniformLocation(runtime.programs.noise, 'u_res'), runtime.renderWidth, runtime.renderHeight);
     gl.uniform2f(gl.getUniformLocation(runtime.programs.noise, 'u_origRes'), runtime.sourceWidth, runtime.sourceHeight);
     gl.uniform1f(gl.getUniformLocation(runtime.programs.noise, 'u_scale'), parseFloat(ui.noiseSize?.value || 0));
@@ -487,7 +511,17 @@ function renderNoise(gl, runtime, inputTex, outputFbo, documentState, ui) {
         noiseTex = runtime.textures.blur2;
     }
 
-    const maskTex = renderMaskFromDefinition(gl, runtime, inputTex, runtime.registry.byId.noise, ui);
+    return noiseTex;
+}
+
+export function renderNoiseSourcePreview(gl, runtime, instance, documentState) {
+    const ui = buildLegacyUI(documentState, instance, runtime.registry);
+    return renderNoiseTexture(gl, runtime, ui, getNoiseSeed(documentState, instance, runtime));
+}
+
+function renderNoise(gl, runtime, inputTex, outputFbo, documentState, ui, instance) {
+    const noiseTex = renderNoiseTexture(gl, runtime, ui, getNoiseSeed(documentState, instance, runtime));
+    const maskTex = renderMaskFromDefinition(gl, runtime, inputTex, runtime.registry.byId.noise, ui) || runtime.textures.white;
     gl.useProgram(runtime.programs.composite);
     gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
     gl.activeTexture(gl.TEXTURE0);
@@ -495,7 +529,7 @@ function renderNoise(gl, runtime, inputTex, outputFbo, documentState, ui) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, noiseTex);
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, maskTex || runtime.textures.white);
+    gl.bindTexture(gl.TEXTURE_2D, maskTex);
     gl.uniform1i(gl.getUniformLocation(runtime.programs.composite, 'u_base'), 0);
     gl.uniform1i(gl.getUniformLocation(runtime.programs.composite, 'u_noise'), 1);
     gl.uniform1i(gl.getUniformLocation(runtime.programs.composite, 'u_mask'), 2);
@@ -862,7 +896,7 @@ export function renderLayer(gl, runtime, layerDef, instance, inputTex, outputFbo
             renderHdr(gl, runtime, inputTex, outputFbo, ui);
             break;
         case 'noise':
-            renderNoise(gl, runtime, inputTex, outputFbo, documentState, ui);
+            renderNoise(gl, runtime, inputTex, outputFbo, documentState, ui, instance);
             break;
         case 'blur':
             renderBlur(gl, runtime, inputTex, outputFbo, ui);
