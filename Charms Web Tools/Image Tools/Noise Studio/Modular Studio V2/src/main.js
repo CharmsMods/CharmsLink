@@ -1,6 +1,5 @@
 import { createStore } from './state/store.js';
 import { loadRegistry, createLayerInstance, relabelInstance } from './registry/index.js';
-import { getLibraryHTML } from './ui/libraryTemplate.js';
 import { downloadState, readJsonFile, validateImportPayload } from './io/documents.js';
 import { NoiseStudioEngine } from './engine/pipeline.js';
 import { createWorkspaceUI } from './ui/workspaces.js';
@@ -1219,19 +1218,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 window.libraryWindow.focus();
                 return;
             }
-            window.libraryWindow = window.open('', 'ModularStudioLibrary');
-            if (window.libraryWindow.isLibraryInitialized) {
-                window.libraryWindow.focus();
-                return;
-            }
-            window.libraryWindow.isLibraryInitialized = true;
-            
-            const defaultsMap = Object.fromEntries(registry.layers.map(l => [l.layerId, l.defaults]));
-            const html = getLibraryHTML(defaultsMap);
-
-            window.libraryWindow.document.open();
-            window.libraryWindow.document.write(html);
-            window.libraryWindow.document.close();
+            window.libraryWindow = window.open('library.html', 'ModularStudioLibrary');
         },
         handlePreviewClick(event) {
             const state = store.getState();
@@ -1325,7 +1312,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     const libraryChannel = new BroadcastChannel('ModularStudioLibraryChannel');
     libraryChannel.onmessage = async (e) => {
         if (!e.data || !e.data.type) return;
-        if (e.data.type === 'RENDER_LIBRARY_FILES') {
+        if (e.data.type === 'REQ_LAYER_DEFAULTS') {
+            const defaultsMap = Object.fromEntries(registry.layers.map(l => [l.layerId, l.defaults]));
+            libraryChannel.postMessage({ type: 'RES_LAYER_DEFAULTS', data: defaultsMap });
+        } else if (e.data.type === 'RENDER_LIBRARY_FILES') {
             if (e.data.payloads && e.data.filenames) {
                 actions.processLibraryPayloads(e.data.payloads, e.data.filenames);
             }

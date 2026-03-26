@@ -21,7 +21,8 @@ The codebase is split into modern modules (`src/`) and legacy/shader files (`Sha
   - `bootstrap.js` & `executors/`: Manages texture uploads, shader compilation, and specialized execution commands.
 - **`src/ui/`**: 
   - `workspaces.js`: Maps high-level application state to the DOM (menus, canvas positioning, workspace layout frames). Contains the toolbar buttons and delegates click events to `actions.*`.
-  - `libraryTemplate.js`: [NEW] Re-homes the entire Library tab's HTML, CSS, and client-side JavaScript. Exports a `getLibraryHTML()` function for dynamic document writing.
+  - `library.js`: [NEW] The interactive logic for the Library tab. Separated from the main editor but shares origin through `library.html`.
+- **`library.html`**: [NEW] The physical home of the Library tab. Imports `library.js` and ensures shared persistence (IndexedDB) with the main site.
 - **`src/state/`**: 
   - `documentHelpers.js`: Contains utility logic for mutating and interpreting the `documentState` object layout safely.
 - **`src/io/`**: 
@@ -183,8 +184,10 @@ The main studio and Library tab communicate via **two distinct channels**:
    
    These use `window.libraryWindow.postMessage()` since the main studio holds the `window.open()` reference.
 
-### 5.5 Library Tab HTML & Detail Modal (`src/ui/libraryTemplate.js`)
-The Library tab UI is decoupled from `main.js` and defined entirely within `libraryTemplate.js`. It is generated as an HTML string via `getLibraryHTML(defaultsMap)` and written to a named popup window.
+### 5.5 Library Tab & Persistence (`library.html` / `src/ui/library.js`)
+The Library UI is a physical page (`library.html`) that shares the same Origin as the editor. This ensures reliable access to the `ModularStudioDB` IndexedDB store across all browsers.
+- **Handshake Protocol**: On load, `library.js` broadcasts a `REQ_LAYER_DEFAULTS` message via `BroadcastChannel`. The Main window responds with `RES_LAYER_DEFAULTS` containing the current registry values for the Detail Modal's filtering logic.
+- **Project Grid**: Renders projects from IndexedDB and syncs with the Editor via `BroadcastChannel` (e.g., `LIBRARY_DB_UPDATED` tells the Library to refresh its results).
 
 **Visual Aesthetic**:
 - **B&W / Monochrome**: Focuses on high-contrast black backgrounds and white lines.
@@ -280,10 +283,10 @@ When extracting WebGL data to push to static UI components (like `320x180` canva
 
 ## 9. Common Gotchas & Patterns
 
-### 9.1 Template Literals in Library UI
-The Library's markup and logic are defined as a JavaScript template literal (backtick string) inside **`src/ui/libraryTemplate.js`**.
-- **Escaping**: When nesting template literals within this string (e.g., for grid item HTML), inner backticks and `${}` interpolations must be escaped with `\`.
-- **Dynamic Variable Injections**: Variables like `LAYER_DEFAULTS` are serialized via `JSON.stringify` and directly interpolated into the script block of the generated HTML at build-time.
+### 9.1 Library Architecture (Static Files)
+The Library UI is no longer managed via `document.write`. It resides in a dedicated physical file to ensure shared persistence.
+- **Cross-Window Syncing**: Data like `LAYER_DEFAULTS` that needs to stay in sync with the registry is passed via a message handshake on window load.
+- **Script Handling**: External libraries like JSZip are loaded via standard `<script>` tags in the HTML head to avoid parser-blocking warnings.
 
 ### 9.2 Named Window Deduplication
 The Library tab uses `window.open('', 'ModularStudioLibrary')` with a named target. If a window with that name already exists, the browser returns the existing window instead of opening a new one. The `isLibraryInitialized` flag prevents re-writing the HTML content.
