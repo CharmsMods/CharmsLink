@@ -207,7 +207,7 @@ btnUpload.addEventListener('click', () => {
                 } else { unrolledPayloads.push(text); unrolledNames.push(files[i].name); }
             } catch (err) { }
         });
-        libraryChannel.postMessage({ type: 'RENDER_LIBRARY_FILES', payloads: unrolledPayloads, filenames: unrolledNames });
+        sendToMain({ type: 'RENDER_LIBRARY_FILES', payloads: unrolledPayloads, filenames: unrolledNames });
     };
     input.click();
 });
@@ -287,36 +287,54 @@ gridView.addEventListener('click', async (e) => {
 document.getElementById('detailClose').addEventListener('click', closeDetail);
 document.getElementById('detailLoad').addEventListener('click', () => {
     if (!detailData) return;
-    libraryChannel.postMessage({ type: 'LOAD_PROJECT', payload: detailData.payload, libraryId: detailData.id, libraryName: detailData.name });
+    sendToMain({ type: 'LOAD_PROJECT', payload: detailData.payload, libraryId: detailData.id, libraryName: detailData.name });
     closeDetail();
 });
 detailOverlay.addEventListener('click', (e) => { if (e.target === detailOverlay) closeDetail(); });
 
 /* --- Handshake & Communication --- */
-libraryChannel.onmessage = (e) => {
-    if (!e.data || !e.data.type) return;
+function sendToMain(msg) {
+    const enriched = { ...msg, _mid: Date.now() + '-' + Math.random().toString(36).substring(2, 7) };
+    libraryChannel.postMessage(enriched);
+    if (window.opener && window.opener !== window) {
+        window.opener.postMessage(enriched, '*');
+    }
+}
+
+const processedMids = new Set();
+function handleMainMessage(data) {
+    if (!data || !data.type) return;
     
-    if (e.data.type === 'START_RENDER') {
+    if (data._mid) {
+        if (processedMids.has(data._mid)) return;
+        processedMids.add(data._mid);
+        setTimeout(() => processedMids.delete(data._mid), 10000);
+    }
+    
+    if (data.type === 'START_RENDER') {
         loadingOverlay.classList.add('active');
         document.getElementById('statusText').textContent = 'Preparing engine...';
-        document.getElementById('countText').textContent = '0 / ' + e.data.total + ' variants';
+        document.getElementById('countText').textContent = '0 / ' + data.total + ' variants';
         document.getElementById('progressFill').style.width = '0%';
     }
-    else if (e.data.type === 'UPDATE_PROGRESS') {
-        document.getElementById('statusText').textContent = 'Rendering ' + e.data.filename + '...';
-        document.getElementById('countText').textContent = e.data.count + ' / ' + e.data.total + ' variants';
-        document.getElementById('progressFill').style.width = ((e.data.count / e.data.total) * 100) + '%';
+    else if (data.type === 'UPDATE_PROGRESS') {
+        document.getElementById('statusText').textContent = 'Rendering ' + data.filename + '...';
+        document.getElementById('countText').textContent = data.count + ' / ' + data.total + ' variants';
+        document.getElementById('progressFill').style.width = ((data.count / data.total) * 100) + '%';
     }
-    else if (e.data.type === 'LIBRARY_DB_UPDATED') {
+    else if (data.type === 'LIBRARY_DB_UPDATED') {
         loadingOverlay.classList.remove('active');
         refreshLibrary();
     }
-    else if (e.data.type === 'RES_LAYER_DEFAULTS') {
-        LAYER_DEFAULTS = e.data.data;
+    else if (data.type === 'RES_LAYER_DEFAULTS') {
+        LAYER_DEFAULTS = data.data;
         refreshLibrary();
     }
-};
+}
+
+libraryChannel.onmessage = (e) => handleMainMessage(e.data);
+window.addEventListener('message', (e) => handleMainMessage(e.data));
 
 // Start handshake and initial load
 refreshLibrary();
-libraryChannel.postMessage({ type: 'REQ_LAYER_DEFAULTS' });
+sendToMain({ type: 'REQ_LAYER_DEFAULTS' });

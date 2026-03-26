@@ -343,6 +343,7 @@ function createPaletteFromImage(image, count) {
 
 window.addEventListener('DOMContentLoaded', async () => {
     const registry = await loadRegistry();
+    const libraryChannel = new BroadcastChannel('ModularStudioLibraryChannel');
     const store = createStore(createInitialState());
     const root = document.getElementById('app');
     const engine = new NoiseStudioEngine(registry, {
@@ -451,6 +452,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             batch: { ...document.batch, isPlaying: false }
         }), { render: false });
     }
+
+    const sendToLibrary = (msg) => {
+        const enriched = { ...msg, _mid: Date.now() + '-' + Math.random().toString(36).substring(2, 7) };
+        libraryChannel.postMessage(enriched);
+        if (window.libraryWindow && !window.libraryWindow.closed) {
+            window.libraryWindow.postMessage(enriched, '*');
+        }
+    };
 
     const actions = {
         getState() {
@@ -887,7 +896,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             activeLibraryId = saveId;
             activeLibraryName = name;
             setNotice(`Saved "${name}" to Library.`, 'success');
-            if (window.libraryWindow && !window.libraryWindow.closed) window.libraryWindow.postMessage({ type: 'LIBRARY_DB_UPDATED' }, '*');
+            sendToLibrary({ type: 'LIBRARY_DB_UPDATED' });
         },
         async newProject() {
             const state = store.getState();
@@ -1173,10 +1182,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             const originalSource = state.document.source;
             setNotice(`Rendering ${payloadsText.length} variants to Library DB...`, 'info', 0);
             
-            window.libraryWindow.postMessage({ type: 'START_RENDER', total: payloadsText.length }, '*');
+            sendToLibrary({ type: 'START_RENDER', total: payloadsText.length });
             
             for (let i = 0; i < payloadsText.length; i++) {
-                window.libraryWindow.postMessage({ type: 'UPDATE_PROGRESS', count: i, total: payloadsText.length, filename: filenames[i] }, '*');
+                sendToLibrary({ type: 'UPDATE_PROGRESS', count: i, total: payloadsText.length, filename: filenames[i] });
                 
                 try {
                      const rawState = JSON.parse(payloadsText[i]);
@@ -1209,7 +1218,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 } catch(e) {}
             }
 
-            window.libraryWindow.postMessage({ type: 'LIBRARY_DB_UPDATED' }, '*');
+            sendToLibrary({ type: 'LIBRARY_DB_UPDATED' });
             setNotice('Library renders saved to DB.', 'success', 3000);
         },
 
@@ -1309,24 +1318,32 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    const libraryChannel = new BroadcastChannel('ModularStudioLibraryChannel');
-    libraryChannel.onmessage = async (e) => {
-        if (!e.data || !e.data.type) return;
-        if (e.data.type === 'REQ_LAYER_DEFAULTS') {
+    const processedMids = new Set();
+    const handleLibraryMessage = async (data, source) => {
+        if (!data || !data.type) return;
+        
+        if (data._mid) {
+            if (processedMids.has(data._mid)) return;
+            processedMids.add(data._mid);
+            setTimeout(() => processedMids.delete(data._mid), 10000);
+        }
+
+        if (data.type === 'REQ_LAYER_DEFAULTS') {
             const defaultsMap = Object.fromEntries(registry.layers.map(l => [l.layerId, l.defaults]));
-            libraryChannel.postMessage({ type: 'RES_LAYER_DEFAULTS', data: defaultsMap });
-        } else if (e.data.type === 'RENDER_LIBRARY_FILES') {
-            if (e.data.payloads && e.data.filenames) {
-                actions.processLibraryPayloads(e.data.payloads, e.data.filenames);
+            const response = { type: 'RES_LAYER_DEFAULTS', data: defaultsMap };
+            sendToLibrary(response);
+        } else if (data.type === 'RENDER_LIBRARY_FILES') {
+            if (data.payloads && data.filenames) {
+                actions.processLibraryPayloads(data.payloads, data.filenames);
             }
-        } else if (e.data.type === 'LOAD_PROJECT') {
+        } else if (data.type === 'LOAD_PROJECT') {
             const state = store.getState();
             if (state.document.source?.imageData) {
                 await actions.saveProjectToLibrary((state.document.source.name || 'current').replace(/\.[^/.]+$/, ''), true);
             }
             
             try {
-                const payloadStr = typeof e.data.payload === 'string' ? e.data.payload : JSON.stringify(e.data.payload);
+                const payloadStr = typeof data.payload === 'string' ? data.payload : JSON.stringify(data.payload);
                 const rawState = JSON.parse(payloadStr);
                 const validated = validateImportPayload(rawState, rawState.kind || 'document');
                 if (validated.source && validated.source.imageData) {
@@ -1341,10 +1358,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     source: validated.source || document.source
                 }), { render: true });
                 
-                // Track where this project came from
-                activeLibraryId = e.data.libraryId || null;
-                activeLibraryName = e.data.libraryName || null;
-                
+                activeLibraryId = data.libraryId || null;
+                activeLibraryName = data.libraryName || null;
                 setNotice(`Loaded "${activeLibraryName || 'project'}" from Library.`, 'success');
             } catch (err) {
                 console.error(err);
@@ -1352,6 +1367,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         }
     };
+
+    libraryChannel.onmessage = (e) => handleLibraryMessage(e.data, null);
+    window.addEventListener('message', (e) => handleLibraryMessage(e.data, e.source));
 
     view = createWorkspaceUI(root, registry, actions);
     await engine.init(view.getRenderRefs().canvas);
