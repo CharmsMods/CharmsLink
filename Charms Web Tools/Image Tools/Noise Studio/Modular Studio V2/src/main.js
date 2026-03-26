@@ -6,19 +6,39 @@ import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
 
 const DB_NAME = 'ModularStudioDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_NAME = 'LibraryProjects';
 
 function initDB() {
     return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onblocked = () => reject(new Error('Library database upgrade was blocked by another open tab.'));
         request.onupgradeneeded = (e) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(STORE_NAME)) {
                 db.createObjectStore(STORE_NAME, { keyPath: 'id' });
             }
         };
-        request.onsuccess = (e) => resolve(e.target.result);
+        request.onsuccess = (e) => {
+            const db = e.target.result;
+            if (db.objectStoreNames.contains(STORE_NAME)) {
+                resolve(db);
+                return;
+            }
+
+            const nextVersion = db.version + 1;
+            db.close();
+            const repairRequest = indexedDB.open(DB_NAME, nextVersion);
+            repairRequest.onblocked = () => reject(new Error('Library database repair was blocked by another open tab.'));
+            repairRequest.onupgradeneeded = (repairEvent) => {
+                const repairDb = repairEvent.target.result;
+                if (!repairDb.objectStoreNames.contains(STORE_NAME)) {
+                    repairDb.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                }
+            };
+            repairRequest.onsuccess = (repairEvent) => resolve(repairEvent.target.result);
+            repairRequest.onerror = (repairEvent) => reject(repairEvent.target.error);
+        };
         request.onerror = (e) => reject(e.target.error);
     });
 }
@@ -1367,6 +1387,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         async processLibraryPayloads(payloadsText, filenames, onProgress = null) {
             const state = store.getState();
             const originalSource = state.document.source;
+            let savedCount = 0;
+            let failedCount = 0;
+            let lastError = null;
             setNotice(`Rendering ${payloadsText.length} variants to Library DB...`, 'info', 0);
 
             onProgress?.({ phase: 'start', total: payloadsText.length });
@@ -1393,7 +1416,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                          payload: validated
                      };
                      await saveToLibraryDB(projectData);
+                     savedCount += 1;
                 } catch (err) {
+                     failedCount += 1;
+                     lastError = err;
                      console.error(`[Library] Error processing file ${filenames[i]}:`, err);
                 }
 
@@ -1412,7 +1438,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
             onProgress?.({ phase: 'complete', total: payloadsText.length });
             notifyLibraryChanged();
-            setNotice('Library renders saved to DB.', 'success', 3000);
+            if (!savedCount) {
+                throw new Error(lastError?.message || 'No Library items were saved to the database.');
+            }
+            setNotice(
+                failedCount
+                    ? `Saved ${savedCount} of ${payloadsText.length} Library item${payloadsText.length === 1 ? '' : 's'}.`
+                    : 'Library renders saved to DB.',
+                failedCount ? 'warning' : 'success',
+                failedCount ? 5000 : 3000
+            );
         },
 
         openLibrary() {

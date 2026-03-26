@@ -267,6 +267,7 @@ The single-page Library eliminates that entire failure class by making Library a
 Database:
 
 - `ModularStudioDB`
+- current code opens it at `DB_VERSION = 2`
 
 Object store:
 
@@ -297,6 +298,13 @@ Editor-side helper functions in `src/main.js`:
 - `getAllFromLibraryDB()`
 
 These are still kept in `main.js` because the Editor owns the authoritative Library persistence actions.
+
+Important migration note:
+
+- The app now defends against older local IndexedDB schemas that may have the database name but not the `LibraryProjects` object store.
+- `initDB()` first opens the normal target version.
+- If the store is still missing on success, it closes the DB and immediately reopens at `db.version + 1` to force an upgrade path that creates the missing store.
+- This was added specifically because GitHub Pages users could retain an older schema locally even after a hard refresh.
 
 ## 11. Save-to-Library Logic
 
@@ -395,6 +403,9 @@ The integrated Library now calls these direct actions instead of sending window 
   - Reports progress through a direct callback instead of cross-window messages.
   - Restores the previous source image in the engine afterward when possible.
   - Explicitly rerenders the current editor document after engine restoration when the editor still has a source image.
+  - Tracks how many Library items were actually saved.
+  - Throws when zero items were saved so the UI does not falsely report success.
+  - Uses a warning notice when only some items succeed.
   - Refreshes the integrated Library.
 
 - `actions.openLibrary()`
