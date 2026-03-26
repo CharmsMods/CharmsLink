@@ -3,9 +3,13 @@
  * Handled as a standalone script for library.html
  */
 
+import { createCrossWindowChannel } from '../io/crossWindowChannel.js';
+
 const DB_NAME = 'ModularStudioDB';
 const STORE_NAME = 'LibraryProjects';
-const libraryChannel = new BroadcastChannel('ModularStudioLibraryChannel');
+const libraryChannel = createCrossWindowChannel('ModularStudioLibraryChannel', {
+    resolveTargetWindow: () => (window.opener && window.opener !== window ? window.opener : null)
+});
 
 // State
 let LAYER_DEFAULTS = {};
@@ -294,23 +298,16 @@ detailOverlay.addEventListener('click', (e) => { if (e.target === detailOverlay)
 
 /* --- Handshake & Communication --- */
 function sendToMain(msg) {
-    const enriched = { ...msg, _mid: Date.now() + '-' + Math.random().toString(36).substring(2, 7) };
-    libraryChannel.postMessage(enriched);
-    if (window.opener && window.opener !== window) {
-        window.opener.postMessage(enriched, '*');
-    }
+    libraryChannel.send(msg);
 }
 
-const processedMids = new Set();
+function requestLayerDefaults() {
+    sendToMain({ type: 'REQ_LAYER_DEFAULTS' });
+}
+
 function handleMainMessage(data) {
     if (!data || !data.type) return;
-    
-    if (data._mid) {
-        if (processedMids.has(data._mid)) return;
-        processedMids.add(data._mid);
-        setTimeout(() => processedMids.delete(data._mid), 10000);
-    }
-    
+
     if (data.type === 'START_RENDER') {
         loadingOverlay.classList.add('active');
         document.getElementById('statusText').textContent = 'Preparing engine...';
@@ -330,11 +327,23 @@ function handleMainMessage(data) {
         LAYER_DEFAULTS = data.data;
         refreshLibrary();
     }
+    else if (data.type === 'EDITOR_READY') {
+        refreshLibrary();
+        requestLayerDefaults();
+    }
 }
 
-libraryChannel.onmessage = (e) => handleMainMessage(e.data);
-window.addEventListener('message', (e) => handleMainMessage(e.data));
+libraryChannel.subscribe((data) => handleMainMessage(data));
+window.addEventListener('focus', () => {
+    refreshLibrary();
+    requestLayerDefaults();
+});
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    refreshLibrary();
+    requestLayerDefaults();
+});
 
 // Start handshake and initial load
 refreshLibrary();
-sendToMain({ type: 'REQ_LAYER_DEFAULTS' });
+requestLayerDefaults();

@@ -1,308 +1,740 @@
-# Modular Studio V2 - Architecture & Context Guide
+# Modular Studio V2 - Architecture and Context Guide
 
-This document is designed to give AI assistants a quick, information-dense overview of the Modular Studio V2 codebase structure, how it works, and how to add new features or layers.
+This file is the AI handoff document for Modular Studio V2. It should let a new model understand the codebase quickly without having to rediscover the architecture from scratch.
 
-## 1. Directory Structure & Responsibilities
+The project is a browser-based image editor with a custom WebGL pipeline, a registry-driven layer system, and a same-origin Library workflow that stores rendered projects in IndexedDB and can be used from a separate window or tab.
 
-The codebase is split into modern modules (`src/`) and legacy/shader files (`Shaders/`, root files).
+## 1. High-Level Product Model
 
-### Root Files
-- `index.html`: The main entry point. Sets up the DOM shell and loads `<script type="module" src="src/main.js"></script>`.
-- `style.css` / `index.css`: Core application styling.
-- **`LEGACY/` Folder**: Contains retired files from the V1 architecture (such as `app.js`, `ui-generator.js`, and old JSON shader bindings). This folder can usually be ignored.
+There are two main browser surfaces:
 
-### `src/` Directory (Modern Architecture)
-- **`main.js`**: State management central. Initializes `documentState`, exposes public `actions` (e.g., `updateControl`, `addLayer`), and orchestrates updates to the WebGL engine and UI frames. Also hosts the **IndexedDB Library system**, **Library tab HTML** (generated via `document.write` into a named popup), and **BroadcastChannel** cross-window messaging.
-- **`src/registry/`**: Defines available filters/layers.
-  - `layerRegistry.json`: The master manifest. Every layer (Noise, Blur, Chromatic Aberration) is defined here with an ID, UI controls, default parameters, and mapping (`bindings`) connecting UI keys to GLSL uniforms.
-  - `index.js`: Loads the JSON registry, parses it, and safely instantiates layer instances.
-- **`src/engine/`**: The custom WebGL pipeline (`NoiseStudioEngine`).
-  - `pipeline.js`: The core render iteration. It calculates layout resolutions, sets up dual texture ping-ponging Framebuffer Objects (FBOs), iterates through `documentState.layerStack`, and executes shader programs in series.
-  - `bootstrap.js` & `executors/`: Manages texture uploads, shader compilation, and specialized execution commands.
-- **`src/ui/`**: 
-  - `workspaces.js`: Maps high-level application state to the DOM (menus, canvas positioning, workspace layout frames). Contains the toolbar buttons and delegates click events to `actions.*`.
-  - `library.js`: [NEW] The interactive logic for the Library tab. Separated from the main editor but shares origin through `library.html`.
-- **`library.html`**: [NEW] The physical home of the Library tab. Imports `library.js` and ensures shared persistence (IndexedDB) with the main site.
-- **`src/state/`**: 
-  - `documentHelpers.js`: Contains utility logic for mutating and interpreting the `documentState` object layout safely.
-- **`src/io/`**: 
-  - `documents.js`: Handles JSON serialization, validation (`validateImportPayload`), and file reading for state import/export.
+1. `index.html` -> the main editor.
+2. `library.html` -> the Library window/tab.
 
-### `Shaders/` Directory
-- Contains `.frag` and `.vert` GLSL files for all hardware-accelerated image effects processed by the engine.
+They are separate pages, but they are intentionally part of the same application. They share:
 
----
+- the same origin
+- the same IndexedDB database
+- a cross-window command channel
 
-## 2. Global State & Rendering Flow
+The editor owns rendering, image processing, and the authoritative live document state.
 
-1. **State Store (`src/main.js`)**: Holds `documentState`, tracking `layerStack` array, `selection`, and `view` settings.
-2. **Action Trigger**: A user interacts with an input in the sidebar (rendered by `src/ui/workspaces.js`). It fires an event calling `actions.updateControl(instanceId, key, value)`.
-3. **State Update**: `main.js` immutably copies the state tree, injecting the new parameter.
-4. **Queue Render**: If the update requests rendering (`{ render: true }`), `main.js` triggers `requestAnimationFrame(() => engine.render(state))`.
-5. **Engine Execution**: (`src/engine/pipeline.js`) Takes over to execute the two-pass WebGL pipeline.
+The Library owns:
 
-### 2.1 Engine Render Pipeline Deep Dive
-The WebGL pipeline (`NoiseStudioEngine`) uses a two-pass architecture to process the layer stack efficiently while allowing mid-stack resolution changes:
+- browsing saved projects
+- exporting/importing Library JSON bundles
+- project inspection UI
+- initiating "load into editor" and "render uploaded Library JSON files" commands
 
-1. **Resolution & Layout Pass (`reallocateBuffers`)**:
-   - The engine iterates through `documentState.layerStack` from bottom to top.
-   - It calculates the required canvas dimensions at each step. While standard layers maintain the current resolution, spatial modifiers (like `scale` or `expander`) actively multiply or add to the `currentWidth` and `currentHeight`.
-   - For every unique resolution encountered in the stack, it generates a cache key (e.g., `1920x1080`).
-   - `ensurePool(w, h)` then instantiates Framebuffer Object (FBO) pools for those resolutions. Each pool contains dedicated textures (`pingPong0`, `pingPong1`, `preview`, `maskTotal`) allocated to that exact width/height, preventing expensive mid-render reallocation.
+Important design intent:
 
-2. **Execution Pass (`render`)**:
-   - The engine iterates through the stack a second time, pulling the pre-calculated resolution and layout bounds for each instance.
-   - `gl.viewport` is adjusted dynamically if the resolution shifted since the previous layer.
-   - **Ping-Ponging**: The output texture of the previous layer (`currentTex`) is bound as the input for the current layer's shader. The shader executes and draws into the alternate buffer of the FBO pool (`pingPong0` or `pingPong1`, alternating via `pool.writeIdx`). This newly written buffer becomes the new `currentTex`.
-   - **Alpha Protection**: If alpha protection is enabled, the engine automatically runs `applyAlphaProtection` via an auxiliary shader pass immediately after the layer finishes, restoring the original transparency of protected pixels.
-   - This ping-ponging loop continues to the top of the stack, where the final `currentTex` is painted to the display canvas and dispatched to the analysis scopes.
+- The Library is not supposed to be a clone of editor state.
+- The Library reads saved records from IndexedDB.
+- The editor performs rendering work and writes Library records into IndexedDB.
+- The two pages communicate mostly for commands, progress, and refresh notifications.
 
----
+## 2. Directory Structure and Responsibilities
 
-## 3. Adding and Configuring Layers
+### Root files
 
-Adding a new layer requires modifying the engine registry, adding the physical GLSL shader, and optionally binding internal UI scopes. 
+- `index.html`
+  - Minimal shell for the main editor.
+  - Mounts `<div id="app"></div>`.
+  - Loads `src/main.js` as an ES module.
 
-### 3.1 Write the GLSL Shader
-1. Create a fragment shader in `Shaders/` (e.g., `Shaders/vibrance.frag`).
-2. Ensure it strictly declares the boilerplate inputs and outputs: `uniform sampler2D u_tex;`, `in vec2 v_uv;`, `out vec4 outColor;`, and any specific uniforms you need (e.g., `uniform float u_amount;`). (Failure to use `v_uv` or `u_tex` will cause WebGL linking errors).
+- `library.html`
+  - Physical page for the Library UI.
+  - Contains inline page-specific CSS.
+  - Loads bundled `src/jszip.min.js`.
+  - Loads `src/ui/library.js` as an ES module.
 
-### 3.2 Register Layer and Bind Uniforms
-1. Open `src/registry/layerRegistry.json`.
-2. Append a top-level object to the `"layers"` array.
-3. Map metadata: `"layerId": "vibrance"`, `"label": "Vibrance"`, `"group": "color"`, `"executor": "shader"`.
-4. Map the asset: `"shader": "Shaders/vibrance.frag"`.
-5. Define the UI controls under the `"controls"` array (e.g., type `range`, `"key": "vibranceAmount"`).
-6. Bind the Uniforms: Within `"bindings"`, map the UI keys to the actual shader variables:
-   ```json
-   "bindings": [
-     {
-       "uniform": "u_amount",
-       "key": "vibranceAmount",
-       "type": "float",
-       "divideBy": 100
-     }
-   ]
-   ```
+- `style.css`
+  - Shared editor styling.
 
-### 3.3 Strict Registry Constraints
-You **must** adhere strictly to the internal validation sets defined in `src/registry/index.js`. Any deviation throws a validation error.
-- **Valid Layer Groups** (`layer.group`): `'base'`, `'color'`, `'texture'`, `'optics'`, `'stylize'`, `'damage'`.
-- **Valid Control Types** (`control.type`): `'range'`, `'select'`, `'checkbox'`, `'color'`, `'message'`, `'separator'`, `'button'`, `'actionRow'`, `'swatchList'`, `'paletteEditor'`, `'conditionalGroup'`, `'colorWheel3Way'`, `'bgPatcherEditor'`, `'expanderEditor'`.
-- You cannot invent new control types or groups without rewriting `src/registry/index.js` validation and `src/ui/workspaces.js` rendering.
+- `ai_context.txt`
+  - This document.
 
-### 3.4 Masking Architecture
-Layers that support masking declare a `"mask"` object in their `layerRegistry.json` definition. 
-- These definitions (e.g., `lumaMask`, `colorExclude`) automatically inject standardized UI controls (Thresholds, Fades, Tolerances) into the layer's sidebar panel via `workspaces.js`.
-- These UI values are bound to the layer's uniform properties. The layer's specific shader (e.g., `adjustMasked.frag`) then incorporates these uniforms directly into its GLSL to perform the masking math.
+- `LEGACY/`
+  - Older V1-era files and shader JSON definitions.
+  - Usually not part of the current execution path.
+  - Useful for historical reference only.
 
-### 3.5 Sub-Layer Internal Previews
-The Layer Settings tab features a collapsible Sub-Layer Preview canvas (`320x180`) allowing users to cycle internal states of the active layer (e.g., viewing raw generation or isolating masks).
-**How to add Sub-Layer Views:**
-1. Open `src/engine/pipeline.js` and locate `updateSubLayerPreview(documentState)`.
-2. Add a new `if (layerDef.layerId === 'yourNewLayerId')` branch.
-3. Push string titles into the `availableViews` array (e.g., `'Isolated Blur'`).
-4. Push corresponding anonymous render callbacks into the `viewDraws` array. Use `this.drawTextureToThumbnail(targetTexture, canvas)` to push WebGL FBO textures to the DOM element.
-5. **Texture Sourcing**: You usually pull derived textures directly from the `pool` object (e.g., `pool.preview.tex`), or by forcing the engine to run a sub-pass synchronously (like `const maskTex = renderMaskPreview(...)`).
+### `src/`
 
-### 3.6 Advanced / Custom Engine Hooks
-- If a layer alters dimensions (`scale`, `expander`), modifies the alpha channel exclusively, or uses multi-pass loops (`blur`), it must use `"executor": "manual"`. 
-- For manual execution, you will need to add branch logic explicitly inside `src/engine/pipeline.js` rendering loop, or within `src/engine/executors/`.
-- Ensure `src/registry/index.js` `collectDefaultParams` supports any non-standard UI control types you invent.
+- `src/main.js`
+  - Main editor entry point.
+  - Creates the store and initial document state.
+  - Loads the registry.
+  - Creates the WebGL engine.
+  - Creates the workspace UI.
+  - Wires editor actions to state mutations, engine calls, exports, imports, and Library behavior.
+  - Owns the editor-side IndexedDB helpers and the editor-side Library message handling.
 
----
+- `src/ui/workspaces.js`
+  - Main DOM renderer for the editor.
+  - Maps app state to markup.
+  - Defines the toolbar and sidebar structure.
+  - Delegates button clicks and form events into `actions.*`.
 
-## 4. UI Generation & Event Binding
+- `src/ui/library.js`
+  - UI logic for `library.html`.
+  - Reads Library records from IndexedDB.
+  - Renders grid/fullscreen/detail views.
+  - Sends commands to the editor via the shared channel.
+  - Refreshes when the Library DB changes.
 
-UI generation is strictly handled within `src/ui/workspaces.js`. The V1 script `ui-generator.js` is fully retired.
-- **Rendering**: The `renderControl(instance, control, state, layerDef)` function parses the `"controls"` array from the registry JSON. It maps types (like `range`, `select`, `color`, `checkbox`) directly to HTML string templates.
-- **Binding**: Input elements generated by `renderControl` embed `data-control-key` attributes. Event delegation on the root window listens for `input`/`change` events on these elements and routes them to `actions.updateControl(instanceId, key, value)`.
+- `src/ui/previewViewport.js`
+  - Editor preview viewport helpers.
 
-### 4.1 Toolbar Actions
-The top toolbar in `workspaces.js` contains buttons bound via `data-action` attributes. Click delegation in `handleToolbarClick()` maps these attribute values to `actions.*` methods:
-- `save-state` → `actions.saveState()` (download JSON)
-- `save-to-library` → `actions.saveProjectToLibrary()` (persist to IndexedDB)
-- `export-current` → `actions.exportCurrent()` (PNG export)
-- `compare-open` → `actions.openCompare()` (before/after compare)
-- `new-project` → `actions.newProject()` (clears canvas + saves current)
-- `open-library` → `actions.openLibrary()` (opens/focuses the Library tab)
+- `src/io/documents.js`
+  - JSON import/export helpers.
+  - Validation entry point: `validateImportPayload(...)`.
+  - File reading for saved document JSON.
 
----
+- `src/io/crossWindowChannel.js`
+  - Shared transport abstraction for editor <-> Library communication.
+  - Wraps `BroadcastChannel`, same-origin `postMessage`, and `localStorage` storage events.
+  - Prevents duplicate processing when the same message arrives through multiple transports.
 
-## 5. Library System (IndexedDB + Secondary Tab)
+- `src/state/store.js`
+  - Lightweight state container used by the editor.
 
-The Library is a persistent project management system that stores rendered thumbnails + full project payloads in `IndexedDB`. It operates as a separate browser tab, styled with the same "Black & White / Square" aesthetic as the main studio (`--bg: #101010`, `--line: #f4f4f4`, `0px` border-radius).
+- `src/state/documentHelpers.js`
+  - Helpers for view state, normalization, and document-level utilities.
 
-### 5.1 IndexedDB Storage (`main.js`, top of file)
-The database `ModularStudioDB` has a single object store `LibraryProjects` with `keyPath: 'id'`.
+- `src/registry/`
+  - Registry loading and validation.
+  - `layerRegistry.json` is the canonical layer manifest.
+  - `index.js` instantiates layer instances and validates registry structure.
+  - `utilityPrograms.json` contains shared low-level shader/program metadata.
 
-**Helper functions** (defined at module scope in `main.js`):
-- `initDB()` → Opens or upgrades the database.
-- `saveToLibraryDB(project)` → `put` a project (upsert by `id`).
-- `deleteFromLibraryDB(id)` → Delete a single project.
-- `clearAllFromLibraryDB()` → Wipe the entire store.
-- `getAllFromLibraryDB()` → Fetch all projects.
+- `src/engine/`
+  - Custom WebGL engine.
+  - `pipeline.js` is the main execution path.
+  - `bootstrap.js` and `executors/` support texture/program setup and specialized execution behavior.
 
-**Project record schema:**
+- `src/analysis/scopes.js`
+  - Analysis/scope helpers for editor previews.
+
+- `src/jszip.min.js`
+  - Bundled JSZip used by the Library ZIP export.
+
+### `Shaders/`
+
+- Physical GLSL fragment and vertex shader files.
+- These are the assets consumed by the registry and engine.
+
+## 3. Main Runtime Model
+
+### 3.1 Editor boot flow
+
+When `index.html` loads:
+
+1. `src/main.js` runs on `DOMContentLoaded`.
+2. The layer registry is loaded.
+3. A cross-window Library channel is created.
+4. The editor store is created from `createInitialState()`.
+5. `NoiseStudioEngine` is created.
+6. The workspace UI is created with `createWorkspaceUI(...)`.
+7. The engine is initialized on the main canvas.
+8. Store subscriptions drive DOM rerendering and WebGL rerender requests.
+
+### 3.2 Main editor state shape
+
+The store state has several top-level zones:
+
+- `state.document`
+  - Persistent, saveable editor data.
+  - This is the state shape that matters for document import/export and engine rendering.
+
+- `state.ui`
+  - Ephemeral UI flags that should not necessarily be persisted.
+
+- `state.notice`
+  - Current toast/message shown to the user.
+
+- `state.eyedropperTarget`
+  - Tracks active eyedropper mode and target control.
+
+The most important part is `state.document`, which includes:
+
+- `version`
+- `kind`
+- `mode`
+- `workspace`
+- `source`
+- `palette`
+- `layerStack`
+- `selection`
+- `view`
+- `export`
+- `batch`
+
+### 3.3 Document source model
+
+`document.source` stores the currently loaded image metadata:
+
+- `name`
+- `type`
+- `imageData`
+- `width`
+- `height`
+
+`imageData` is especially important because the Library system depends on it:
+
+- saving to the Library requires `source.imageData`
+- loading Library payloads into the editor restores the image from `source.imageData`
+- uploaded Library JSON files must contain an embedded image if the editor is expected to render thumbnails from them
+
+## 4. Render and Update Flow
+
+The editor follows a fairly standard pattern:
+
+1. A user action calls an `actions.*` method.
+2. The action mutates store state through `updateDocument(...)`, `updateInstance(...)`, or `store.setState(...)`.
+3. The store subscriber rerenders the DOM when needed.
+4. If `meta.render` is true and the engine has an image, the engine is asked to render the current `document`.
+
+Important rule:
+
+- UI-only flags belong in `state.ui`.
+- Anything that must affect engine rendering or be part of saved documents belongs in `state.document`.
+
+## 5. Registry-Driven Layer System
+
+Layers are defined primarily through `src/registry/layerRegistry.json`.
+
+Each layer entry describes:
+
+- metadata (`layerId`, label, group)
+- executor mode
+- default params
+- UI controls
+- shader bindings
+- optional mask support
+
+`src/registry/index.js` validates and loads the registry and is strict about accepted values. New layers must stay within the allowed validation sets unless the registry system itself is extended.
+
+### 5.1 Layer instances
+
+Editor layer instances are not just raw registry entries. They are concrete items in `document.layerStack`.
+
+The editor creates them through registry helpers and later normalizes them with functions like:
+
+- `createLayerInstance(...)`
+- `relabelInstance(...)`
+- `reindexStack(...)`
+
+`reindexStack(...)` is important because it:
+
+- rebuilds params from registry defaults plus saved overrides
+- normalizes `enabled` / `visible`
+- drops invalid or unknown layers
+- reassigns labels/indexing for sibling instances
+
+## 6. Engine Architecture
+
+The WebGL engine is implemented in `src/engine/pipeline.js` and related engine files.
+
+Core traits:
+
+- custom render pipeline, not a third-party image editor
+- ping-pong render targets
+- dynamic buffer allocation based on the document's current stack and size changes
+- layer-by-layer execution through registry-defined and manual executors
+
+The engine is responsible for:
+
+- loading source images
+- shader compilation/use
+- main preview rendering
+- image export to PNG blobs
+- layer previews / scoped analysis helpers
+- comparison views
+
+Layers that need unusual behavior such as:
+
+- custom multi-pass logic
+- size changes
+- direct alpha manipulation
+- special sub-previews
+
+usually require explicit engine-side support instead of only registry changes.
+
+## 7. Editor UI and Action Routing
+
+`src/ui/workspaces.js` is the main editor UI composition layer.
+
+It is responsible for:
+
+- toolbar layout
+- sidebar content
+- control rendering
+- event delegation to editor actions
+
+Toolbar actions are routed through `data-action` values into `actions.*` methods in `src/main.js`.
+
+Common toolbar mappings include:
+
+- `save-state` -> `actions.saveState()`
+- `save-to-library` -> `actions.saveProjectToLibrary()`
+- `export-current` -> `actions.exportCurrent()`
+- `compare-open` -> `actions.openCompare()`
+- `new-project` -> `actions.newProject()`
+- `open-library` -> `actions.openLibrary()`
+
+## 8. Library System Overview
+
+The Library is a persistent project browser backed by IndexedDB.
+
+Conceptually, a Library entry contains:
+
+- a rendered preview PNG blob
+- the saved document payload
+- user-facing name metadata
+- timestamp/id metadata
+
+The editor is the writer/renderer.
+The Library page is the browser/inspector.
+
+### 8.1 IndexedDB schema
+
+Database:
+
+- `ModularStudioDB`
+
+Object store:
+
+- `LibraryProjects`
+
+Key path:
+
+- `id`
+
+Current record shape:
+
 ```js
 {
-  id: String,           // unique ID (base36 timestamp + random)
-  timestamp: Number,    // Date.now()
-  name: String,         // original filename or user-given name
-  blob: Blob,           // rendered PNG thumbnail
-  payload: Object       // full document state (source, layerStack, workspace, export)
+  id: String,
+  timestamp: Number,
+  name: String,
+  blob: Blob,
+  payload: Object
 }
 ```
 
-### 5.2 Deduplication & Fingerprinting
-`makeProjectFingerprint(payload)` generates a string key from `source.name` + serialized layer params. Before saving, `saveProjectToLibrary` compares the fingerprint of the current project against its last known state. If identical, it short-circuits with "Already saved — no changes detected."
+### 8.2 IndexedDB helpers
 
-### 5.3 Origin Tracking (Overwrite vs. New Entry)
-Two module-level variables track which Library entry is currently loaded:
-- `activeLibraryId` — The `id` of the library record the project was loaded from (or `null`).
-- `activeLibraryName` — The `name` of that record.
+Editor-side helpers live in `src/main.js`:
 
-When `saveProjectToLibrary()` is called:
-- **If `activeLibraryId` is set** (project was loaded from Library): The user is prompted to either keep the same name (overwrite) or type a new name (save as new entry).
-- **If `activeLibraryId` is null** (fresh project): A standard `prompt()` asks for a name.
+- `initDB()`
+- `saveToLibraryDB(project)`
+- `deleteFromLibraryDB(id)`
+- `clearAllFromLibraryDB()`
+- `getAllFromLibraryDB()`
 
-`newProject()` resets both to `null`, ensuring the next save treats the project as brand new.
+Library-side helpers are duplicated inline in `src/ui/library.js` because that file runs in a separate page context.
 
-### 5.4 Cross-Window Communication
-The main studio and Library tab communicate via **two distinct channels**:
+This duplication is intentional and acceptable for now.
 
-1. **`BroadcastChannel('ModularStudioLibraryChannel')`** — Library→Main messages. Used for:
-   - `RENDER_LIBRARY_FILES` — Library uploads JSON files, sends payloads to main engine for rendering.
-   - `LOAD_PROJECT` — User clicks a grid item to load into the editor. Includes `payload`, `libraryId`, and `libraryName`.
-   
-   BroadcastChannel was chosen over `window.opener.postMessage` because it **survives page reloads**. If the user refreshes the main studio, the Library tab can still send messages to it.
+### 8.3 Save behavior and deduplication
 
-2. **`window.postMessage()`** — Main→Library messages. Used for:
-   - `START_RENDER` — Tells Library to show the loading overlay.
-   - `UPDATE_PROGRESS` — Updates the progress bar during batch rendering.
-   - `LIBRARY_DB_UPDATED` — Tells Library to refresh its grid from IndexedDB.
-   
-   These use `window.libraryWindow.postMessage()` since the main studio holds the `window.open()` reference.
+`actions.saveProjectToLibrary(nameOverride, forceNew)` is the core save path.
 
-### 5.5 Library Tab & Persistence (`library.html` / `src/ui/library.js`)
-The Library UI is a physical page (`library.html`) that shares the same Origin as the editor. This ensures reliable access to the `ModularStudioDB` IndexedDB store across all browsers.
-- **Handshake Protocol**: On load, `library.js` broadcasts a `REQ_LAYER_DEFAULTS` message via `BroadcastChannel`. The Main window responds with `RES_LAYER_DEFAULTS` containing the current registry values for the Detail Modal's filtering logic.
-- **Project Grid**: Renders projects from IndexedDB and syncs with the Editor via `BroadcastChannel` (e.g., `LIBRARY_DB_UPDATED` tells the Library to refresh its results).
+It:
 
-**Visual Aesthetic**:
-- **B&W / Monochrome**: Focuses on high-contrast black backgrounds and white lines.
-- **Square Edges**: `border-radius: 0` for all cards, buttons, and modals.
-- **Monospace Labels**: Uses `var(--mono)` (Consolas/SFMono) for all technical data labels and indices.
+1. Verifies that there is a loaded source image with `source.imageData`.
+2. Builds a payload containing:
+   - `version`
+   - `kind`
+   - `workspace`
+   - `export`
+   - `source`
+   - `layerStack`
+3. Computes a fingerprint using `makeProjectFingerprint(payload)`.
+4. Loads existing Library entries.
+5. Deletes exact fingerprint duplicates found elsewhere in the DB.
+6. Short-circuits if the active Library record already matches exactly.
+7. Prompts the user for overwrite-vs-new naming behavior when the current document came from the Library.
+8. Renders a fresh preview PNG via `engine.exportPngBlob(...)`.
+9. Stores the result in IndexedDB.
+10. Updates `activeLibraryId` and `activeLibraryName`.
+11. Emits `LIBRARY_DB_UPDATED` so the Library UI can refresh.
 
-**Header Buttons**:
-- **Hover Reveal Original** (`btnHover`): Defaults to **OFF**. 
+Important nuance:
 
-**Project Detail Modal** (`detailOverlay`):
-Triggered by clicking any grid item. It's a fullscreen overlay featuring:
-- **Image Pane**: Shows the rendered project with "Hover Reveal" capability to see the source image.
-- **Sidebar Breakdown**: Lists all layers in the stack as "Layer Cards" (`renderLayerCards` function).
-- **Smart Filtering (Default-Aware)**: The parser cross-references a global `LAYER_DEFAULTS` map (injected during `openLibrary`). It automatically hides any parameter values that match the layer's registry defaults, displaying only what the user has modified. If a layer is untouched, it shows a "Default settings" placeholder.
+- Deduplication is global across the Library store, not just against the currently loaded record.
 
-**Header Buttons:**
-| Button | ID | Function |
-|---|---|---|
-| Upload JSON | `btnUpload` | Opens file picker for `.json`/`.mns.json` files, sends payloads to main for rendering |
-| Hover Reveal Original | `btnHover` | Toggles hover-to-see-original on grid/fullscreen images |
-| Show Interactive Series | `btnFullscreen` | Switches between grid view and click-to-advance single-image view |
-| Save Full Project | `btnDownloadSave` | Downloads entire library as single JSON array (each entry wrapped with `_libraryName`) |
-| Export All JSONs | `btnExportZip` | Packages each entry as individual `.mns.json` file in a ZIP (uses JSZip CDN) |
-| Clear All | `btnClearAll` | Prompts save-first, then confirmation, then wipes IndexedDB |
+### 8.4 Tracking the loaded Library origin
 
-**Custom Modal System:**
-All user interaction dialogs (delete, load, clear all, alerts) use styled in-page modals instead of browser `confirm()`/`alert()`.
-- `showModal(message, buttons)` → Returns a `Promise` that resolves to the clicked button's `value`.
-- `showAlert(message)` → Single "OK" button.
-- `showConfirm(message)` → "Cancel" + "Confirm" buttons.
-- Buttons can have `.primary` (cyan) or `.danger` (red) styling classes.
-- The modal overlay uses `backdrop-filter: blur(4px)`.
+The editor tracks the current Library origin with:
 
-**Grid Item Structure:**
-Each grid item shows: project name (`.label`), delete button (`×`, hover-to-reveal), hover hint, and an image container with base + hover images (crossfade via CSS `opacity` transition).
+- `activeLibraryId`
+- `activeLibraryName`
 
-**Fullscreen View:**
-Click-to-advance single-image viewer with a label showing `name (index / total)`.
+These are used to decide whether a save should:
 
-**External Dependencies:**
-- **JSZip (v3.10.1)**: Loaded from `cdnjs.cloudflare.com` CDN for the "Export All JSONs" ZIP packaging.
+- overwrite the original Library entry
+- or create a new one
 
-### 5.6 Library-Related Actions in `main.js`
-- `actions.saveProjectToLibrary(nameOverride, forceNew)` — Core save logic with dedup, fingerprinting, overwrite/new prompt.
-- `actions.newProject()` — Saves current project to Library, then clears canvas, layerStack, and resets `activeLibraryId`/`activeLibraryName`.
-- `actions.processLibraryPayloads(payloadsText, filenames)` — Batch-renders uploaded JSON files using the engine, saves each to IndexedDB, sends progress messages to Library tab.
-- `actions.openLibrary()` — Opens or focuses the Library tab. Uses named window `'ModularStudioLibrary'` to prevent duplicates. Checks `isLibraryInitialized` flag to avoid re-writing HTML.
+`newProject()` resets them.
 
-### 5.7 Auto-Save Hooks
-Several user actions trigger automatic Library saves:
-- **`openImageFile(file)`** — After loading an image, calls `saveProjectToLibrary(file.name)`.
-- **`openStateFile(file)`** — After loading a JSON preset, calls `saveProjectToLibrary(file.name)`.
-- **`LOAD_PROJECT` handler** — Before loading a Library project, auto-saves the current project if one is loaded.
+### 8.5 Auto-save hooks related to the Library
 
-### 5.8 Save Full Project Format
-The "Save Full Project" export creates a JSON array where each element is a project payload augmented with `_libraryName`:
+Several actions automatically save into the Library:
+
+- `openImageFile(file)`
+  - After loading an image, the editor auto-saves to the Library.
+
+- `openStateFile(file)`
+  - After loading a JSON document with an embedded image, the editor auto-saves to the Library.
+
+- `LOAD_PROJECT` handling
+  - Before the editor loads a project requested by the Library, it auto-saves the currently loaded project if one exists.
+
+This makes the Library function partly like a persistent working history.
+
+## 9. Library Page Behavior
+
+`library.html` + `src/ui/library.js` implement a separate UI shell for browsing the Library.
+
+Primary behaviors:
+
+- read all projects from IndexedDB
+- render a project grid
+- show fullscreen browsing mode
+- show a project detail modal
+- allow per-entry delete
+- allow full-Library export
+- allow ZIP export of all JSON payloads
+- allow upload of JSON files to be rendered by the editor and saved into the Library
+- allow "Load in Editor" from the detail modal
+
+### 9.1 Library visual model
+
+The Library uses a black/white, utility-style visual language:
+
+- dark background
+- white borders
+- square-ish controls
+- mono labels for technical metadata
+
+The Library page has its own CSS embedded directly in `library.html`.
+
+### 9.2 Library views
+
+Main Library UI states include:
+
+- grid view
+- fullscreen click-to-advance series view
+- project detail overlay
+- loading overlay during editor-side batch rendering
+- modal overlay for confirmation/alerts
+
+### 9.3 Project detail modal
+
+The detail modal is especially useful for AI understanding because it reflects how Library payloads are interpreted.
+
+It shows:
+
+- preview image
+- hover source image
+- project name
+- layer count / active layer count
+- source metadata
+- filtered layer param cards
+
+The filtering logic depends on `LAYER_DEFAULTS`, which comes from the editor at runtime. Parameters that still match registry defaults are hidden from the modal to keep the summary focused on changed values.
+
+## 10. Editor <-> Library Communication
+
+### 10.1 Current transport model
+
+The editor and Library communicate through `src/io/crossWindowChannel.js`.
+
+This replaced the older mental model of "use BroadcastChannel one way and postMessage the other way."
+
+The channel abstraction intentionally sends each logical message through multiple possible same-origin routes:
+
+- `BroadcastChannel`
+- direct window `postMessage`
+- `localStorage` storage events
+
+This is a reliability feature, not redundancy by accident.
+
+### 10.2 Why the transport is layered
+
+The multi-window workflow historically appeared to work on local hosting but break on GitHub Pages. The likely issue was not IndexedDB itself. The real fragility was the command/refresh bridge between the Library and editor windows.
+
+The current layered transport is meant to survive more real-world cases:
+
+- editor opens the Library as a popup/window
+- user reuses an existing named Library window
+- Library is opened independently in another same-origin tab
+- one transport path is unavailable or stale
+- the editor reloads while the Library stays open
+
+If the system ever regresses again on GitHub Pages but still works locally, investigate transport assumptions before redesigning the Library as an overlay.
+
+### 10.3 `createCrossWindowChannel(...)`
+
+`createCrossWindowChannel(channelName, options)` currently does the following:
+
+- creates a per-window sender id
+- creates a logical storage key of the form `ModularStudioChannel:${channelName}`
+- optionally creates a `BroadcastChannel`
+- listens for same-origin `message` events
+- listens for `storage` events
+- normalizes outgoing messages with metadata
+- deduplicates repeated arrivals by message id
+
+Current normalized metadata fields:
+
+- `_channel`
+- `_senderId`
+- `_mid`
+- `_sentAt`
+
+Message deduplication matters because the same logical message can arrive through:
+
+- broadcast
+- direct `postMessage`
+- `storage`
+
+and should only be handled once.
+
+Compatibility note:
+
+- The channel accepts messages without `_channel` as a backward-compatibility measure so a fresh window can still interact with a stale same-origin tab running an older build until both are refreshed.
+
+### 10.4 Direct window targets
+
+The shared channel still supports direct target windows where available:
+
+- Editor side:
+  - `resolveTargetWindow: () => window.libraryWindow`
+
+- Library side:
+  - `resolveTargetWindow: () => window.opener`
+
+This means a popup relationship is still useful when it exists, but it is no longer the only expected communication path.
+
+### 10.5 Important message types
+
+Current message types in active use:
+
+- `REQ_LAYER_DEFAULTS`
+  - Library asks the editor for registry defaults.
+
+- `RES_LAYER_DEFAULTS`
+  - Editor sends a `layerId -> defaults` map back.
+
+- `RENDER_LIBRARY_FILES`
+  - Library uploads one or more JSON payloads and asks the editor to render/store them.
+
+- `LOAD_PROJECT`
+  - Library asks the editor to load a selected project payload.
+
+- `START_RENDER`
+  - Editor tells the Library to show the loading overlay.
+
+- `UPDATE_PROGRESS`
+  - Editor updates Library progress state during batch processing.
+
+- `LIBRARY_DB_UPDATED`
+  - Editor tells the Library to reload from IndexedDB.
+
+- `EDITOR_READY`
+  - Editor announces that it is live and ready so the Library can resync.
+
+## 11. How the Library Uses IndexedDB vs Messaging
+
+This distinction is important.
+
+### IndexedDB is used for:
+
+- persistent saved Library entries
+- Library grid data
+- project preview blobs
+- payload storage
+- cross-page shared persistence
+
+### Messaging is used for:
+
+- requesting layer defaults
+- asking the editor to render uploaded JSON files
+- asking the editor to load a selected project
+- showing progress during editor-side batch rendering
+- telling the Library to refresh after DB changes
+- announcing editor readiness
+
+Do not confuse these responsibilities.
+
+If saves appear to "not show up in the Library," the problem might be:
+
+- save did not actually write to IndexedDB
+- the Library did not refresh its DB view
+- the cross-window signal failed
+
+Those are different failure classes.
+
+## 12. `actions.processLibraryPayloads(...)`
+
+This action is important because it is where uploaded Library JSON files become actual Library entries.
+
+Current flow:
+
+1. The Library sends `RENDER_LIBRARY_FILES` with JSON strings and filenames.
+2. The editor receives the message.
+3. The editor sends `START_RENDER`.
+4. For each payload:
+   - parse JSON
+   - validate payload
+   - require embedded `source.imageData`
+   - rebuild/normalize layer stack
+   - load the source image into the engine
+   - render a preview blob with `engine.exportPngBlob(...)`
+   - save a new Library record into IndexedDB
+   - send `UPDATE_PROGRESS`
+5. Restore the editor's original source image if possible.
+6. Send `LIBRARY_DB_UPDATED`.
+
+Important recent change:
+
+- This path no longer requires `window.libraryWindow` to exist.
+- It can work even if the Library is not the editor-opened popup, as long as both pages are same-origin and the channel can reach the editor.
+
+## 13. Opening the Library Window
+
+`actions.openLibrary()` currently:
+
+1. Reuses `window.libraryWindow` if it exists and is still open.
+2. Otherwise resolves `library.html` against `window.location.href`.
+3. Opens the page with named target `ModularStudioLibrary`.
+4. Shows a warning notice if the popup was blocked.
+5. Emits `EDITOR_READY` so the Library can resync immediately.
+
+Important:
+
+- The current architecture does not use `document.write`.
+- There is no `isLibraryInitialized` bootstrap flag anymore.
+- The Library is a real file, not dynamically generated HTML.
+
+## 14. Library Resync Behavior
+
+`src/ui/library.js` refreshes proactively in multiple situations:
+
+- initial page load
+- when it receives `LIBRARY_DB_UPDATED`
+- when it receives `RES_LAYER_DEFAULTS`
+- when it receives `EDITOR_READY`
+- when the window gains focus
+- when the page becomes visible again
+
+This is intentional and should not be "simplified" without understanding why. It is part of the reliability strategy for multi-window use.
+
+## 15. File Import / Export Formats
+
+### 15.1 Standard editor document JSON
+
+Handled through `src/io/documents.js` and editor save/open actions.
+
+This represents the document state and may or may not include embedded image data depending on save settings.
+
+### 15.2 Library full-project export
+
+The Library "Save Full Project" action exports the entire Library as a JSON array.
+
+Each entry looks like:
+
 ```json
-[
-  { "_libraryName": "sunset-warm.mns.json", "version": 2, "kind": "document", "source": {...}, "layerStack": [...] },
-  { "_libraryName": "night-city.mns.json", ... }
-]
+{
+  "_libraryName": "example-name",
+  "version": 2,
+  "kind": "document",
+  "...": "payload fields"
+}
 ```
-On re-import via the Library's "Upload JSON" button, the unrolling logic checks `item._libraryName` to restore original filenames rather than generating synthetic names.
 
-### 5.9 Export All JSONs (ZIP)
-The "Export All JSONs" button uses JSZip to package each library entry as an individual `.mns.json` file:
-- Each file contains `{ version: 2, kind: 'document', ...payload }` formatted with `JSON.stringify(payload, null, 2)`.
-- Filenames are preserved from the original upload. If a name doesn't end in `.json`, `.mns.json` is appended.
-- The ZIP is downloaded as `modular_studio_exports.zip`.
+`_libraryName` is used when re-importing into the Library so filenames can be restored.
 
----
+### 15.3 Library ZIP export
 
-## 6. Exporting, Batch Processing & State Persistence
+The Library "Export All JSONs" action:
 
-- **Image Export**: Found in `src/main.js` via `actions.exportCurrent()`. The engine is requested to execute `engine.exportPngBlob(state.document)`. The engine processes the layer stack offscreen at the final compiled resolution and returns a PNG Blob, which the main script downloads.
-- **State Saving (JSON Download)**: Users can save their workspace parameters using `actions.saveState()`. This serializes the current `documentState` (minus raw image data, unless the "Save Image" toggle is on) into a JSON file for later restoration via `src/io/documents.js`.
-- **State Saving (Library)**: Users can save directly to IndexedDB via the "Save to Library" toolbar button. See Section 5 for full details.
+- creates a ZIP with JSZip
+- writes one `.mns.json` file per Library entry
+- ensures `{ version: 2, kind: 'document', ...payload }` shape
+- preserves filenames where possible
 
----
+The ZIP downloads as `modular_studio_exports.zip`.
 
-## 7. State Routing & Fixed UI Components
-- **Global State vs Engine State**: The application splits transient UI triggers (`state.ui`) from saveable, persistent document logic (`state.document`). The WebGL engine (`pipeline.js`) is only passed the `documentState` object on render. Any UI toggle that explicitly requires forcing or gating engine functionality (such as toggling a render-target canvas via `layerPreviewsOpen`) must logically be registered in **`state.document.view`** (via `src/state/documentHelpers.js`), not `state.ui`.
-- **Sticky UI Hoisting**: `src/ui/workspaces.js` wraps the majority of the Inspector sidebar inside a `<div class="sidebar-scroll">` container. If a new UI feature (like a preview canvas or top-level toolbox) needs to remain fixed on the screen while the user scrolls, its HTML string must be hoisted completely out of localized element functions (like `renderLayerPanel`) and injected directly above the scroll envelope inside the highest level `renderSidebar()`.
+## 16. Hosting and Deployment Notes
 
----
+The editor and Library are designed for same-origin deployment.
 
-## 8. Framebuffer Aspect Ratio Constraints
-When extracting WebGL data to push to static UI components (like `320x180` canvases), directly drawing (`renderPreviewTexture`) into a fixed rectangular Framebuffer (FBO) will rigidly squash or stretch pixels, permanently destroying the image's layout logic in the UI.
-- **The Rule**: Buffer FBOs intended for generic UI bridging (like `thumbnailFBO`) must be statically allocated to maximum square limits (e.g., `320x320`).
-- **Aspect Calculation**: The readback methodology (e.g., `drawTextureToThumbnail()`) must dynamically calculate a bounding box constraint (`gl.viewport(0, 0, tw, th)`) cleanly aligned to the active document's true aspect ratio before reading back pixels. The safely extracted array is then natively letterboxed by the 2D canvas `drawImage` UI call.
+This is required for:
 
----
+- shared IndexedDB access
+- safe same-origin `postMessage`
+- `localStorage` event-based fallback transport
 
-## 9. Common Gotchas & Patterns
+GitHub Pages should be a valid deployment target as long as:
 
-### 9.1 Library Architecture (Static Files)
-The Library UI is no longer managed via `document.write`. It resides in a dedicated physical file to ensure shared persistence.
-- **Cross-Window Syncing**: Data like `LAYER_DEFAULTS` that needs to stay in sync with the registry is passed via a message handshake on window load.
-- **Script Handling**: External libraries like JSZip are loaded via standard `<script>` tags in the HTML head to avoid parser-blocking warnings.
+- `index.html` and `library.html` are both published
+- their relative asset paths remain valid
+- both pages resolve under the same Pages origin
 
-### 9.2 Named Window Deduplication
-The Library tab uses `window.open('', 'ModularStudioLibrary')` with a named target. If a window with that name already exists, the browser returns the existing window instead of opening a new one. The `isLibraryInitialized` flag prevents re-writing the HTML content.
+If the app works on localhost but not on GitHub Pages, likely suspects include:
 
-### 9.3 BroadcastChannel vs postMessage
-- Use `BroadcastChannel` for messages that must survive page reloads (Library→Main).
-- Use `window.postMessage` for messages where the sender holds a direct reference to the target window (Main→Library via `window.libraryWindow`).
+- popup blocking or popup policy differences
+- a stale open tab still running older JS
+- path resolution/deploy path mismatch
+- one transport API behaving differently in that browser
+- same-origin assumptions being broken by how the pages are opened
 
-### 9.4 IndexedDB Transactions
-Each DB helper opens a fresh `indexedDB.open()` connection. This is intentional — it avoids stale connection issues. The Library tab also has its own independent set of IndexedDB helpers (duplicated inline) since it runs in a separate `document.write` context.
+Do not assume the solution is "move the Library into an overlay" until transport and hosting assumptions have been tested first.
 
----
+## 17. Common Gotchas
 
-## 10. AI Instructions for Maintaining This Document
+### 17.1 Library architecture is static-page based
 
-**CRITICAL INSTRUCTION FOR ALL FUTURE AI AGENTS:** 
-If you make architectural changes to this codebase (e.g., adding new core systems, changing how state is managed, altering the UI generator logic, modifying the WebGL rendering pipeline, or extending the Library system), **you MUST update this document** to reflect those changes.
+The Library is a dedicated file (`library.html`), not editor-injected HTML.
 
-However, do **NOT** update this document for routine work, such as adding a new standard layer, fixing a localized bug, or tweaking styles. Only update this file if the underlying structural rules or directory responsibilities described above have fundamentally changed. Keep this guide accurate, dense, and focused strictly on the application's core architecture.
+### 17.2 Fresh DB connections are intentional
+
+Each DB helper opens IndexedDB fresh instead of sharing one long-lived connection. This reduces stale-connection edge cases between windows.
+
+### 17.3 The Library detail modal depends on live registry defaults
+
+If the detail modal starts showing too many params, check the `REQ_LAYER_DEFAULTS` / `RES_LAYER_DEFAULTS` handshake first.
+
+### 17.4 Not every cross-window issue is a DB issue
+
+The Library can fail to refresh even when the DB write succeeded.
+
+### 17.5 Not every importable JSON can be rendered
+
+`actions.processLibraryPayloads(...)` expects embedded source image data. Payloads without `source.imageData` cannot produce preview renders.
+
+## 18. Guidance for Future AI Work
+
+If you change any of these systems, update this file:
+
+- editor/document state shape
+- Library architecture
+- IndexedDB schema
+- cross-window transport
+- file formats
+- engine/render pipeline rules
+- registry/layer architecture
+
+Do not update this file for routine styling or one-off bug fixes unless they change the architectural truth future agents need to know.
+
+If a future AI is debugging Library problems, it should trace issues in this order:
+
+1. Did the editor write the expected record into IndexedDB?
+2. Did the cross-window channel deliver the expected command/signal?
+3. Did the Library refresh from IndexedDB afterward?
+4. Is the issue local-only, Pages-only, or browser-specific?
+5. Is the problem transport, persistence, or payload validity?

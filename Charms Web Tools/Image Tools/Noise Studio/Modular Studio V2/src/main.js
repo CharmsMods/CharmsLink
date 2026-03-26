@@ -1,6 +1,7 @@
 import { createStore } from './state/store.js';
 import { loadRegistry, createLayerInstance, relabelInstance } from './registry/index.js';
 import { downloadState, readJsonFile, validateImportPayload } from './io/documents.js';
+import { createCrossWindowChannel } from './io/crossWindowChannel.js';
 import { NoiseStudioEngine } from './engine/pipeline.js';
 import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
@@ -343,7 +344,9 @@ function createPaletteFromImage(image, count) {
 
 window.addEventListener('DOMContentLoaded', async () => {
     const registry = await loadRegistry();
-    const libraryChannel = new BroadcastChannel('ModularStudioLibraryChannel');
+    const libraryChannel = createCrossWindowChannel('ModularStudioLibraryChannel', {
+        resolveTargetWindow: () => (window.libraryWindow && !window.libraryWindow.closed ? window.libraryWindow : null)
+    });
     const store = createStore(createInitialState());
     const root = document.getElementById('app');
     const engine = new NoiseStudioEngine(registry, {
@@ -454,11 +457,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     const sendToLibrary = (msg) => {
-        const enriched = { ...msg, _mid: Date.now() + '-' + Math.random().toString(36).substring(2, 7) };
-        libraryChannel.postMessage(enriched);
-        if (window.libraryWindow && !window.libraryWindow.closed) {
-            window.libraryWindow.postMessage(enriched, '*');
-        }
+        libraryChannel.send(msg);
     };
 
     const actions = {
@@ -1177,7 +1176,6 @@ window.addEventListener('DOMContentLoaded', async () => {
             setNotice('Batch export complete.', 'success');
         },
         async processLibraryPayloads(payloadsText, filenames) {
-            if (!window.libraryWindow || window.libraryWindow.closed) return;
             const state = store.getState();
             const originalSource = state.document.source;
             setNotice(`Rendering ${payloadsText.length} variants to Library DB...`, 'info', 0);
@@ -1227,7 +1225,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                 window.libraryWindow.focus();
                 return;
             }
-            window.libraryWindow = window.open('library.html', 'ModularStudioLibrary');
+            const libraryUrl = new URL('library.html', window.location.href).toString();
+            window.libraryWindow = window.open(libraryUrl, 'ModularStudioLibrary');
+            if (!window.libraryWindow) {
+                setNotice('Popup blocked. Allow popups or open library.html in another tab.', 'warning', 7000);
+                return;
+            }
+            sendToLibrary({ type: 'EDITOR_READY' });
         },
         handlePreviewClick(event) {
             const state = store.getState();
@@ -1318,15 +1322,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    const processedMids = new Set();
     const handleLibraryMessage = async (data, source) => {
         if (!data || !data.type) return;
-        
-        if (data._mid) {
-            if (processedMids.has(data._mid)) return;
-            processedMids.add(data._mid);
-            setTimeout(() => processedMids.delete(data._mid), 10000);
-        }
 
         if (data.type === 'REQ_LAYER_DEFAULTS') {
             const defaultsMap = Object.fromEntries(registry.layers.map(l => [l.layerId, l.defaults]));
@@ -1368,8 +1365,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    libraryChannel.onmessage = (e) => handleLibraryMessage(e.data, null);
-    window.addEventListener('message', (e) => handleLibraryMessage(e.data, e.source));
+    libraryChannel.subscribe((data, meta) => handleLibraryMessage(data, meta?.source || null));
 
     view = createWorkspaceUI(root, registry, actions);
     await engine.init(view.getRenderRefs().canvas);
@@ -1385,5 +1381,6 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     view.render(store.getState());
     engine.attachRefs(view.getRenderRefs());
+    sendToLibrary({ type: 'EDITOR_READY' });
     setNotice('Load an image to start editing.', 'info', 6500);
 });
