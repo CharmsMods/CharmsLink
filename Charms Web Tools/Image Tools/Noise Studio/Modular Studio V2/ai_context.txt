@@ -1,0 +1,292 @@
+# Modular Studio V2 - Architecture & Context Guide
+
+This document is designed to give AI assistants a quick, information-dense overview of the Modular Studio V2 codebase structure, how it works, and how to add new features or layers.
+
+## 1. Directory Structure & Responsibilities
+
+The codebase is split into modern modules (`src/`) and legacy/shader files (`Shaders/`, root files).
+
+### Root Files
+- `index.html`: The main entry point. Sets up the DOM shell and loads `<script type="module" src="src/main.js"></script>`.
+- `style.css` / `index.css`: Core application styling.
+- **`LEGACY/` Folder**: Contains retired files from the V1 architecture (such as `app.js`, `ui-generator.js`, and old JSON shader bindings). This folder can usually be ignored.
+
+### `src/` Directory (Modern Architecture)
+- **`main.js`**: State management central. Initializes `documentState`, exposes public `actions` (e.g., `updateControl`, `addLayer`), and orchestrates updates to the WebGL engine and UI frames. Also hosts the **IndexedDB Library system**, **Library tab HTML** (generated via `document.write` into a named popup), and **BroadcastChannel** cross-window messaging.
+- **`src/registry/`**: Defines available filters/layers.
+  - `layerRegistry.json`: The master manifest. Every layer (Noise, Blur, Chromatic Aberration) is defined here with an ID, UI controls, default parameters, and mapping (`bindings`) connecting UI keys to GLSL uniforms.
+  - `index.js`: Loads the JSON registry, parses it, and safely instantiates layer instances.
+- **`src/engine/`**: The custom WebGL pipeline (`NoiseStudioEngine`).
+  - `pipeline.js`: The core render iteration. It calculates layout resolutions, sets up dual texture ping-ponging Framebuffer Objects (FBOs), iterates through `documentState.layerStack`, and executes shader programs in series.
+  - `bootstrap.js` & `executors/`: Manages texture uploads, shader compilation, and specialized execution commands.
+- **`src/ui/`**: 
+  - `workspaces.js`: Maps high-level application state to the DOM (menus, canvas positioning, workspace layout frames). Contains the toolbar buttons (Save JSON, Save to Library, Library, New Project, etc.) and delegates click events to `actions.*`.
+- **`src/state/`**: 
+  - `documentHelpers.js`: Contains utility logic for mutating and interpreting the `documentState` object layout safely.
+- **`src/io/`**: 
+  - `documents.js`: Handles JSON serialization, validation (`validateImportPayload`), and file reading for state import/export.
+
+### `Shaders/` Directory
+- Contains `.frag` and `.vert` GLSL files for all hardware-accelerated image effects processed by the engine.
+
+---
+
+## 2. Global State & Rendering Flow
+
+1. **State Store (`src/main.js`)**: Holds `documentState`, tracking `layerStack` array, `selection`, and `view` settings.
+2. **Action Trigger**: A user interacts with an input in the sidebar (rendered by `src/ui/workspaces.js`). It fires an event calling `actions.updateControl(instanceId, key, value)`.
+3. **State Update**: `main.js` immutably copies the state tree, injecting the new parameter.
+4. **Queue Render**: If the update requests rendering (`{ render: true }`), `main.js` triggers `requestAnimationFrame(() => engine.render(state))`.
+5. **Engine Execution**: (`src/engine/pipeline.js`) Takes over to execute the two-pass WebGL pipeline.
+
+### 2.1 Engine Render Pipeline Deep Dive
+The WebGL pipeline (`NoiseStudioEngine`) uses a two-pass architecture to process the layer stack efficiently while allowing mid-stack resolution changes:
+
+1. **Resolution & Layout Pass (`reallocateBuffers`)**:
+   - The engine iterates through `documentState.layerStack` from bottom to top.
+   - It calculates the required canvas dimensions at each step. While standard layers maintain the current resolution, spatial modifiers (like `scale` or `expander`) actively multiply or add to the `currentWidth` and `currentHeight`.
+   - For every unique resolution encountered in the stack, it generates a cache key (e.g., `1920x1080`).
+   - `ensurePool(w, h)` then instantiates Framebuffer Object (FBO) pools for those resolutions. Each pool contains dedicated textures (`pingPong0`, `pingPong1`, `preview`, `maskTotal`) allocated to that exact width/height, preventing expensive mid-render reallocation.
+
+2. **Execution Pass (`render`)**:
+   - The engine iterates through the stack a second time, pulling the pre-calculated resolution and layout bounds for each instance.
+   - `gl.viewport` is adjusted dynamically if the resolution shifted since the previous layer.
+   - **Ping-Ponging**: The output texture of the previous layer (`currentTex`) is bound as the input for the current layer's shader. The shader executes and draws into the alternate buffer of the FBO pool (`pingPong0` or `pingPong1`, alternating via `pool.writeIdx`). This newly written buffer becomes the new `currentTex`.
+   - **Alpha Protection**: If alpha protection is enabled, the engine automatically runs `applyAlphaProtection` via an auxiliary shader pass immediately after the layer finishes, restoring the original transparency of protected pixels.
+   - This ping-ponging loop continues to the top of the stack, where the final `currentTex` is painted to the display canvas and dispatched to the analysis scopes.
+
+---
+
+## 3. Adding and Configuring Layers
+
+Adding a new layer requires modifying the engine registry, adding the physical GLSL shader, and optionally binding internal UI scopes. 
+
+### 3.1 Write the GLSL Shader
+1. Create a fragment shader in `Shaders/` (e.g., `Shaders/vibrance.frag`).
+2. Ensure it strictly declares the boilerplate inputs and outputs: `uniform sampler2D u_tex;`, `in vec2 v_uv;`, `out vec4 outColor;`, and any specific uniforms you need (e.g., `uniform float u_amount;`). (Failure to use `v_uv` or `u_tex` will cause WebGL linking errors).
+
+### 3.2 Register Layer and Bind Uniforms
+1. Open `src/registry/layerRegistry.json`.
+2. Append a top-level object to the `"layers"` array.
+3. Map metadata: `"layerId": "vibrance"`, `"label": "Vibrance"`, `"group": "color"`, `"executor": "shader"`.
+4. Map the asset: `"shader": "Shaders/vibrance.frag"`.
+5. Define the UI controls under the `"controls"` array (e.g., type `range`, `"key": "vibranceAmount"`).
+6. Bind the Uniforms: Within `"bindings"`, map the UI keys to the actual shader variables:
+   ```json
+   "bindings": [
+     {
+       "uniform": "u_amount",
+       "key": "vibranceAmount",
+       "type": "float",
+       "divideBy": 100
+     }
+   ]
+   ```
+
+### 3.3 Strict Registry Constraints
+You **must** adhere strictly to the internal validation sets defined in `src/registry/index.js`. Any deviation throws a validation error.
+- **Valid Layer Groups** (`layer.group`): `'base'`, `'color'`, `'texture'`, `'optics'`, `'stylize'`, `'damage'`.
+- **Valid Control Types** (`control.type`): `'range'`, `'select'`, `'checkbox'`, `'color'`, `'message'`, `'separator'`, `'button'`, `'actionRow'`, `'swatchList'`, `'paletteEditor'`, `'conditionalGroup'`, `'colorWheel3Way'`, `'bgPatcherEditor'`, `'expanderEditor'`.
+- You cannot invent new control types or groups without rewriting `src/registry/index.js` validation and `src/ui/workspaces.js` rendering.
+
+### 3.4 Masking Architecture
+Layers that support masking declare a `"mask"` object in their `layerRegistry.json` definition. 
+- These definitions (e.g., `lumaMask`, `colorExclude`) automatically inject standardized UI controls (Thresholds, Fades, Tolerances) into the layer's sidebar panel via `workspaces.js`.
+- These UI values are bound to the layer's uniform properties. The layer's specific shader (e.g., `adjustMasked.frag`) then incorporates these uniforms directly into its GLSL to perform the masking math.
+
+### 3.5 Sub-Layer Internal Previews
+The Layer Settings tab features a collapsible Sub-Layer Preview canvas (`320x180`) allowing users to cycle internal states of the active layer (e.g., viewing raw generation or isolating masks).
+**How to add Sub-Layer Views:**
+1. Open `src/engine/pipeline.js` and locate `updateSubLayerPreview(documentState)`.
+2. Add a new `if (layerDef.layerId === 'yourNewLayerId')` branch.
+3. Push string titles into the `availableViews` array (e.g., `'Isolated Blur'`).
+4. Push corresponding anonymous render callbacks into the `viewDraws` array. Use `this.drawTextureToThumbnail(targetTexture, canvas)` to push WebGL FBO textures to the DOM element.
+5. **Texture Sourcing**: You usually pull derived textures directly from the `pool` object (e.g., `pool.preview.tex`), or by forcing the engine to run a sub-pass synchronously (like `const maskTex = renderMaskPreview(...)`).
+
+### 3.6 Advanced / Custom Engine Hooks
+- If a layer alters dimensions (`scale`, `expander`), modifies the alpha channel exclusively, or uses multi-pass loops (`blur`), it must use `"executor": "manual"`. 
+- For manual execution, you will need to add branch logic explicitly inside `src/engine/pipeline.js` rendering loop, or within `src/engine/executors/`.
+- Ensure `src/registry/index.js` `collectDefaultParams` supports any non-standard UI control types you invent.
+
+---
+
+## 4. UI Generation & Event Binding
+
+UI generation is strictly handled within `src/ui/workspaces.js`. The V1 script `ui-generator.js` is fully retired.
+- **Rendering**: The `renderControl(instance, control, state, layerDef)` function parses the `"controls"` array from the registry JSON. It maps types (like `range`, `select`, `color`, `checkbox`) directly to HTML string templates.
+- **Binding**: Input elements generated by `renderControl` embed `data-control-key` attributes. Event delegation on the root window listens for `input`/`change` events on these elements and routes them to `actions.updateControl(instanceId, key, value)`.
+
+### 4.1 Toolbar Actions
+The top toolbar in `workspaces.js` contains buttons bound via `data-action` attributes. Click delegation in `handleToolbarClick()` maps these attribute values to `actions.*` methods:
+- `save-state` → `actions.saveState()` (download JSON)
+- `save-to-library` → `actions.saveProjectToLibrary()` (persist to IndexedDB)
+- `export-current` → `actions.exportCurrent()` (PNG export)
+- `compare-open` → `actions.openCompare()` (before/after compare)
+- `new-project` → `actions.newProject()` (clears canvas + saves current)
+- `open-library` → `actions.openLibrary()` (opens/focuses the Library tab)
+
+---
+
+## 5. Library System (IndexedDB + Secondary Tab)
+
+The Library is a persistent project management system that stores rendered thumbnails + full project payloads in `IndexedDB`. It operates as a separate browser tab opened via `window.open()`.
+
+### 5.1 IndexedDB Storage (`main.js`, top of file)
+The database `ModularStudioDB` has a single object store `LibraryProjects` with `keyPath: 'id'`.
+
+**Helper functions** (defined at module scope in `main.js`):
+- `initDB()` → Opens or upgrades the database.
+- `saveToLibraryDB(project)` → `put` a project (upsert by `id`).
+- `deleteFromLibraryDB(id)` → Delete a single project.
+- `clearAllFromLibraryDB()` → Wipe the entire store.
+- `getAllFromLibraryDB()` → Fetch all projects.
+
+**Project record schema:**
+```js
+{
+  id: String,           // unique ID (base36 timestamp + random)
+  timestamp: Number,    // Date.now()
+  name: String,         // original filename or user-given name
+  blob: Blob,           // rendered PNG thumbnail
+  payload: Object       // full document state (source, layerStack, workspace, export)
+}
+```
+
+### 5.2 Deduplication & Fingerprinting
+`makeProjectFingerprint(payload)` generates a string key from `source.name` + serialized layer params. Before saving, `saveProjectToLibrary` compares the fingerprint of the current project against its last known state. If identical, it short-circuits with "Already saved — no changes detected."
+
+### 5.3 Origin Tracking (Overwrite vs. New Entry)
+Two module-level variables track which Library entry is currently loaded:
+- `activeLibraryId` — The `id` of the library record the project was loaded from (or `null`).
+- `activeLibraryName` — The `name` of that record.
+
+When `saveProjectToLibrary()` is called:
+- **If `activeLibraryId` is set** (project was loaded from Library): The user is prompted to either keep the same name (overwrite) or type a new name (save as new entry).
+- **If `activeLibraryId` is null** (fresh project): A standard `prompt()` asks for a name.
+
+`newProject()` resets both to `null`, ensuring the next save treats the project as brand new.
+
+### 5.4 Cross-Window Communication
+The main studio and Library tab communicate via **two distinct channels**:
+
+1. **`BroadcastChannel('ModularStudioLibraryChannel')`** — Library→Main messages. Used for:
+   - `RENDER_LIBRARY_FILES` — Library uploads JSON files, sends payloads to main engine for rendering.
+   - `LOAD_PROJECT` — User clicks a grid item to load into the editor. Includes `payload`, `libraryId`, and `libraryName`.
+   
+   BroadcastChannel was chosen over `window.opener.postMessage` because it **survives page reloads**. If the user refreshes the main studio, the Library tab can still send messages to it.
+
+2. **`window.postMessage()`** — Main→Library messages. Used for:
+   - `START_RENDER` — Tells Library to show the loading overlay.
+   - `UPDATE_PROGRESS` — Updates the progress bar during batch rendering.
+   - `LIBRARY_DB_UPDATED` — Tells Library to refresh its grid from IndexedDB.
+   
+   These use `window.libraryWindow.postMessage()` since the main studio holds the `window.open()` reference.
+
+### 5.5 Library Tab HTML (Inline in `main.js`)
+The Library tab is generated as a raw HTML string via `const html = \`...\`` inside `actions.openLibrary()`, then written to the popup via `document.write()`. Key components:
+
+**Header Buttons:**
+| Button | ID | Function |
+|---|---|---|
+| Upload JSON | `btnUpload` | Opens file picker for `.json`/`.mns.json` files, sends payloads to main for rendering |
+| Hover Reveal Original | `btnHover` | Toggles hover-to-see-original on grid/fullscreen images |
+| Show Interactive Series | `btnFullscreen` | Switches between grid view and click-to-advance single-image view |
+| Save Full Project | `btnDownloadSave` | Downloads entire library as single JSON array (each entry wrapped with `_libraryName`) |
+| Export All JSONs | `btnExportZip` | Packages each entry as individual `.mns.json` file in a ZIP (uses JSZip CDN) |
+| Clear All | `btnClearAll` | Prompts save-first, then confirmation, then wipes IndexedDB |
+
+**Custom Modal System:**
+All user interaction dialogs (delete, load, clear all, alerts) use styled in-page modals instead of browser `confirm()`/`alert()`.
+- `showModal(message, buttons)` → Returns a `Promise` that resolves to the clicked button's `value`.
+- `showAlert(message)` → Single "OK" button.
+- `showConfirm(message)` → "Cancel" + "Confirm" buttons.
+- Buttons can have `.primary` (cyan) or `.danger` (red) styling classes.
+- The modal overlay uses `backdrop-filter: blur(4px)`.
+
+**Grid Item Structure:**
+Each grid item shows: project name (`.label`), delete button (`×`, hover-to-reveal), hover hint, and an image container with base + hover images (crossfade via CSS `opacity` transition).
+
+**Fullscreen View:**
+Click-to-advance single-image viewer with a label showing `name (index / total)`.
+
+**External Dependencies:**
+- **JSZip (v3.10.1)**: Loaded from `cdnjs.cloudflare.com` CDN for the "Export All JSONs" ZIP packaging.
+
+### 5.6 Library-Related Actions in `main.js`
+- `actions.saveProjectToLibrary(nameOverride, forceNew)` — Core save logic with dedup, fingerprinting, overwrite/new prompt.
+- `actions.newProject()` — Saves current project to Library, then clears canvas, layerStack, and resets `activeLibraryId`/`activeLibraryName`.
+- `actions.processLibraryPayloads(payloadsText, filenames)` — Batch-renders uploaded JSON files using the engine, saves each to IndexedDB, sends progress messages to Library tab.
+- `actions.openLibrary()` — Opens or focuses the Library tab. Uses named window `'ModularStudioLibrary'` to prevent duplicates. Checks `isLibraryInitialized` flag to avoid re-writing HTML.
+
+### 5.7 Auto-Save Hooks
+Several user actions trigger automatic Library saves:
+- **`openImageFile(file)`** — After loading an image, calls `saveProjectToLibrary(file.name)`.
+- **`openStateFile(file)`** — After loading a JSON preset, calls `saveProjectToLibrary(file.name)`.
+- **`LOAD_PROJECT` handler** — Before loading a Library project, auto-saves the current project if one is loaded.
+
+### 5.8 Save Full Project Format
+The "Save Full Project" export creates a JSON array where each element is a project payload augmented with `_libraryName`:
+```json
+[
+  { "_libraryName": "sunset-warm.mns.json", "version": 2, "kind": "document", "source": {...}, "layerStack": [...] },
+  { "_libraryName": "night-city.mns.json", ... }
+]
+```
+On re-import via the Library's "Upload JSON" button, the unrolling logic checks `item._libraryName` to restore original filenames rather than generating synthetic names.
+
+### 5.9 Export All JSONs (ZIP)
+The "Export All JSONs" button uses JSZip to package each library entry as an individual `.mns.json` file:
+- Each file contains `{ version: 2, kind: 'document', ...payload }` formatted with `JSON.stringify(payload, null, 2)`.
+- Filenames are preserved from the original upload. If a name doesn't end in `.json`, `.mns.json` is appended.
+- The ZIP is downloaded as `modular_studio_exports.zip`.
+
+---
+
+## 6. Exporting, Batch Processing & State Persistence
+
+- **Image Export**: Found in `src/main.js` via `actions.exportCurrent()`. The engine is requested to execute `engine.exportPngBlob(state.document)`. The engine processes the layer stack offscreen at the final compiled resolution and returns a PNG Blob, which the main script downloads.
+- **State Saving (JSON Download)**: Users can save their workspace parameters using `actions.saveState()`. This serializes the current `documentState` (minus raw image data, unless the "Save Image" toggle is on) into a JSON file for later restoration via `src/io/documents.js`.
+- **State Saving (Library)**: Users can save directly to IndexedDB via the "Save to Library" toolbar button. See Section 5 for full details.
+
+---
+
+## 7. State Routing & Fixed UI Components
+- **Global State vs Engine State**: The application splits transient UI triggers (`state.ui`) from saveable, persistent document logic (`state.document`). The WebGL engine (`pipeline.js`) is only passed the `documentState` object on render. Any UI toggle that explicitly requires forcing or gating engine functionality (such as toggling a render-target canvas via `layerPreviewsOpen`) must logically be registered in **`state.document.view`** (via `src/state/documentHelpers.js`), not `state.ui`.
+- **Sticky UI Hoisting**: `src/ui/workspaces.js` wraps the majority of the Inspector sidebar inside a `<div class="sidebar-scroll">` container. If a new UI feature (like a preview canvas or top-level toolbox) needs to remain fixed on the screen while the user scrolls, its HTML string must be hoisted completely out of localized element functions (like `renderLayerPanel`) and injected directly above the scroll envelope inside the highest level `renderSidebar()`.
+
+---
+
+## 8. Framebuffer Aspect Ratio Constraints
+When extracting WebGL data to push to static UI components (like `320x180` canvases), directly drawing (`renderPreviewTexture`) into a fixed rectangular Framebuffer (FBO) will rigidly squash or stretch pixels, permanently destroying the image's layout logic in the UI.
+- **The Rule**: Buffer FBOs intended for generic UI bridging (like `thumbnailFBO`) must be statically allocated to maximum square limits (e.g., `320x320`).
+- **Aspect Calculation**: The readback methodology (e.g., `drawTextureToThumbnail()`) must dynamically calculate a bounding box constraint (`gl.viewport(0, 0, tw, th)`) cleanly aligned to the active document's true aspect ratio before reading back pixels. The safely extracted array is then natively letterboxed by the 2D canvas `drawImage` UI call.
+
+---
+
+## 9. Common Gotchas & Patterns
+
+### 9.1 Template Literals in Library HTML
+The Library tab HTML is defined as a JavaScript template literal (backtick string) inside `main.js`. When nesting template literals within this string (e.g., for grid item HTML), inner backticks and `${}` interpolations must be escaped with `\`:
+```js
+// Inside the outer template literal:
+const itemHtml = \`<div data-index="\${index}">\${res.name}</div>\`;
+```
+
+### 9.2 Named Window Deduplication
+The Library tab uses `window.open('', 'ModularStudioLibrary')` with a named target. If a window with that name already exists, the browser returns the existing window instead of opening a new one. The `isLibraryInitialized` flag prevents re-writing the HTML content.
+
+### 9.3 BroadcastChannel vs postMessage
+- Use `BroadcastChannel` for messages that must survive page reloads (Library→Main).
+- Use `window.postMessage` for messages where the sender holds a direct reference to the target window (Main→Library via `window.libraryWindow`).
+
+### 9.4 IndexedDB Transactions
+Each DB helper opens a fresh `indexedDB.open()` connection. This is intentional — it avoids stale connection issues. The Library tab also has its own independent set of IndexedDB helpers (duplicated inline) since it runs in a separate `document.write` context.
+
+---
+
+## 10. AI Instructions for Maintaining This Document
+
+**CRITICAL INSTRUCTION FOR ALL FUTURE AI AGENTS:** 
+If you make architectural changes to this codebase (e.g., adding new core systems, changing how state is managed, altering the UI generator logic, modifying the WebGL rendering pipeline, or extending the Library system), **you MUST update this document** to reflect those changes.
+
+However, do **NOT** update this document for routine work, such as adding a new standard layer, fixing a localized bug, or tweaking styles. Only update this file if the underlying structural rules or directory responsibilities described above have fundamentally changed. Keep this guide accurate, dense, and focused strictly on the application's core architecture.

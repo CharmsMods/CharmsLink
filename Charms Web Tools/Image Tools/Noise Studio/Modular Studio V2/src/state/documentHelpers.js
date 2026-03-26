@@ -10,7 +10,10 @@ export function createDefaultViewState() {
         zoom: 1,
         zoomLocked: false,
         highQualityPreview: false,
-        hoverCompareEnabled: true
+        hoverCompareEnabled: true,
+        isolateActiveLayerChain: false,
+        layerPreviewsOpen: false,
+        layerPreviewIndex: 0
     };
 }
 
@@ -26,7 +29,10 @@ export function normalizeViewState(view = {}) {
         highQualityPreview: !!view.highQualityPreview,
         hoverCompareEnabled: typeof view.hoverCompareEnabled === 'boolean'
             ? view.hoverCompareEnabled
-            : defaults.hoverCompareEnabled
+            : defaults.hoverCompareEnabled,
+        isolateActiveLayerChain: !!view.isolateActiveLayerChain,
+        layerPreviewsOpen: !!view.layerPreviewsOpen,
+        layerPreviewIndex: Number.isFinite(Number(view.layerPreviewIndex)) ? Number(view.layerPreviewIndex) : 0
     };
 }
 

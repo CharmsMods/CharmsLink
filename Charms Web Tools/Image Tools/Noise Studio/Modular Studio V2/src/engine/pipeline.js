@@ -44,10 +44,7 @@ function clampScale(width, height, maxDim) {
 }
 
 function getSelectedBreakdownItems(layerDef) {
-    const items = [
-        { key: 'chain', label: 'Chain Result' },
-        { key: 'isolated', label: 'Isolated Layer' }
-    ];
+    const items = [];
     if (layerDef?.mask) {
         items.push({ key: 'mask', label: 'Mask' });
     }
@@ -166,16 +163,16 @@ export class NoiseStudioEngine {
 
     allocateStaticBuffers() {
         const { gl } = this.runtime;
-        const thumb = makeFbo(gl, 320, 180, false);
-        this.runtime.thumbnailFBO = { ...thumb, w: 320, h: 180 };
+        const thumb = makeFbo(gl, 320, 320, false);
+        this.runtime.thumbnailFBO = { ...thumb, w: 320, h: 320 };
         const analysis = makeFbo(gl, 256, 256, false);
         this.runtime.analysisFBO = { ...analysis, w: 256, h: 256 };
         this.runtime.thumbTempCanvas = document.createElement('canvas');
         this.runtime.thumbTempCanvas.width = 320;
-        this.runtime.thumbTempCanvas.height = 180;
+        this.runtime.thumbTempCanvas.height = 320;
         this.runtime.thumbTempCtx = this.runtime.thumbTempCanvas.getContext('2d');
-        this.runtime.thumbPixelBuffer = new Uint8Array(320 * 180 * 4);
-        this.runtime.thumbClampedBuffer = new Uint8ClampedArray(320 * 180 * 4);
+        this.runtime.thumbPixelBuffer = new Uint8Array(320 * 320 * 4);
+        this.runtime.thumbClampedBuffer = new Uint8ClampedArray(320 * 320 * 4);
         this.runtime.analysisTempCanvas = document.createElement('canvas');
         this.runtime.analysisTempCanvas.width = 256;
         this.runtime.analysisTempCanvas.height = 256;
@@ -278,7 +275,7 @@ export class NoiseStudioEngine {
         this.runtime.layerResolutions = {};
         this.runtime.layerLayouts = {};
 
-        documentState.layerStack.forEach((instance) => {
+        for (const instance of documentState.layerStack) {
             if (!instance.visible || !instance.enabled) {
                 this.runtime.layerResolutions[instance.instanceId] = { w: currentWidth, h: currentHeight };
                 this.runtime.layerLayouts[instance.instanceId] = {
@@ -287,53 +284,57 @@ export class NoiseStudioEngine {
                     sourcePlacement: { ...sourcePlacement }
                 };
                 required.add(this.getPoolKey(currentWidth, currentHeight));
-                return;
+            } else {
+                if (instance.layerId === 'scale') {
+                    const scale = Math.max(0.1, parseFloat(instance.params.scaleMultiplier || 1));
+                    sourcePlacement = {
+                        x: sourcePlacement.x * scale,
+                        y: sourcePlacement.y * scale,
+                        w: sourcePlacement.w * scale,
+                        h: sourcePlacement.h * scale
+                    };
+                    currentWidthFloat *= scale;
+                    currentHeightFloat *= scale;
+                    const clamp = clampScale(currentWidthFloat, currentHeightFloat, maxDim);
+                    sourcePlacement = {
+                        x: sourcePlacement.x * clamp,
+                        y: sourcePlacement.y * clamp,
+                        w: sourcePlacement.w * clamp,
+                        h: sourcePlacement.h * clamp
+                    };
+                    currentWidthFloat *= clamp;
+                    currentHeightFloat *= clamp;
+                    currentWidth = Math.max(1, Math.round(currentWidthFloat));
+                    currentHeight = Math.max(1, Math.round(currentHeightFloat));
+                } else if (instance.layerId === 'expander') {
+                    const requestedPadding = Math.max(0, Math.round(Number(instance.params.expanderPadding || 0)));
+                    const maxPaddingX = Math.max(0, Math.floor((maxDim - currentWidthFloat) * 0.5));
+                    const maxPaddingY = Math.max(0, Math.floor((maxDim - currentHeightFloat) * 0.5));
+                    const appliedPadding = Math.max(0, Math.min(requestedPadding, maxPaddingX, maxPaddingY));
+                    currentWidthFloat += appliedPadding * 2;
+                    currentHeightFloat += appliedPadding * 2;
+                    sourcePlacement = {
+                        x: sourcePlacement.x + appliedPadding,
+                        y: sourcePlacement.y + appliedPadding,
+                        w: sourcePlacement.w,
+                        h: sourcePlacement.h
+                    };
+                    currentWidth = Math.max(1, Math.round(currentWidthFloat));
+                    currentHeight = Math.max(1, Math.round(currentHeightFloat));
+                }
+                this.runtime.layerResolutions[instance.instanceId] = { w: currentWidth, h: currentHeight };
+                this.runtime.layerLayouts[instance.instanceId] = {
+                    canvasWidth: currentWidth,
+                    canvasHeight: currentHeight,
+                    sourcePlacement: { ...sourcePlacement }
+                };
+                required.add(this.getPoolKey(currentWidth, currentHeight));
             }
-            if (instance.layerId === 'scale') {
-                const scale = Math.max(0.1, parseFloat(instance.params.scaleMultiplier || 1));
-                sourcePlacement = {
-                    x: sourcePlacement.x * scale,
-                    y: sourcePlacement.y * scale,
-                    w: sourcePlacement.w * scale,
-                    h: sourcePlacement.h * scale
-                };
-                currentWidthFloat *= scale;
-                currentHeightFloat *= scale;
-                const clamp = clampScale(currentWidthFloat, currentHeightFloat, maxDim);
-                sourcePlacement = {
-                    x: sourcePlacement.x * clamp,
-                    y: sourcePlacement.y * clamp,
-                    w: sourcePlacement.w * clamp,
-                    h: sourcePlacement.h * clamp
-                };
-                currentWidthFloat *= clamp;
-                currentHeightFloat *= clamp;
-                currentWidth = Math.max(1, Math.round(currentWidthFloat));
-                currentHeight = Math.max(1, Math.round(currentHeightFloat));
-            } else if (instance.layerId === 'expander') {
-                const requestedPadding = Math.max(0, Math.round(Number(instance.params.expanderPadding || 0)));
-                const maxPaddingX = Math.max(0, Math.floor((maxDim - currentWidthFloat) * 0.5));
-                const maxPaddingY = Math.max(0, Math.floor((maxDim - currentHeightFloat) * 0.5));
-                const appliedPadding = Math.max(0, Math.min(requestedPadding, maxPaddingX, maxPaddingY));
-                currentWidthFloat += appliedPadding * 2;
-                currentHeightFloat += appliedPadding * 2;
-                sourcePlacement = {
-                    x: sourcePlacement.x + appliedPadding,
-                    y: sourcePlacement.y + appliedPadding,
-                    w: sourcePlacement.w,
-                    h: sourcePlacement.h
-                };
-                currentWidth = Math.max(1, Math.round(currentWidthFloat));
-                currentHeight = Math.max(1, Math.round(currentHeightFloat));
+
+            if (documentState.view.isolateActiveLayerChain && documentState.selection.layerInstanceId === instance.instanceId) {
+                break;
             }
-            this.runtime.layerResolutions[instance.instanceId] = { w: currentWidth, h: currentHeight };
-            this.runtime.layerLayouts[instance.instanceId] = {
-                canvasWidth: currentWidth,
-                canvasHeight: currentHeight,
-                sourcePlacement: { ...sourcePlacement }
-            };
-            required.add(this.getPoolKey(currentWidth, currentHeight));
-        });
+        }
 
         this.runtime.renderWidth = currentWidth;
         this.runtime.renderHeight = currentHeight;
@@ -488,10 +489,16 @@ export class NoiseStudioEngine {
         this.runtime.selectedLayerContext = null;
         this.runtime.selectedLayerOutput = null;
 
-        documentState.layerStack.forEach((instance) => {
-            if (!instance.visible) return;
+        for (const instance of documentState.layerStack) {
+            if (!instance.visible) {
+                if (documentState.view.isolateActiveLayerChain && documentState.selection.layerInstanceId === instance.instanceId) break;
+                continue;
+            }
             const layerDef = this.registry.byId[instance.layerId];
-            if (!layerDef) return;
+            if (!layerDef) {
+                if (documentState.view.isolateActiveLayerChain && documentState.selection.layerInstanceId === instance.instanceId) break;
+                continue;
+            }
             const resolution = this.runtime.layerResolutions[instance.instanceId] || this.runtime.initialRes;
             const outputPlacement = this.runtime.layerLayouts[instance.instanceId]?.sourcePlacement || currentPlacement;
             const pool = this.ensurePool(resolution.w, resolution.h);
@@ -561,7 +568,11 @@ export class NoiseStudioEngine {
                 renderPreviewTexture(gl, this.runtime, currentTex, pool.chainCapture.fbo, 0);
                 this.runtime.selectedLayerOutput = pool.chainCapture.tex;
             }
-        });
+
+            if (documentState.view.isolateActiveLayerChain && documentState.selection.layerInstanceId === instance.instanceId) {
+                break;
+            }
+        }
 
         const finalWidth = this.runtime.renderWidth;
         const finalHeight = this.runtime.renderHeight;
@@ -583,6 +594,7 @@ export class NoiseStudioEngine {
             this.syncHoverPreview();
             this.updateScopes(currentTex);
             this.updateBreakdown(documentState);
+            this.updateSubLayerPreview(documentState);
             this.runtime.renderWidth = finalWidth;
             this.runtime.renderHeight = finalHeight;
             this.syncPopup();
@@ -633,18 +645,52 @@ export class NoiseStudioEngine {
         if (!canvas || !texture) return;
         const { gl } = this.runtime;
         const target = this.runtime.thumbnailFBO;
-        renderPreviewTexture(gl, this.runtime, texture, target.fbo, 0);
-        gl.readPixels(0, 0, target.w, target.h, gl.RGBA, gl.UNSIGNED_BYTE, this.runtime.thumbPixelBuffer);
-        for (let y = 0; y < target.h; y += 1) {
-            const srcOffset = (target.h - 1 - y) * target.w * 4;
-            const dstOffset = y * target.w * 4;
-            this.runtime.thumbClampedBuffer.set(this.runtime.thumbPixelBuffer.subarray(srcOffset, srcOffset + target.w * 4), dstOffset);
+        
+        const aspect = Math.max(1, this.runtime.renderWidth) / Math.max(1, this.runtime.renderHeight);
+        let tw = 320;
+        let th = 320;
+        if (aspect > 1) {
+            tw = 320;
+            th = Math.max(1, Math.floor(320 / aspect));
+        } else {
+            tw = Math.max(1, Math.floor(320 * aspect));
+            th = 320;
         }
-        const imageData = new ImageData(this.runtime.thumbClampedBuffer, target.w, target.h);
+
+        gl.viewport(0, 0, tw, th);
+        renderPreviewTexture(gl, this.runtime, texture, target.fbo, 0);
+        gl.readPixels(0, 0, tw, th, gl.RGBA, gl.UNSIGNED_BYTE, this.runtime.thumbPixelBuffer);
+        
+        for (let y = 0; y < th; y += 1) {
+            const srcOffset = (th - 1 - y) * tw * 4;
+            const dstOffset = y * tw * 4;
+            this.runtime.thumbClampedBuffer.set(this.runtime.thumbPixelBuffer.subarray(srcOffset, srcOffset + tw * 4), dstOffset);
+        }
+        
+        const imageData = new ImageData(new Uint8ClampedArray(this.runtime.thumbClampedBuffer.buffer, 0, tw * th * 4), tw, th);
+        this.runtime.thumbTempCanvas.width = tw;
+        this.runtime.thumbTempCanvas.height = th;
         this.runtime.thumbTempCtx.putImageData(imageData, 0, 0);
+        
         const ctx = canvas.getContext('2d', { alpha: false });
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(this.runtime.thumbTempCanvas, 0, 0, target.w, target.h, 0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const canvasAspect = canvas.width / canvas.height;
+        let drawW = canvas.width;
+        let drawH = canvas.height;
+        let offsetX = 0;
+        let offsetY = 0;
+        
+        if (aspect > canvasAspect) {
+            drawH = canvas.width / aspect;
+            offsetY = (canvas.height - drawH) * 0.5;
+        } else {
+            drawW = canvas.height * aspect;
+            offsetX = (canvas.width - drawW) * 0.5;
+        }
+        
+        ctx.drawImage(this.runtime.thumbTempCanvas, 0, 0, tw, th, offsetX, offsetY, drawW, drawH);
     }
 
     syncHoverPreview() {
@@ -700,14 +746,14 @@ export class NoiseStudioEngine {
         });
 
         const chainCanvas = this.refs.breakdownContainer.querySelector('[data-breakdown-key=\"chain\"] canvas');
-        this.drawTextureToThumbnail(this.runtime.selectedLayerOutput, chainCanvas);
+        if (chainCanvas) this.drawTextureToThumbnail(this.runtime.selectedLayerOutput, chainCanvas);
 
         this.updateFixedPoolRefs(pool);
         this.runtime.renderWidth = resolution.w;
         this.runtime.renderHeight = resolution.h;
         renderLayer(this.runtime.gl, this.runtime, layerDef, instance, inputTex, pool.preview.fbo, documentState, { force: true });
         const isolatedCanvas = this.refs.breakdownContainer.querySelector('[data-breakdown-key=\"isolated\"] canvas');
-        this.drawTextureToThumbnail(pool.preview.tex, isolatedCanvas);
+        if (isolatedCanvas) this.drawTextureToThumbnail(pool.preview.tex, isolatedCanvas);
 
         if (layerDef.mask) {
             const maskTex = renderMaskPreview(this.runtime.gl, this.runtime, layerDef, instance, inputTex, documentState);
@@ -719,6 +765,44 @@ export class NoiseStudioEngine {
             const falloffCanvas = this.refs.breakdownContainer.querySelector('[data-breakdown-key=\"falloff\"] canvas');
             this.drawTextureToThumbnail(falloffTex, falloffCanvas);
         }
+    }
+
+    updateSubLayerPreview(documentState) {
+        if (!documentState.view.layerPreviewsOpen || !this.runtime.selectedLayerContext || !this.refs.subLayerCanvas) {
+            return;
+        }
+
+        const { layerDef, instance, inputTex, pool } = this.runtime.selectedLayerContext;
+        const canvas = this.refs.subLayerCanvas;
+        const label = this.refs.subLayerLabel;
+
+        let availableViews = [];
+        let viewDraws = [];
+
+        if (layerDef.layerId === 'noise') {
+            availableViews.push('Isolated Noise');
+            viewDraws.push(() => {
+                this.drawTextureToThumbnail(pool.preview.tex, canvas);
+            });
+            
+            if (layerDef.mask) {
+                availableViews.push('Noise Mask');
+                viewDraws.push(() => {
+                    const maskTex = renderMaskPreview(this.runtime.gl, this.runtime, layerDef, instance, inputTex, documentState);
+                    this.drawTextureToThumbnail(maskTex || this.runtime.textures.black, canvas);
+                });
+            }
+        }
+
+        if (availableViews.length === 0) {
+            if (label) label.textContent = 'No Sub-layers available';
+            this.drawTextureToThumbnail(this.runtime.textures.black, canvas);
+            return;
+        }
+
+        const index = (documentState.view.layerPreviewIndex || 0) % availableViews.length;
+        if (label) label.textContent = availableViews[index];
+        viewDraws[index]();
     }
 
     async exportPngBlob(documentState) {

@@ -630,6 +630,20 @@ function renderSidebar(state, registry) {
         <div class="workspace-tabs">
             ${tabs.map((tab) => `<button type="button" class="workspace-tab ${currentView === tab.id ? 'is-active' : ''}" data-action="set-studio-view" data-view="${tab.id}">${tab.label}</button>`).join('')}
         </div>
+        ${currentView === 'layer' ? `
+        <div class="panel-section layer-preview-container ${state.document.view.layerPreviewsOpen ? 'is-open' : 'is-collapsed'}" style="margin-bottom: 0; flex-shrink: 0; border-bottom: 1px solid var(--border-light); background: var(--bg-100); z-index: 10;">
+            <div class="panel-heading" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;" data-action="toggle-layer-previews">
+                <span>Sub-Layer Previews</span>
+                <span>${state.document.view.layerPreviewsOpen ? '▲' : '▼'}</span>
+            </div>
+            ${state.document.view.layerPreviewsOpen ? `
+                <div class="preview-canvas-wrapper fixed-size" style="padding: 12px; padding-top: 0;">
+                    <div class="preview-label" style="font-size: 11px; margin-bottom: 8px; color: var(--text-muted);"><span id="subLayerLabel">Loading...</span></div>
+                    <canvas id="subLayerCanvas" width="320" height="180" data-action="cycle-layer-preview" style="cursor: pointer; display: block; width: 100%; border-radius: 4px; border: 1px solid var(--border-light); background: #000;"></canvas>
+                </div>
+            ` : ''}
+        </div>
+        ` : ''}
         <div class="sidebar-scroll">${body}</div>
     `;
 }
@@ -652,13 +666,74 @@ function renderBatchDialog(state) {
     `;
 }
 
+function renderJsonCompareDialog(state) {
+    if (!state.ui.jsonCompareModalOpen) return '';
+    const results = state.ui.jsonCompareResults;
+    const view = state.ui.jsonCompareView;
+    const activeIndex = state.ui.jsonCompareIndex;
+    
+    // We remove the global originalSrc here because each JSON payload has its own source now
+    
+    return `
+        <div class="dialog is-open" id="jsonCompareDialog" style="z-index: 1000;">
+            <div class="dialog-panel" style="width: 90vw; max-width: 1400px; height: 90vh; max-height: 900px; display: flex; flex-direction: column;">
+                <div class="dialog-header">
+                    <div>
+                        <div class="eyebrow">Comparison Tool</div>
+                        <h3>JSON Base Image Renders</h3>
+                    </div>
+                    ${results.length ? `
+                    <div style="flex:1; display:flex; justify-content:center;" class="button-cluster">
+                        <button type="button" class="secondary-button ${view === 'grid' ? 'is-active' : ''}" data-action="json-compare-view-grid">Grid View</button>
+                        <button type="button" class="secondary-button ${view === 'single' ? 'is-active' : ''}" data-action="json-compare-view-single">Single View</button>
+                    </div>` : ''}
+                    <button type="button" class="icon-button" data-action="json-compare-close">Close</button>
+                </div>
+                <div class="dialog-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                    ${!results.length ? `
+                        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.5;">
+                            <h3>No Valid Renders Generated</h3>
+                        </div>
+                    ` : view === 'grid' ? `
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; overflow-y: auto; padding-right: 8px;">
+                            ${results.map((res, i) => `
+                                <div class="scope-card" style="cursor: pointer;" data-action="json-compare-select" data-index="${i}">
+                                    <div class="scope-card-header" style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${res.filename}">${res.filename}</div>
+                                    <div style="position: relative; width: 100%; aspect-ratio: ${Math.max(1, res.payload.source?.width || 1)} / ${Math.max(1, res.payload.source?.height || 1)}; background: #000;">
+                                        <img src="${res.url}" class="json-compare-image" style="width: 100%; height: 100%; object-fit: contain; pointer-events: auto;" onmouseenter="this.dataset.swapSrc=this.src; this.src='${res.payload.source?.imageData || ''}'" onmouseleave="this.src=this.dataset.swapSrc" />
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative;">
+                            ${results[activeIndex] ? `
+                                <div class="scope-card-header" style="position: absolute; top: 16px; left: 16px; z-index: 10; font-size: 16px; background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 4px;">
+                                    ${results[activeIndex].filename} (${activeIndex + 1} / ${results.length})
+                                </div>
+                                <div style="display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; position: relative;">
+                                    <button type="button" class="icon-button" data-action="json-compare-prev" style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 24px; padding: 16px; z-index: 10; background:rgba(0,0,0,0.5); border-radius:50%; width:48px; height:48px; border:1px solid rgba(255,255,255,0.2)">&lsaquo;</button>
+                                    <img src="${results[activeIndex].url}" class="json-compare-image" style="max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: auto;" onmouseenter="this.dataset.swapSrc=this.src; this.src='${results[activeIndex].payload.source?.imageData || ''}'" onmouseleave="this.src=this.dataset.swapSrc" />
+                                    <button type="button" class="icon-button" data-action="json-compare-next" style="position: absolute; right: 16px; top: 50%; transform: translateY(-50%); font-size: 24px; padding: 16px; z-index: 10; background:rgba(0,0,0,0.5); border-radius:50%; width:48px; height:48px; border:1px solid rgba(255,255,255,0.2)">&rsaquo;</button>
+                                </div>
+                            ` : `<p>Invalid active render index.</p>`}
+                        </div>
+                    `}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderToolbar(state) {
     return `
         <header class="toolbar">
             <div class="toolbar-cluster">
                 <button type="button" class="toolbar-button" data-action="trigger-image-input">Load Image</button>
+                <button type="button" class="toolbar-button" data-action="new-project">New Project</button>
                 <button type="button" class="toolbar-button" data-action="export-current">Export PNG</button>
                 <button type="button" class="toolbar-button" data-action="batch-open">Batch Process</button>
+                <button type="button" class="toolbar-button" data-action="open-library">Library</button>
             </div>
             <div class="toolbar-cluster toolbar-state-actions">
                 <button type="button" class="toolbar-button" data-action="open-state">Load</button>
@@ -671,6 +746,7 @@ function renderToolbar(state) {
                     <input id="saveImageToggle" type="checkbox" ${state.ui.saveImageOnSave ? 'checked' : ''}>
                     <span>Save Image</span>
                 </label>
+                <button type="button" class="toolbar-button" data-action="save-to-library">Save to Library</button>
                 <label class="tiny-toggle toolbar-toggle">
                     <input id="themeToggle" type="checkbox" ${state.document.view.theme === 'dark' ? 'checked' : ''}>
                     <span>Dark Mode</span>
@@ -706,6 +782,7 @@ export function createWorkspaceUI(root, registry, actions) {
                         <div class="preview-toolbar">
                             <label class="tiny-toggle"><input type="checkbox" id="highQualityPreviewToggle"><span>High Quality</span></label>
                             <label class="tiny-toggle"><input type="checkbox" id="hoverCompareToggle"><span>Hover Original</span></label>
+                            <label class="tiny-toggle"><input type="checkbox" id="isolateActiveLayerToggle"><span>Render to Active Layer</span></label>
                             <button type="button" class="mini-button" data-action="zoom-out">-</button>
                             <input id="previewZoomRange" type="range" min="1" max="${MAX_PREVIEW_ZOOM}" step="0.1" value="1">
                             <button type="button" class="mini-button" data-action="zoom-in">+</button>
@@ -728,6 +805,7 @@ export function createWorkspaceUI(root, registry, actions) {
             <div class="dialog" id="compareDialog"><div class="dialog-panel compare-panel"><div class="dialog-header"><div><div class="eyebrow">Comparison</div><h3>Original vs Processed</h3></div><button type="button" class="icon-button" data-action="compare-close">Close</button></div><div class="dialog-body"><div class="compare-grid"><div class="scope-card"><div class="scope-card-header">Original</div><canvas id="compareOriginal" width="640" height="360"></canvas></div><div class="scope-card"><div class="scope-card-header">Processed</div><canvas id="compareProcessed" width="640" height="360"></canvas></div></div><div class="scope-meta-line" id="compareInfo">Source -- | Render --</div><div class="button-cluster"><button type="button" class="secondary-button" data-action="compare-export" data-mode="side">Export Side</button><button type="button" class="secondary-button" data-action="compare-export" data-mode="stack">Export Stack</button></div></div></div></div>
             <div id="toleranceTooltip" style="display: none; position: fixed; pointer-events: none; z-index: 1000; background: #222; color: #fff; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px; transform: translate(-50%, -100%); margin-top: -8px;"></div>
             <div id="batchSlot"></div>
+            <div id="jsonCompareSlot"></div>
         </div>
     `;
 
@@ -753,6 +831,7 @@ export function createWorkspaceUI(root, registry, actions) {
         stateInput: root.querySelector('#stateInput'),
         paletteImageInput: root.querySelector('#paletteImageInput'),
         batchSlot: root.querySelector('#batchSlot'),
+        jsonCompareSlot: root.querySelector('#jsonCompareSlot'),
         compareDialog: root.querySelector('#compareDialog'),
         compareOriginal: root.querySelector('#compareOriginal'),
         compareProcessed: root.querySelector('#compareProcessed'),
@@ -1081,6 +1160,21 @@ export function createWorkspaceUI(root, registry, actions) {
         if (!action) return;
         const actionMap = {
             'trigger-image-input': () => refs.imageInput.click(),
+            'new-project': () => {
+                if (confirm('Create a new project? Your current work will be safely saved to the Library.')) {
+                    actions.newProject();
+                }
+            },
+            'open-library': () => actions.openLibrary(),
+            'json-compare-close': () => actions.setJsonCompareModal(false),
+            'json-compare-view-grid': () => actions.setJsonCompareView('grid'),
+            'json-compare-view-single': () => actions.setJsonCompareView('single'),
+            'json-compare-prev': () => actions.setJsonCompareIndex((getLiveState()?.ui.jsonCompareIndex || 0) - 1),
+            'json-compare-next': () => actions.setJsonCompareIndex((getLiveState()?.ui.jsonCompareIndex || 0) + 1),
+            'json-compare-select': () => {
+                actions.setJsonCompareIndex(parseInt(node.dataset.index, 10));
+                actions.setJsonCompareView('single');
+            },
             'open-state': () => refs.stateInput.click(),
             'set-studio-view': () => actions.setStudioView(node.dataset.view),
             'add-layer': () => actions.addLayer(node.dataset.layer),
@@ -1097,6 +1191,7 @@ export function createWorkspaceUI(root, registry, actions) {
             'reset-ca-center': () => actions.resetCaCenter(node.dataset.instance),
             'set-wheel-neutral': () => actions.updateControl(node.dataset.instance, node.dataset.key, '#ffffff'),
             'save-state': actions.saveState,
+            'save-to-library': () => actions.saveProjectToLibrary(),
             'export-current': actions.exportCurrent,
             'compare-open': actions.openCompare,
             'compare-close': actions.closeCompare,
@@ -1136,7 +1231,9 @@ export function createWorkspaceUI(root, registry, actions) {
             'bg-patcher-pick-patch': () => actions.armEyedropper({ kind: 'bg-patcher-patch', instanceId: node.dataset.instance, index: parseInt(node.dataset.index, 10) }),
             'bg-patcher-delete-patch': () => actions.removeBgPatcherPatch(node.dataset.instance, parseInt(node.dataset.index, 10)),
             'bg-patcher-reset': () => actions.resetBgPatcher(node.dataset.instance),
-            'expander-pick-color': () => actions.armEyedropper({ kind: 'expander-color', instanceId: node.dataset.instance })
+            'expander-pick-color': () => actions.armEyedropper({ kind: 'expander-color', instanceId: node.dataset.instance }),
+            'toggle-layer-previews': () => actions.toggleLayerPreviews(),
+            'cycle-layer-preview': () => actions.cycleLayerPreview()
         };
         actionMap[action]?.();
     };
@@ -1311,8 +1408,10 @@ export function createWorkspaceUI(root, registry, actions) {
         else if (target === refs.previewZoomRange) actions.setZoom(parseFloat(target.value));
         else if (target === refs.highQualityPreviewToggle) actions.setHighQualityPreview(target.checked);
         else if (target.id === 'hoverCompareToggle') actions.setHoverCompareEnabled(target.checked);
+        else if (target.id === 'isolateActiveLayerToggle') actions.setRenderUpToActiveLayer(target.checked);
         else if (target.id === 'loadImageToggle') actions.setLoadImageOnOpen(target.checked);
         else if (target.id === 'saveImageToggle') actions.setSaveImageOnSave(target.checked);
+
         else if (target.id === 'themeToggle') actions.setTheme(target.checked);
         else if (target.dataset.action === 'batch-fps') actions.setBatchFps(parseInt(target.value, 10) || 10);
         else if (target.dataset.action === 'batch-keep-structure') actions.setKeepFolderStructure(target.checked);
@@ -1377,6 +1476,7 @@ export function createWorkspaceUI(root, registry, actions) {
         drawToleranceSpectrums(state);
 
         refs.batchSlot.innerHTML = renderBatchDialog(state);
+        refs.jsonCompareSlot.innerHTML = renderJsonCompareDialog(state);
         refs.compareDialog.classList.toggle('is-open', !!state.ui.compareOpen);
         refs.previewTitle.textContent = state.document.source.name || 'No source loaded';
         refs.previewZoomRange.value = String(state.document.view.zoom);
@@ -1385,6 +1485,8 @@ export function createWorkspaceUI(root, registry, actions) {
         refs.highQualityPreviewToggle.checked = !!state.document.view.highQualityPreview;
         const hoverCompareToggle = root.querySelector('#hoverCompareToggle');
         if (hoverCompareToggle) hoverCompareToggle.checked = !!state.document.view.hoverCompareEnabled;
+        const isolateActiveLayerToggle = root.querySelector('#isolateActiveLayerToggle');
+        if (isolateActiveLayerToggle) isolateActiveLayerToggle.checked = !!state.document.view.isolateActiveLayerChain;
         const current = selectedInstance(state);
         const suppressHoverCompare = current?.layerId === 'bgPatcher'
             && (
@@ -1493,7 +1595,9 @@ export function createWorkspaceUI(root, registry, actions) {
                 avgBrightnessEl: root.querySelector('#avgBrightnessValue'),
                 renderResolutionEl: root.querySelector('#renderResolutionValue'),
                 avgSaturationEl: root.querySelector('#avgSaturationValue'),
-                breakdownContainer: root.querySelector('#breakdownContainer')
+                breakdownContainer: root.querySelector('#breakdownContainer'),
+                subLayerCanvas: root.querySelector('#subLayerCanvas'),
+                subLayerLabel: root.querySelector('#subLayerLabel')
             };
         }
     };

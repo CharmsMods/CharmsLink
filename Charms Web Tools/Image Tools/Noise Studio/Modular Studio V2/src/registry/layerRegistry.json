@@ -2594,6 +2594,190 @@
         }
       ],
       "extraPrograms": []
+    },
+    {
+      "layerId": "imageBreaks",
+      "label": "Image Breaks",
+      "technicalLabel": "Row/Col Displacement",
+      "group": "damage",
+      "description": "Shifts rows and columns of pixels to create a broken image glitch effect.",
+      "executor": "shader",
+      "programKey": "imageBreaks",
+      "shader": "Shaders/imageBreaks.frag",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "ibEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "checkbox",
+          "label": "Enable",
+          "default": true,
+          "key": "ibEnable"
+        },
+        {
+          "type": "range",
+          "label": "Columns",
+          "min": 1,
+          "max": 200,
+          "step": 1,
+          "default": 10,
+          "key": "ibCols"
+        },
+        {
+          "type": "range",
+          "label": "Rows",
+          "min": 1,
+          "max": 200,
+          "step": 1,
+          "default": 10,
+          "key": "ibRows"
+        },
+        {
+          "type": "range",
+          "label": "Horizontal Shift",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.2,
+          "key": "ibShiftX"
+        },
+        {
+          "type": "range",
+          "label": "Vertical Shift",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.0,
+          "key": "ibShiftY"
+        },
+        {
+          "type": "range",
+          "label": "Shift Edge Blur",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.0,
+          "key": "ibShiftBlur"
+        },
+        {
+          "type": "range",
+          "label": "Random Seed",
+          "min": 0,
+          "max": 100,
+          "step": 1,
+          "default": 0,
+          "key": "ibSeed"
+        },
+        {
+          "type": "separator"
+        },
+        {
+          "type": "message",
+          "text": "Square Block Displacements",
+          "tone": "section"
+        },
+        {
+          "type": "range",
+          "label": "Square Density",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0,
+          "key": "ibSqDensity"
+        },
+        {
+          "type": "range",
+          "label": "Grid Size",
+          "min": 1,
+          "max": 100,
+          "step": 1,
+          "default": 20,
+          "key": "ibSqGrid"
+        },
+        {
+          "type": "range",
+          "label": "Square Distance",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.1,
+          "key": "ibSqDist"
+        },
+        {
+          "type": "range",
+          "label": "Square Edge Blur",
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "default": 0.0,
+          "key": "ibSqBlur"
+        }
+      ],
+      "mask": null,
+      "bindings": [
+        {
+          "uniform": "u_cols",
+          "key": "ibCols",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_rows",
+          "key": "ibRows",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_shiftX",
+          "key": "ibShiftX",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_shiftY",
+          "key": "ibShiftY",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_shiftBlur",
+          "key": "ibShiftBlur",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_seed",
+          "key": "ibSeed",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sqDensity",
+          "key": "ibSqDensity",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sqGrid",
+          "key": "ibSqGrid",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sqDist",
+          "key": "ibSqDist",
+          "type": "float",
+          "divideBy": null
+        },
+        {
+          "uniform": "u_sqBlur",
+          "key": "ibSqBlur",
+          "type": "float",
+          "divideBy": null
+        }
+      ],
+      "extraPrograms": []
     }
   ]
 }
