@@ -20,7 +20,8 @@ The codebase is split into modern modules (`src/`) and legacy/shader files (`Sha
   - `pipeline.js`: The core render iteration. It calculates layout resolutions, sets up dual texture ping-ponging Framebuffer Objects (FBOs), iterates through `documentState.layerStack`, and executes shader programs in series.
   - `bootstrap.js` & `executors/`: Manages texture uploads, shader compilation, and specialized execution commands.
 - **`src/ui/`**: 
-  - `workspaces.js`: Maps high-level application state to the DOM (menus, canvas positioning, workspace layout frames). Contains the toolbar buttons (Save JSON, Save to Library, Library, New Project, etc.) and delegates click events to `actions.*`.
+  - `workspaces.js`: Maps high-level application state to the DOM (menus, canvas positioning, workspace layout frames). Contains the toolbar buttons and delegates click events to `actions.*`.
+  - `libraryTemplate.js`: [NEW] Re-homes the entire Library tab's HTML, CSS, and client-side JavaScript. Exports a `getLibraryHTML()` function for dynamic document writing.
 - **`src/state/`**: 
   - `documentHelpers.js`: Contains utility logic for mutating and interpreting the `documentState` object layout safely.
 - **`src/io/`**: 
@@ -129,7 +130,7 @@ The top toolbar in `workspaces.js` contains buttons bound via `data-action` attr
 
 ## 5. Library System (IndexedDB + Secondary Tab)
 
-The Library is a persistent project management system that stores rendered thumbnails + full project payloads in `IndexedDB`. It operates as a separate browser tab opened via `window.open()`.
+The Library is a persistent project management system that stores rendered thumbnails + full project payloads in `IndexedDB`. It operates as a separate browser tab, styled with the same "Black & White / Square" aesthetic as the main studio (`--bg: #101010`, `--line: #f4f4f4`, `0px` border-radius).
 
 ### 5.1 IndexedDB Storage (`main.js`, top of file)
 The database `ModularStudioDB` has a single object store `LibraryProjects` with `keyPath: 'id'`.
@@ -182,8 +183,22 @@ The main studio and Library tab communicate via **two distinct channels**:
    
    These use `window.libraryWindow.postMessage()` since the main studio holds the `window.open()` reference.
 
-### 5.5 Library Tab HTML (Inline in `main.js`)
-The Library tab is generated as a raw HTML string via `const html = \`...\`` inside `actions.openLibrary()`, then written to the popup via `document.write()`. Key components:
+### 5.5 Library Tab HTML & Detail Modal (`src/ui/libraryTemplate.js`)
+The Library tab UI is decoupled from `main.js` and defined entirely within `libraryTemplate.js`. It is generated as an HTML string via `getLibraryHTML(defaultsMap)` and written to a named popup window.
+
+**Visual Aesthetic**:
+- **B&W / Monochrome**: Focuses on high-contrast black backgrounds and white lines.
+- **Square Edges**: `border-radius: 0` for all cards, buttons, and modals.
+- **Monospace Labels**: Uses `var(--mono)` (Consolas/SFMono) for all technical data labels and indices.
+
+**Header Buttons**:
+- **Hover Reveal Original** (`btnHover`): Defaults to **OFF**. 
+
+**Project Detail Modal** (`detailOverlay`):
+Triggered by clicking any grid item. It's a fullscreen overlay featuring:
+- **Image Pane**: Shows the rendered project with "Hover Reveal" capability to see the source image.
+- **Sidebar Breakdown**: Lists all layers in the stack as "Layer Cards" (`renderLayerCards` function).
+- **Smart Filtering (Default-Aware)**: The parser cross-references a global `LAYER_DEFAULTS` map (injected during `openLibrary`). It automatically hides any parameter values that match the layer's registry defaults, displaying only what the user has modified. If a layer is untouched, it shows a "Default settings" placeholder.
 
 **Header Buttons:**
 | Button | ID | Function |
@@ -265,12 +280,10 @@ When extracting WebGL data to push to static UI components (like `320x180` canva
 
 ## 9. Common Gotchas & Patterns
 
-### 9.1 Template Literals in Library HTML
-The Library tab HTML is defined as a JavaScript template literal (backtick string) inside `main.js`. When nesting template literals within this string (e.g., for grid item HTML), inner backticks and `${}` interpolations must be escaped with `\`:
-```js
-// Inside the outer template literal:
-const itemHtml = \`<div data-index="\${index}">\${res.name}</div>\`;
-```
+### 9.1 Template Literals in Library UI
+The Library's markup and logic are defined as a JavaScript template literal (backtick string) inside **`src/ui/libraryTemplate.js`**.
+- **Escaping**: When nesting template literals within this string (e.g., for grid item HTML), inner backticks and `${}` interpolations must be escaped with `\`.
+- **Dynamic Variable Injections**: Variables like `LAYER_DEFAULTS` are serialized via `JSON.stringify` and directly interpolated into the script block of the generated HTML at build-time.
 
 ### 9.2 Named Window Deduplication
 The Library tab uses `window.open('', 'ModularStudioLibrary')` with a named target. If a window with that name already exists, the browser returns the existing window instead of opening a new one. The `isLibraryInitialized` flag prevents re-writing the HTML content.
