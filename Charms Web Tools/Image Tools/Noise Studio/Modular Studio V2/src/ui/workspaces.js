@@ -1,5 +1,6 @@
 import { getLayerInstancesByGroup } from '../registry/index.js';
 import { hasRenderableLayers, MAX_PREVIEW_ZOOM } from '../state/documentHelpers.js';
+import { createLibraryPanel } from './libraryPanel.js';
 import { clientToImageUv, computePreviewTransform, getPointerRatio } from './previewViewport.js';
 
 const GROUP_LABELS = {
@@ -733,7 +734,6 @@ function renderToolbar(state) {
                 <button type="button" class="toolbar-button" data-action="new-project">New Project</button>
                 <button type="button" class="toolbar-button" data-action="export-current">Export PNG</button>
                 <button type="button" class="toolbar-button" data-action="batch-open">Batch Process</button>
-                <button type="button" class="toolbar-button" data-action="open-library">Library</button>
             </div>
             <div class="toolbar-cluster toolbar-state-actions">
                 <button type="button" class="toolbar-button" data-action="open-state">Load</button>
@@ -756,6 +756,16 @@ function renderToolbar(state) {
     `;
 }
 
+function renderSectionTabs(state) {
+    const activeSection = state.ui.activeSection === 'library' ? 'library' : 'editor';
+    return `
+        <nav class="section-switcher">
+            <button type="button" class="mode-button ${activeSection === 'editor' ? 'is-active' : ''}" data-action="set-app-section" data-section="editor">Editor</button>
+            <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
+        </nav>
+    `;
+}
+
 function buildWheelColor(surface, clientX, clientY) {
     const rect = surface.getBoundingClientRect();
     const radius = Math.min(rect.width, rect.height) / 2;
@@ -772,6 +782,7 @@ function buildWheelColor(surface, clientX, clientY) {
 export function createWorkspaceUI(root, registry, actions) {
     root.innerHTML = `
         <div class="app-shell">
+            <div id="sectionTabsSlot"></div>
             <div id="toolbarSlot"></div>
             <div class="notice-strip" id="noticeStrip"></div>
             <div class="workspace-shell" id="workspaceShell">
@@ -799,6 +810,7 @@ export function createWorkspaceUI(root, registry, actions) {
                     </div>
                 </section>
             </div>
+            <section class="app-section-panel" id="libraryPanel"></section>
             <input id="imageInput" type="file" accept="image/*" hidden>
             <input id="stateInput" type="file" accept=".json,.mns.json" hidden>
             <input id="paletteImageInput" type="file" accept="image/*" hidden>
@@ -811,10 +823,12 @@ export function createWorkspaceUI(root, registry, actions) {
 
     const refs = {
         root,
+        sectionTabsSlot: root.querySelector('#sectionTabsSlot'),
         toolbarSlot: root.querySelector('#toolbarSlot'),
         noticeStrip: root.querySelector('#noticeStrip'),
         workspaceShell: root.querySelector('#workspaceShell'),
         sidebarPanel: root.querySelector('#sidebarPanel'),
+        libraryPanel: root.querySelector('#libraryPanel'),
         previewShell: root.querySelector('#previewShell'),
         previewEmpty: root.querySelector('#previewEmpty'),
         sourcePreviewCanvas: root.querySelector('#sourcePreviewCanvas'),
@@ -850,11 +864,16 @@ export function createWorkspaceUI(root, registry, actions) {
     let previewInteraction = null;
     let brushInteraction = null;
     let latestState = null;
+    let lastActiveSection = null;
     let lastSourceSignature = '';
     const viewportState = {
         pointer: { x: 0.5, y: 0.5 }
     };
     const loupeCtx = refs.previewLoupeCanvas.getContext('2d');
+    const libraryPanel = createLibraryPanel(refs.libraryPanel, {
+        actions,
+        layerDefaults: Object.fromEntries(registry.layers.map((layer) => [layer.layerId, layer.defaults]))
+    });
 
     function getLiveState() {
         return actions.getState?.() || latestState;
@@ -1159,13 +1178,14 @@ export function createWorkspaceUI(root, registry, actions) {
         const action = node.dataset.action;
         if (!action) return;
         const actionMap = {
+            'set-app-section': () => actions.setActiveSection(node.dataset.section),
             'trigger-image-input': () => refs.imageInput.click(),
             'new-project': () => {
-                if (confirm('Create a new project? Your current work will be safely saved to the Library.')) {
+                if (confirm('Create a new project? You may be prompted to save or discard the current project first.')) {
                     actions.newProject();
                 }
             },
-            'open-library': () => actions.openLibrary(),
+            'open-library': () => actions.setActiveSection('library'),
             'json-compare-close': () => actions.setJsonCompareModal(false),
             'json-compare-view-grid': () => actions.setJsonCompareView('grid'),
             'json-compare-view-single': () => actions.setJsonCompareView('single'),
@@ -1456,11 +1476,20 @@ export function createWorkspaceUI(root, registry, actions) {
         }
 
         document.documentElement.dataset.theme = state.document.view.theme === 'dark' ? 'dark' : 'light';
-        refs.toolbarSlot.innerHTML = renderToolbar(state);
+        refs.sectionTabsSlot.innerHTML = renderSectionTabs(state);
+        refs.toolbarSlot.innerHTML = state.ui.activeSection === 'library' ? '' : renderToolbar(state);
+        refs.toolbarSlot.style.display = state.ui.activeSection === 'library' ? 'none' : 'block';
         refs.noticeStrip.className = `notice-strip ${state.notice ? `is-${state.notice.type || 'info'}` : ''}`;
         refs.noticeStrip.textContent = state.notice?.text || '';
         refs.noticeStrip.style.display = state.notice ? 'flex' : 'none';
         refs.workspaceShell.className = `workspace-shell mode-${state.document.mode} tab-${state.document.workspace.studioView}`;
+        refs.workspaceShell.style.display = state.ui.activeSection === 'library' ? 'none' : 'grid';
+        refs.libraryPanel.style.display = state.ui.activeSection === 'library' ? 'block' : 'none';
+        if (state.ui.activeSection !== lastActiveSection) {
+            if (state.ui.activeSection === 'library') libraryPanel.activate();
+            else libraryPanel.deactivate();
+            lastActiveSection = state.ui.activeSection;
+        }
         const sidebarScrollElement = refs.sidebarPanel.querySelector('.sidebar-scroll');
         const sidebarScrollTop = sidebarScrollElement ? sidebarScrollElement.scrollTop : refs.sidebarPanel.scrollTop;
 
@@ -1575,6 +1604,9 @@ export function createWorkspaceUI(root, registry, actions) {
 
     return {
         render,
+        refreshLibrary() {
+            libraryPanel.refresh();
+        },
         clientToImageUv(clientX, clientY) {
             return clientToImageUv(clientX, clientY, refs.previewScaleWrap.getBoundingClientRect());
         },

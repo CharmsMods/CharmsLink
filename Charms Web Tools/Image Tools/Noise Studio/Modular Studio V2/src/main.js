@@ -1,7 +1,6 @@
 import { createStore } from './state/store.js';
 import { loadRegistry, createLayerInstance, relabelInstance } from './registry/index.js';
 import { downloadState, readJsonFile, validateImportPayload } from './io/documents.js';
-import { createCrossWindowChannel } from './io/crossWindowChannel.js';
 import { NoiseStudioEngine } from './engine/pipeline.js';
 import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
@@ -62,13 +61,82 @@ function getAllFromLibraryDB() {
 }
 
 function makeProjectFingerprint(payload) {
-    const src = payload.source?.name || payload.source?.imageData?.slice(0, 100) || '';
-    const layers = (payload.layerStack || []).map(l => l.layerId + ':' + JSON.stringify(l.params)).join('|');
-    return src + '::' + layers;
+    return JSON.stringify({
+        version: payload.version ?? 'mns/v2',
+        kind: payload.kind ?? 'document',
+        mode: payload.mode ?? 'studio',
+        workspace: payload.workspace || null,
+        export: payload.export || null,
+        source: payload.source
+            ? {
+                name: payload.source.name || '',
+                type: payload.source.type || '',
+                width: payload.source.width || 0,
+                height: payload.source.height || 0,
+                imageDataLength: payload.source.imageData?.length || 0,
+                imageDataStart: payload.source.imageData?.slice(0, 100) || '',
+                imageDataEnd: payload.source.imageData?.slice(-100) || ''
+            }
+            : null,
+        palette: payload.palette || [],
+        layerStack: (payload.layerStack || []).map((layer) => ({
+            layerId: layer.layerId,
+            enabled: layer.enabled !== false,
+            visible: layer.visible !== false,
+            params: layer.params || {}
+        })),
+        selection: payload.selection || null,
+        view: payload.view || null
+    });
+}
+
+function createLibraryProjectId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function stripProjectExtension(name) {
+    return String(name || '').replace(/\.[^/.]+$/, '');
+}
+
+function getSuggestedProjectName(documentState, nameOverride = null) {
+    return stripProjectExtension(nameOverride || documentState.source?.name || 'Untitled') || 'Untitled';
+}
+
+function buildLibraryPayload(documentState) {
+    return {
+        version: 'mns/v2',
+        kind: 'document',
+        mode: 'studio',
+        workspace: documentState.workspace,
+        palette: documentState.palette,
+        selection: documentState.selection,
+        view: documentState.view,
+        export: documentState.export,
+        source: documentState.source,
+        layerStack: documentState.layerStack
+    };
+}
+
+function normalizeLegacyDocumentPayload(payload) {
+    if (!payload || typeof payload !== 'object') return payload;
+    if (payload.version === 2 || payload.version === '2') {
+        return {
+            mode: payload.mode || 'studio',
+            ...payload,
+            version: 'mns/v2',
+            kind: payload.kind || 'document'
+        };
+    }
+    return payload;
 }
 
 let activeLibraryId = null;
 let activeLibraryName = null;
+
+function clearActiveLibraryOrigin() {
+    activeLibraryId = null;
+    activeLibraryName = null;
+}
 
 function downloadBlob(blob, filename) {
     const link = document.createElement('a');
@@ -162,6 +230,25 @@ function createEmptyBatchState() {
     };
 }
 
+function getInitialActiveSection() {
+    try {
+        return new URL(window.location.href).searchParams.get('section') === 'library' ? 'library' : 'editor';
+    } catch (_error) {
+        return 'editor';
+    }
+}
+
+function syncSectionUrl(section) {
+    try {
+        const url = new URL(window.location.href);
+        if (section === 'library') url.searchParams.set('section', 'library');
+        else url.searchParams.delete('section');
+        window.history.replaceState(null, '', url);
+    } catch (_error) {
+        // Ignore URL sync issues in unsupported environments.
+    }
+}
+
 function createInitialState() {
     return {
         document: {
@@ -178,6 +265,7 @@ function createInitialState() {
             batch: createEmptyBatchState()
         },
         ui: {
+            activeSection: getInitialActiveSection(),
             compareOpen: false,
             jsonCompareModalOpen: false,
             jsonCompareResults: [],
@@ -344,9 +432,6 @@ function createPaletteFromImage(image, count) {
 
 window.addEventListener('DOMContentLoaded', async () => {
     const registry = await loadRegistry();
-    const libraryChannel = createCrossWindowChannel('ModularStudioLibraryChannel', {
-        resolveTargetWindow: () => (window.libraryWindow && !window.libraryWindow.closed ? window.libraryWindow : null)
-    });
     const store = createStore(createInitialState());
     const root = document.getElementById('app');
     const engine = new NoiseStudioEngine(registry, {
@@ -456,13 +541,62 @@ window.addEventListener('DOMContentLoaded', async () => {
         }), { render: false });
     }
 
-    const sendToLibrary = (msg) => {
-        libraryChannel.send(msg);
-    };
+    function notifyLibraryChanged() {
+        view?.refreshLibrary?.();
+    }
+
+    async function getMatchingLibraryEntries(payload) {
+        const fingerprint = makeProjectFingerprint(payload);
+        try {
+            const existing = await getAllFromLibraryDB();
+            return existing.filter((entry) => entry.payload && makeProjectFingerprint(entry.payload) === fingerprint);
+        } catch (_error) {
+            return [];
+        }
+    }
+
+    async function ensureCurrentProjectCanBeReplaced(actionLabel) {
+        const state = store.getState();
+        if (!state.document.source?.imageData) return true;
+
+        const exactMatches = await getMatchingLibraryEntries(buildLibraryPayload(state.document));
+        if (exactMatches.length) return true;
+
+        const shouldSave = confirm(`Save the current project to the Library before ${actionLabel}?`);
+        if (shouldSave) {
+            const saved = await actions.saveProjectToLibrary(getSuggestedProjectName(state.document), {
+                forceNew: true,
+                preferExisting: true
+            });
+            return !!saved;
+        }
+        return confirm(`Continue ${actionLabel} without saving the current project to the Library?`);
+    }
 
     const actions = {
         getState() {
             return store.getState();
+        },
+        setActiveSection(section) {
+            const nextSection = section === 'library' ? 'library' : 'editor';
+            if (nextSection === 'library') stopPlayback();
+            syncSectionUrl(nextSection);
+            store.setState((state) => ({
+                ...state,
+                document: nextSection === 'library'
+                    ? {
+                        ...state.document,
+                        workspace: { ...state.document.workspace, batchOpen: false }
+                    }
+                    : state.document,
+                ui: {
+                    ...state.ui,
+                    activeSection: nextSection,
+                    compareOpen: nextSection === 'library' ? false : state.ui.compareOpen,
+                    jsonCompareModalOpen: nextSection === 'library' ? false : state.ui.jsonCompareModalOpen
+                },
+                eyedropperTarget: nextSection === 'library' ? null : state.eyedropperTarget
+            }), { render: false });
         },
         setMode(mode) {
             updateDocument((document) => ({
@@ -821,67 +955,74 @@ window.addEventListener('DOMContentLoaded', async () => {
                 palette: createPaletteFromImage(image, Number(selected?.params.extractCount || 8))
             }));
         },
-        async saveProjectToLibrary(nameOverride = null, forceNew = false) {
+        async saveProjectToLibrary(nameOverride = null, optionsOrForceNew = false) {
+            const options = typeof optionsOrForceNew === 'object' && optionsOrForceNew !== null
+                ? optionsOrForceNew
+                : { forceNew: !!optionsOrForceNew };
+            const forceNew = !!options.forceNew;
+            const preferExisting = !!options.preferExisting;
             const state = store.getState();
             if (!state.document.source?.imageData) {
-                setNotice('No image loaded — nothing to save.', 'warning');
-                return;
+                setNotice('No image loaded - nothing to save.', 'warning');
+                return null;
             }
-            
-            const payloadParams = {
-                version: 2,
-                kind: 'document',
-                workspace: state.document.workspace,
-                export: state.document.export,
-                source: state.document.source,
-                layerStack: state.document.layerStack
-            };
-            
-            // Deduplication: fingerprint current payload and remove older matches
-            const fingerprint = makeProjectFingerprint(payloadParams);
-            try {
-                const existing = await getAllFromLibraryDB();
-                for (const entry of existing) {
-                    if (entry.payload && makeProjectFingerprint(entry.payload) === fingerprint) {
-                        // Exact match already in library
-                        if (entry.id === activeLibraryId) {
-                            setNotice('Already saved — no changes detected.', 'info');
-                            return;
-                        }
-                        await deleteFromLibraryDB(entry.id);
-                    }
-                }
-            } catch (e) { /* first run, no DB yet */ }
-            
+
+            const payloadParams = buildLibraryPayload(state.document);
+            const matchingEntries = await getMatchingLibraryEntries(payloadParams);
+            const activeMatch = activeLibraryId
+                ? matchingEntries.find((entry) => entry.id === activeLibraryId) || null
+                : null;
+            const reusableMatch = preferExisting
+                ? activeMatch || matchingEntries[0] || null
+                : null;
+
+            if (reusableMatch) {
+                const wasActiveMatch = reusableMatch.id === activeLibraryId;
+                activeLibraryId = reusableMatch.id;
+                activeLibraryName = reusableMatch.name;
+                setNotice(
+                    wasActiveMatch
+                        ? 'Already saved - no changes detected.'
+                        : `Already in Library as "${reusableMatch.name}".`,
+                    'info'
+                );
+                return reusableMatch;
+            }
+
             let name;
             let saveId;
-            
+
             if (!forceNew && activeLibraryId) {
-                // Loaded from library — ask overwrite or new
+                const defaultName = activeLibraryName || getSuggestedProjectName(state.document, nameOverride);
                 const choice = prompt(
-                    `This project was loaded from "${activeLibraryName}".\n\nType a new name to save as a NEW entry, or leave as-is to OVERWRITE the existing one:`,
-                    activeLibraryName
+                    activeMatch
+                        ? `This project already matches "${defaultName}".\n\nLeave the name as-is to keep that saved version, or type a new name to save a NEW entry:`
+                        : `This project was loaded from "${defaultName}".\n\nType a new name to save as a NEW entry, or leave as-is to OVERWRITE the existing one:`,
+                    defaultName
                 );
-                if (choice === null) return; // cancelled
-                if (choice === activeLibraryName) {
-                    // Overwrite
+                if (choice === null) return null;
+                const trimmedChoice = choice.trim();
+                if (!trimmedChoice) return null;
+                if (trimmedChoice === defaultName) {
+                    if (activeMatch) {
+                        setNotice('Already saved - no changes detected.', 'info');
+                        return activeMatch;
+                    }
                     saveId = activeLibraryId;
-                    name = activeLibraryName;
+                    name = defaultName;
                 } else {
-                    // New entry
-                    saveId = Date.now().toString(36) + Math.random().toString(36).substr(2);
-                    name = choice;
+                    saveId = createLibraryProjectId();
+                    name = trimmedChoice;
                 }
             } else {
-                // Brand new or forced new
-                name = nameOverride || state.document.source.name || 'Untitled';
-                name = name.replace(/\.[^/.]+$/, '');
-                const askedName = prompt('Name your project for the Library:', name);
-                if (!askedName) return;
-                name = askedName;
-                saveId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+                const defaultName = getSuggestedProjectName(state.document, nameOverride);
+                const askedName = prompt('Name your project for the Library:', defaultName);
+                if (askedName === null) return null;
+                name = askedName.trim();
+                if (!name) return null;
+                saveId = createLibraryProjectId();
             }
-            
+
             setNotice('Saving to Library...', 'info', 0);
             const blob = await engine.exportPngBlob(state.document);
             const projectData = {
@@ -895,19 +1036,64 @@ window.addEventListener('DOMContentLoaded', async () => {
             activeLibraryId = saveId;
             activeLibraryName = name;
             setNotice(`Saved "${name}" to Library.`, 'success');
-            sendToLibrary({ type: 'LIBRARY_DB_UPDATED' });
+            notifyLibraryChanged();
+            return projectData;
+        },
+        async getLibraryProjects() {
+            try {
+                return await getAllFromLibraryDB();
+            } catch (_error) {
+                return [];
+            }
+        },
+        async deleteLibraryProject(id) {
+            if (!id) return;
+            await deleteFromLibraryDB(id);
+            if (activeLibraryId === id) {
+                clearActiveLibraryOrigin();
+            }
+            notifyLibraryChanged();
+        },
+        async clearLibraryProjects() {
+            await clearAllFromLibraryDB();
+            clearActiveLibraryOrigin();
+            notifyLibraryChanged();
+        },
+        async loadLibraryProject(payload, libraryId = null, libraryName = null) {
+            if (!await ensureCurrentProjectCanBeReplaced(`loading "${libraryName || 'this Library project'}"`)) return false;
+
+            try {
+                const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+                const rawState = normalizeLegacyDocumentPayload(JSON.parse(payloadStr));
+                const validated = validateImportPayload(rawState, rawState.kind || 'document');
+                if (validated.source && validated.source.imageData) {
+                    const image = await loadImageFromDataUrl(validated.source.imageData);
+                    await engine.loadImage(image, validated.source);
+                }
+                const layerStack = reindexStack(registry, validated.layerStack || []);
+                updateDocument((document) => ({
+                    ...document,
+                    ...validated,
+                    layerStack,
+                    source: validated.source || document.source
+                }), { render: true });
+
+                activeLibraryId = libraryId || null;
+                activeLibraryName = libraryName || null;
+                actions.setActiveSection('editor');
+                setNotice(`Loaded "${activeLibraryName || 'project'}" from Library.`, 'success');
+                return true;
+            } catch (error) {
+                console.error(error);
+                setNotice('Failed to load project from Library', 'error');
+                throw error;
+            }
         },
         async newProject() {
-            const state = store.getState();
-            if (engine.hasImage()) {
-                let name = state.document.source.name || 'Untitled';
-                const askedName = prompt('Before starting a new project, name your current project for the Library:', name);
-                if (askedName) {
-                    await actions.saveProjectToLibrary(askedName);
-                } else if (!confirm('Discard current project without saving to Library?')) {
-                    return;
-                }
-            }
+            if (!await ensureCurrentProjectCanBeReplaced('starting a new project')) return;
+            stopPlayback();
+            paletteExtractionImage = null;
+            paletteExtractionOwner = null;
             updateDocument((document) => ({
                 ...document,
                 source: { width: 0, height: 0, name: '', imageData: null },
@@ -917,13 +1103,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                 workspace: { ...document.workspace, batchOpen: false },
                 batch: createEmptyBatchState()
             }), { render: false });
-            activeLibraryId = null;
-            activeLibraryName = null;
+            clearActiveLibraryOrigin();
             engine.requestRender(store.getState().document);
             setNotice('Started a new project.', 'success');
         },
         async openImageFile(file) {
             if (!file) return;
+            if (!await ensureCurrentProjectCanBeReplaced('loading a new image')) return;
             try {
                 stopPlayback();
                 paletteExtractionImage = null;
@@ -936,10 +1122,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                     workspace: { ...document.workspace, batchOpen: false },
                     batch: createEmptyBatchState()
                 }), { render: false });
-                
+
+                clearActiveLibraryOrigin();
                 engine.requestRender(store.getState().document);
-                await actions.saveProjectToLibrary(file.name.replace(/\.[^/.]+$/, ''));
-                
+                await actions.saveProjectToLibrary(stripProjectExtension(file.name), { preferExisting: true });
+
                 setNotice(`Loaded ${file.name}.`, 'success');
             } catch (error) {
                 setNotice(`Could not load image: ${error.message}`, 'error', 6000);
@@ -947,11 +1134,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async openStateFile(file) {
             if (!file) return;
+            if (!await ensureCurrentProjectCanBeReplaced('loading a state file')) return;
             try {
                 stopPlayback();
                 paletteExtractionImage = null;
                 paletteExtractionOwner = null;
-                const payload = validateImportPayload(await readJsonFile(file), 'document');
+                const payload = validateImportPayload(normalizeLegacyDocumentPayload(await readJsonFile(file)), 'document');
                 const importedLayerCount = Array.isArray(payload.layerStack) ? payload.layerStack.length : 0;
                 const layerStack = reindexStack(registry, payload.layerStack || []);
                 const droppedLayerCount = Math.max(0, importedLayerCount - layerStack.length);
@@ -981,6 +1169,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         batch: createEmptyBatchState()
                     }
                 }), { render: engine.hasImage() && !(shouldLoadImage && embeddedSource) });
+                clearActiveLibraryOrigin();
 
                 if (shouldLoadImage && embeddedSource) {
                     try {
@@ -988,7 +1177,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         await engine.loadImage(image, embeddedSource);
                         updateDocument((document) => ({ ...document, source: embeddedSource }), { render: false });
                         engine.requestRender(store.getState().document);
-                        await actions.saveProjectToLibrary(file.name.replace(/\.[^/.]+$/, ''));
+                        await actions.saveProjectToLibrary(stripProjectExtension(file.name), { preferExisting: true });
                         setNotice(
                             droppedLayerCount
                                 ? `State loaded: ${file.name}. Removed ${droppedLayerCount} unsupported layer${droppedLayerCount === 1 ? '' : 's'}.`
@@ -1175,18 +1364,18 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
             setNotice('Batch export complete.', 'success');
         },
-        async processLibraryPayloads(payloadsText, filenames) {
+        async processLibraryPayloads(payloadsText, filenames, onProgress = null) {
             const state = store.getState();
             const originalSource = state.document.source;
             setNotice(`Rendering ${payloadsText.length} variants to Library DB...`, 'info', 0);
-            
-            sendToLibrary({ type: 'START_RENDER', total: payloadsText.length });
-            
+
+            onProgress?.({ phase: 'start', total: payloadsText.length });
+
             for (let i = 0; i < payloadsText.length; i++) {
-                sendToLibrary({ type: 'UPDATE_PROGRESS', count: i, total: payloadsText.length, filename: filenames[i] });
-                
+                onProgress?.({ phase: 'progress', count: i, total: payloadsText.length, filename: filenames[i] });
+
                 try {
-                     const rawState = JSON.parse(payloadsText[i]);
+                     const rawState = normalizeLegacyDocumentPayload(JSON.parse(payloadsText[i]));
                      const validated = validateImportPayload(rawState, rawState.kind || 'document');
                      if (!validated.source || !validated.source.imageData) continue;
 
@@ -1197,7 +1386,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                      const blob = await engine.exportPngBlob(tempDoc);
                      
                      const projectData = {
-                         id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+                         id: createLibraryProjectId(),
                          timestamp: Date.now(),
                          name: filenames[i],
                          blob: blob,
@@ -1207,6 +1396,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                 } catch (err) {
                      console.error(`[Library] Error processing file ${filenames[i]}:`, err);
                 }
+
+                onProgress?.({ phase: 'progress', count: i + 1, total: payloadsText.length, filename: filenames[i] });
             }
 
             if (originalSource && originalSource.imageData) {
@@ -1215,23 +1406,17 @@ window.addEventListener('DOMContentLoaded', async () => {
                     await engine.loadImage(originalImage, originalSource);
                 } catch(e) {}
             }
+            if (store.getState().document.source?.imageData) {
+                engine.requestRender(store.getState().document);
+            }
 
-            sendToLibrary({ type: 'LIBRARY_DB_UPDATED' });
+            onProgress?.({ phase: 'complete', total: payloadsText.length });
+            notifyLibraryChanged();
             setNotice('Library renders saved to DB.', 'success', 3000);
         },
 
         openLibrary() {
-            if (window.libraryWindow && !window.libraryWindow.closed) {
-                window.libraryWindow.focus();
-                return;
-            }
-            const libraryUrl = new URL('library.html', window.location.href).toString();
-            window.libraryWindow = window.open(libraryUrl, 'ModularStudioLibrary');
-            if (!window.libraryWindow) {
-                setNotice('Popup blocked. Allow popups or open library.html in another tab.', 'warning', 7000);
-                return;
-            }
-            sendToLibrary({ type: 'EDITOR_READY' });
+            actions.setActiveSection('library');
         },
         handlePreviewClick(event) {
             const state = store.getState();
@@ -1322,51 +1507,6 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    const handleLibraryMessage = async (data, source) => {
-        if (!data || !data.type) return;
-
-        if (data.type === 'REQ_LAYER_DEFAULTS') {
-            const defaultsMap = Object.fromEntries(registry.layers.map(l => [l.layerId, l.defaults]));
-            const response = { type: 'RES_LAYER_DEFAULTS', data: defaultsMap };
-            sendToLibrary(response);
-        } else if (data.type === 'RENDER_LIBRARY_FILES') {
-            if (data.payloads && data.filenames) {
-                actions.processLibraryPayloads(data.payloads, data.filenames);
-            }
-        } else if (data.type === 'LOAD_PROJECT') {
-            const state = store.getState();
-            if (state.document.source?.imageData) {
-                await actions.saveProjectToLibrary((state.document.source.name || 'current').replace(/\.[^/.]+$/, ''), true);
-            }
-            
-            try {
-                const payloadStr = typeof data.payload === 'string' ? data.payload : JSON.stringify(data.payload);
-                const rawState = JSON.parse(payloadStr);
-                const validated = validateImportPayload(rawState, rawState.kind || 'document');
-                if (validated.source && validated.source.imageData) {
-                    const image = await loadImageFromDataUrl(validated.source.imageData);
-                    await engine.loadImage(image, validated.source);
-                }
-                const layerStack = reindexStack(registry, validated.layerStack || []);
-                updateDocument((document) => ({
-                    ...document,
-                    ...validated,
-                    layerStack,
-                    source: validated.source || document.source
-                }), { render: true });
-                
-                activeLibraryId = data.libraryId || null;
-                activeLibraryName = data.libraryName || null;
-                setNotice(`Loaded "${activeLibraryName || 'project'}" from Library.`, 'success');
-            } catch (err) {
-                console.error(err);
-                setNotice('Failed to load project from Library', 'error');
-            }
-        }
-    };
-
-    libraryChannel.subscribe((data, meta) => handleLibraryMessage(data, meta?.source || null));
-
     view = createWorkspaceUI(root, registry, actions);
     await engine.init(view.getRenderRefs().canvas);
     engine.attachRefs(view.getRenderRefs());
@@ -1381,6 +1521,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     view.render(store.getState());
     engine.attachRefs(view.getRenderRefs());
-    sendToLibrary({ type: 'EDITOR_READY' });
-    setNotice('Load an image to start editing.', 'info', 6500);
+    setNotice(
+        store.getState().ui.activeSection === 'library'
+            ? 'Browse saved projects in the Library, or switch to Editor to start a new one.'
+            : 'Load an image to start editing.',
+        'info',
+        6500
+    );
 });

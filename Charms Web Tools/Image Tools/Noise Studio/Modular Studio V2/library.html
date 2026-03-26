@@ -4,166 +4,43 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Modular Studio Library</title>
+    <meta http-equiv="refresh" content="0; url=index.html?section=library">
     <style>
-        :root {
-            --bg: #101010;
-            --bg-soft: #181818;
-            --bg-muted: #1f1f1f;
-            --line: #f4f4f4;
-            --line-soft: #3a3a3a;
-            --text: #f4f4f4;
-            --muted: #999;
-            --font: 'Segoe UI', 'Aptos', sans-serif;
-            --mono: 'Consolas', 'SFMono-Regular', monospace;
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            background: #101010;
+            color: #f4f4f4;
+            font: 13px/1.5 "Segoe UI", "Aptos", sans-serif;
         }
-        * { box-sizing: border-box; margin: 0; }
-        body { background: var(--bg); overflow: hidden; display: flex; flex-direction: column; height: 100vh; font: 13px/1.4 var(--font); color: var(--text); }
-
-        /* Toolbar */
-        .header { display: flex; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); flex-shrink: 0; gap: 10px; flex-wrap: wrap; background: var(--bg); }
-        .header-title { font-weight: 600; font-size: 13px; margin-right: auto; text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--mono); }
-        .toolbar-btn { background: var(--bg); border: 1px solid var(--line); color: var(--text); padding: 5px 8px; min-height: 28px; cursor: pointer; font: 13px/1 var(--font); white-space: nowrap; }
-        .toolbar-btn:hover { background: var(--bg-muted); }
-        .toolbar-btn.active { background: var(--line); color: var(--bg); }
-        .toolbar-btn.danger { color: var(--text); }
-
-        /* Content */
-        .content { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; }
-        .grid-view { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 1px; background: var(--line-soft); }
-        .grid-view.hidden { display: none; }
-        .grid-item { position: relative; background: var(--bg); overflow: hidden; display: flex; align-items: center; justify-content: center; height: 48vh; cursor: pointer; }
-        .grid-item:hover { outline: 1px solid var(--line); outline-offset: -1px; z-index: 2; }
-
-        /* Fullscreen Series */
-        .fullscreen-view { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: var(--bg); align-items: center; justify-content: center; cursor: pointer; user-select: none; }
-        .fullscreen-view.active { display: flex; }
-
-        /* Images */
-        .image-container { width: 100%; height: 100%; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-        .img-base, .img-hover { position: absolute; width: 100%; height: 100%; object-fit: contain; pointer-events: none; transition: opacity 0.3s ease; }
-        .img-hover { opacity: 0; z-index: 5; }
-        .img-base { opacity: 1; z-index: 1; }
-        body.hover-enabled .image-container:hover .img-hover { opacity: 1; }
-        body.hover-enabled .image-container:hover .img-base { opacity: 0; }
-
-        /* Labels */
-        .label { position: absolute; top: 8px; left: 8px; background: var(--bg); border: 1px solid var(--line-soft); font: 11px/1 var(--mono); padding: 4px 6px; pointer-events: none; z-index: 10; text-transform: uppercase; letter-spacing: 0.06em; }
-        .delete-btn { position: absolute; bottom: 8px; right: 8px; z-index: 20; background: var(--bg); border: 1px solid var(--line-soft); color: var(--text); width: 24px; height: 24px; cursor: pointer; font-size: 16px; line-height: 1; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s ease; padding: 0; }
-        .grid-item:hover .delete-btn { opacity: 1; }
-        .delete-btn:hover { border-color: var(--line); background: var(--bg-muted); }
-        .hover-hint { position: absolute; top: 8px; right: 8px; border: 1px solid var(--line-soft); background: var(--bg); font: 10px/1 var(--mono); padding: 3px 6px; pointer-events: none; z-index: 10; opacity: 0; transition: opacity 0.2s ease; text-transform: uppercase; letter-spacing: 0.06em; }
-        body.hover-enabled .grid-item:hover .hover-hint, body.hover-enabled .fullscreen-view:hover .hover-hint { opacity: 1; }
-        .fullscreen-label { position: absolute; top: 10px; left: 10px; background: var(--bg); border: 1px solid var(--line-soft); font: 13px/1 var(--mono); padding: 6px 8px; pointer-events: none; z-index: 10; }
-
-        /* Loading Overlay */
-        .loading-overlay { display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(16,16,16,0.95); z-index: 100; flex-direction: column; align-items: center; justify-content: center; }
-        .loading-overlay.active { display: flex; }
-        .progress-bar { width: 320px; height: 4px; background: var(--bg); border: 1px solid var(--line); margin-top: 20px; overflow: hidden; }
-        .progress-fill { height: 100%; background: var(--text); width: 0%; transition: width 0.2s ease; }
-        .loading-overlay h2 { font: 500 16px/1 var(--font); color: var(--text); }
-        .loading-overlay p { margin-top: 6px; font-size: 11px; color: var(--muted); }
-
-        /* Small Modal */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 200; align-items: center; justify-content: center; }
-        .modal-overlay.active { display: flex; }
-        .modal-box { background: var(--bg); border: 1px solid var(--line); padding: 20px; max-width: 380px; width: 90%; }
-        .modal-text { font-size: 13px; line-height: 1.6; color: var(--text); margin: 0 0 16px; }
-        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
-        .modal-btn { padding: 5px 12px; min-height: 28px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: 13px/1 var(--font); cursor: pointer; }
-        .modal-btn:hover { background: var(--bg-muted); }
-        .modal-btn.primary { background: var(--line); color: var(--bg); }
-        .modal-btn.primary:hover { opacity: 0.85; }
-        .modal-btn.danger { background: var(--bg); color: var(--text); }
-        .modal-btn.danger:hover { background: var(--bg-muted); }
-
-        /* Project Detail Modal */
-        .detail-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 150; }
-        .detail-overlay.active { display: flex; }
-        .detail-shell { display: grid; grid-template-columns: 1fr 360px; width: calc(100% - 40px); height: calc(100% - 40px); margin: 20px; border: 1px solid var(--line); background: var(--bg); overflow: hidden; }
-        .detail-image-pane { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; background: #000; }
-        .detail-image-pane .image-container { width: 100%; height: 100%; }
-        .detail-sidebar { display: flex; flex-direction: column; border-left: 1px solid var(--line); overflow: hidden; }
-        .detail-sidebar-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 10px; border-bottom: 1px solid var(--line); gap: 8px; }
-        .detail-sidebar-header h3 { font: 600 13px/1.3 var(--font); margin: 0; word-break: break-all; }
-        .detail-sidebar-header .eyebrow { font: 11px/1 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
-        .detail-sidebar-scroll { flex: 1; overflow-y: auto; padding: 10px; }
-        .detail-sidebar-footer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
-        .detail-sidebar-footer .toolbar-btn { flex: 1; text-align: center; }
-
-        /* Layer Cards */
-        .layer-card { border: 1px solid var(--line-soft); margin-bottom: 8px; }
-        .layer-card-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); background: var(--bg-soft); }
-        .layer-card-header strong { font: 600 11px/1 var(--mono); text-transform: uppercase; }
-        .layer-card-header span { font: 11px/1 var(--mono); color: var(--muted); }
-        .layer-card-body { padding: 6px 8px; }
-        .param-row { display: flex; justify-content: space-between; align-items: baseline; padding: 2px 0; gap: 8px; }
-        .param-key { font: 11px/1.4 var(--mono); color: var(--muted); }
-        .param-val { font: 11px/1.4 var(--mono); color: var(--text); text-align: right; word-break: break-all; max-width: 180px; }
-        .source-info { border: 1px solid var(--line-soft); padding: 8px; margin-bottom: 8px; }
-        .source-info .eyebrow { font: 11px/1 var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
-        .detail-empty { color: var(--muted); font-size: 11px; padding: 8px 0; }
+        a {
+            color: inherit;
+        }
+        .shell {
+            border: 1px solid #f4f4f4;
+            padding: 18px 20px;
+            max-width: 420px;
+            text-align: center;
+        }
+        strong {
+            display: block;
+            margin-bottom: 8px;
+            font: 600 13px/1.4 Consolas, "SFMono-Regular", monospace;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
     </style>
-    <script src="src/jszip.min.js"></script>
 </head>
 <body>
-    <div class="header">
-        <div class="header-title">Library</div>
-        <button class="toolbar-btn" id="btnUpload">Upload JSON</button>
-        <button class="toolbar-btn" id="btnHover">Hover Original</button>
-        <button class="toolbar-btn" id="btnFullscreen">Interactive Series</button>
-        <button class="toolbar-btn" id="btnDownloadSave" style="margin-left: auto;">Save Full Project</button>
-        <button class="toolbar-btn" id="btnExportZip">Export All JSONs</button>
-        <button class="toolbar-btn danger" id="btnClearAll">Clear All</button>
+    <div class="shell">
+        <strong>Library Moved</strong>
+        <div>Redirecting to the integrated Library tab inside the main editor.</div>
+        <div><a href="index.html?section=library">Open it manually</a> if the redirect does not happen.</div>
     </div>
-    <div class="content">
-        <div class="grid-view" id="gridView"></div>
-        <div class="fullscreen-view" id="fullscreenView">
-            <div class="fullscreen-label" id="fsLabel"></div>
-            <div class="hover-hint">Hovering Original</div>
-            <div class="image-container">
-                <img src="" class="img-base" id="fsBase" />
-                <img src="" class="img-hover" id="fsHover" />
-            </div>
-        </div>
-        <div class="loading-overlay" id="loadingOverlay">
-            <h2 id="statusText">Preparing engine...</h2>
-            <p id="countText">0 variants completed</p>
-            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-        </div>
-    </div>
-
-    <div class="modal-overlay" id="modalOverlay">
-        <div class="modal-box">
-            <div class="modal-text" id="modalText"></div>
-            <div class="modal-actions" id="modalActions"></div>
-        </div>
-    </div>
-
-    <div class="detail-overlay" id="detailOverlay">
-        <div class="detail-shell">
-            <div class="detail-image-pane">
-                <div class="hover-hint">Hovering Original</div>
-                <div class="image-container">
-                    <img src="" class="img-base" id="detailBase" />
-                    <img src="" class="img-hover" id="detailHover" />
-                </div>
-            </div>
-            <div class="detail-sidebar">
-                <div class="detail-sidebar-header">
-                    <div>
-                        <h3 id="detailName"></h3>
-                        <div class="eyebrow" id="detailMeta"></div>
-                    </div>
-                </div>
-                <div class="detail-sidebar-scroll" id="detailLayers"></div>
-                <div class="detail-sidebar-footer">
-                    <button class="toolbar-btn primary" id="detailLoad">Load in Editor</button>
-                    <button class="toolbar-btn" id="detailClose">Close</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script type="module" src="src/ui/library.js"></script>
+    <script>
+        window.location.replace(new URL('index.html?section=library', window.location.href).toString());
+    </script>
 </body>
 </html>
