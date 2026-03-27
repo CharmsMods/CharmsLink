@@ -83,7 +83,7 @@ export function readJsonFile(file) {
 
 export function validateImportPayload(payload, expectedKind) {
     if (!payload || typeof payload !== 'object') {
-        throw new Error('The selected file is not a valid Modular Noise Studio state file.');
+        throw new Error('The selected file is not a valid Modular Studio state file.');
     }
     if (payload.version !== 'mns/v2') {
         throw new Error('Unsupported file version. Only mns/v2 state files are supported.');

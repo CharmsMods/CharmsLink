@@ -2,6 +2,7 @@ import { getLayerInstancesByGroup } from '../registry/index.js';
 import { hasRenderableLayers, MAX_PREVIEW_ZOOM } from '../state/documentHelpers.js';
 import { createLibraryPanel } from './libraryPanel.js';
 import { clientToImageUv, computePreviewTransform, getPointerRatio } from './previewViewport.js';
+import { createStitchWorkspace } from '../stitch/ui.js';
 
 const GROUP_LABELS = {
     base: 'Base',
@@ -726,7 +727,7 @@ function renderJsonCompareDialog(state) {
     `;
 }
 
-function renderToolbar(state) {
+function renderStudioToolbar(state) {
     return `
         <header class="toolbar">
             <div class="toolbar-cluster">
@@ -756,12 +757,39 @@ function renderToolbar(state) {
     `;
 }
 
+function renderStitchToolbar(state) {
+    return `
+        <header class="toolbar">
+            <div class="toolbar-cluster">
+                <button type="button" class="toolbar-button" data-action="stitch-new-project">New Stitch</button>
+                <button type="button" class="toolbar-button" data-action="stitch-add-images">Add Images</button>
+                <button type="button" class="toolbar-button" data-action="stitch-run-analysis" ${state.stitchDocument.inputs.length < 2 ? 'disabled' : ''}>Run Analysis</button>
+                <button type="button" class="toolbar-button" data-action="stitch-open-gallery" ${state.stitchDocument.candidates.length ? '' : 'disabled'}>Candidate Gallery</button>
+            </div>
+            <div class="toolbar-cluster toolbar-state-actions">
+                <button type="button" class="toolbar-button" data-action="stitch-export-current" ${state.stitchDocument.inputs.length ? '' : 'disabled'}>Export PNG</button>
+                <button type="button" class="toolbar-button" data-action="stitch-save-to-library" ${state.stitchDocument.inputs.length ? '' : 'disabled'}>Save to Library</button>
+                <button type="button" class="toolbar-button" data-action="stitch-reset-view">Fit View</button>
+                <label class="tiny-toggle toolbar-toggle">
+                    <input id="themeToggle" type="checkbox" ${state.document.view.theme === 'dark' ? 'checked' : ''}>
+                    <span>Dark Mode</span>
+                </label>
+            </div>
+        </header>
+    `;
+}
+
 function renderSectionTabs(state) {
-    const activeSection = state.ui.activeSection === 'library' ? 'library' : 'editor';
+    const activeSection = state.ui.activeSection === 'library'
+        ? 'library'
+        : state.ui.activeSection === 'stitch'
+            ? 'stitch'
+            : 'editor';
     return `
         <nav class="section-switcher">
             <button type="button" class="mode-button ${activeSection === 'editor' ? 'is-active' : ''}" data-action="set-app-section" data-section="editor">Editor</button>
             <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
+            <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
         </nav>
     `;
 }
@@ -779,7 +807,7 @@ function buildWheelColor(surface, clientX, clientY) {
     return hsvToHex(hue, saturation, 1);
 }
 
-export function createWorkspaceUI(root, registry, actions) {
+export function createWorkspaceUI(root, registry, actions, extras = {}) {
     root.innerHTML = `
         <div class="app-shell">
             <div id="sectionTabsSlot"></div>
@@ -811,6 +839,7 @@ export function createWorkspaceUI(root, registry, actions) {
                 </section>
             </div>
             <section class="app-section-panel" id="libraryPanel"></section>
+            <section class="app-section-panel" id="stitchPanel"></section>
             <input id="imageInput" type="file" accept="image/*" hidden>
             <input id="stateInput" type="file" accept=".json,.mns.json" hidden>
             <input id="paletteImageInput" type="file" accept="image/*" hidden>
@@ -829,6 +858,7 @@ export function createWorkspaceUI(root, registry, actions) {
         workspaceShell: root.querySelector('#workspaceShell'),
         sidebarPanel: root.querySelector('#sidebarPanel'),
         libraryPanel: root.querySelector('#libraryPanel'),
+        stitchPanel: root.querySelector('#stitchPanel'),
         previewShell: root.querySelector('#previewShell'),
         previewEmpty: root.querySelector('#previewEmpty'),
         sourcePreviewCanvas: root.querySelector('#sourcePreviewCanvas'),
@@ -873,6 +903,10 @@ export function createWorkspaceUI(root, registry, actions) {
     const libraryPanel = createLibraryPanel(refs.libraryPanel, {
         actions,
         layerDefaults: Object.fromEntries(registry.layers.map((layer) => [layer.layerId, layer.defaults]))
+    });
+    const stitchPanel = createStitchWorkspace(refs.stitchPanel, {
+        actions,
+        stitchEngine: extras.stitchEngine
     });
 
     function getLiveState() {
@@ -1212,6 +1246,13 @@ export function createWorkspaceUI(root, registry, actions) {
             'set-wheel-neutral': () => actions.updateControl(node.dataset.instance, node.dataset.key, '#ffffff'),
             'save-state': actions.saveState,
             'save-to-library': () => actions.saveProjectToLibrary(),
+            'stitch-new-project': actions.newStitchProject,
+            'stitch-add-images': actions.openStitchPicker,
+            'stitch-run-analysis': actions.runStitchAnalysis,
+            'stitch-open-gallery': () => actions.setStitchGalleryOpen(true),
+            'stitch-export-current': actions.exportStitchProject,
+            'stitch-save-to-library': () => actions.saveProjectToLibrary(null, { projectType: 'stitch' }),
+            'stitch-reset-view': actions.resetStitchView,
             'export-current': actions.exportCurrent,
             'compare-open': actions.openCompare,
             'compare-close': actions.closeCompare,
@@ -1477,17 +1518,30 @@ export function createWorkspaceUI(root, registry, actions) {
 
         document.documentElement.dataset.theme = state.document.view.theme === 'dark' ? 'dark' : 'light';
         refs.sectionTabsSlot.innerHTML = renderSectionTabs(state);
-        refs.toolbarSlot.innerHTML = state.ui.activeSection === 'library' ? '' : renderToolbar(state);
+        refs.toolbarSlot.innerHTML = state.ui.activeSection === 'library'
+            ? ''
+            : state.ui.activeSection === 'stitch'
+                ? renderStitchToolbar(state)
+                : renderStudioToolbar(state);
         refs.toolbarSlot.style.display = state.ui.activeSection === 'library' ? 'none' : 'block';
         refs.noticeStrip.className = `notice-strip ${state.notice ? `is-${state.notice.type || 'info'}` : ''}`;
         refs.noticeStrip.textContent = state.notice?.text || '';
         refs.noticeStrip.style.display = state.notice ? 'flex' : 'none';
         refs.workspaceShell.className = `workspace-shell mode-${state.document.mode} tab-${state.document.workspace.studioView}`;
-        refs.workspaceShell.style.display = state.ui.activeSection === 'library' ? 'none' : 'grid';
+        refs.workspaceShell.style.display = state.ui.activeSection === 'editor' ? 'grid' : 'none';
         refs.libraryPanel.style.display = state.ui.activeSection === 'library' ? 'block' : 'none';
+        refs.stitchPanel.style.display = state.ui.activeSection === 'stitch' ? 'block' : 'none';
         if (state.ui.activeSection !== lastActiveSection) {
-            if (state.ui.activeSection === 'library') libraryPanel.activate();
-            else libraryPanel.deactivate();
+            if (state.ui.activeSection === 'library') {
+                libraryPanel.activate();
+                stitchPanel.deactivate();
+            } else if (state.ui.activeSection === 'stitch') {
+                libraryPanel.deactivate();
+                stitchPanel.activate();
+            } else {
+                libraryPanel.deactivate();
+                stitchPanel.deactivate();
+            }
             lastActiveSection = state.ui.activeSection;
         }
         const sidebarScrollElement = refs.sidebarPanel.querySelector('.sidebar-scroll');
@@ -1503,6 +1557,7 @@ export function createWorkspaceUI(root, registry, actions) {
         }
 
         drawToleranceSpectrums(state);
+        stitchPanel.render(state.stitchDocument).catch((error) => console.error(error));
 
         refs.batchSlot.innerHTML = renderBatchDialog(state);
         refs.jsonCompareSlot.innerHTML = renderJsonCompareDialog(state);
@@ -1606,6 +1661,9 @@ export function createWorkspaceUI(root, registry, actions) {
         render,
         refreshLibrary() {
             libraryPanel.refresh();
+        },
+        openStitchPicker() {
+            stitchPanel.openPicker?.();
         },
         clientToImageUv(clientX, clientY) {
             return clientToImageUv(clientX, clientY, refs.previewScaleWrap.getBoundingClientRect());

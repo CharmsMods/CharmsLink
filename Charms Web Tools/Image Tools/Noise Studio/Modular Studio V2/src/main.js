@@ -1,13 +1,28 @@
 import { createStore } from './state/store.js';
 import { loadRegistry, createLayerInstance, relabelInstance } from './registry/index.js';
 import { downloadState, readJsonFile, validateImportPayload } from './io/documents.js';
+import { createProjectAdapterRegistry } from './io/projectAdapters.js';
 import { NoiseStudioEngine } from './engine/pipeline.js';
+import { StitchEngine } from './stitch/engine.js';
+import {
+    applyCandidateToDocument,
+    computeCompositeBounds,
+    createEmptyStitchDocument,
+    createStitchInputId,
+    getPlacementByInput,
+    normalizeStitchDocument,
+    stripEphemeralStitchState,
+    summarizeStitchDocument,
+    updateInputOrder as updateStitchInputOrderHelper,
+    updatePlacement as updateStitchPlacementHelper
+} from './stitch/document.js';
 import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
 
 const DB_NAME = 'ModularStudioDB';
 const DB_VERSION = 2;
 const STORE_NAME = 'LibraryProjects';
+const LIBRARY_META_ID = '__library_meta__';
 
 function initDB() {
     return new Promise((resolve, reject) => {
@@ -53,6 +68,15 @@ function saveToLibraryDB(project) {
     }));
 }
 
+function getFromLibraryDB(id) {
+    return initDB().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).get(id);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = (e) => reject(e.target.error);
+    }));
+}
+
 function deleteFromLibraryDB(id) {
     return initDB().then(db => new Promise((resolve, reject) => {
         const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -80,34 +104,31 @@ function getAllFromLibraryDB() {
     }));
 }
 
+function stableSerialize(value) {
+    if (Array.isArray(value)) {
+        return `[${value.map((entry) => stableSerialize(entry)).join(',')}]`;
+    }
+    if (value && typeof value === 'object') {
+        const keys = Object.keys(value).sort();
+        return `{${keys.map((key) => `${JSON.stringify(key)}:${stableSerialize(value[key])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+}
+
+function stripLibraryMetadata(payload) {
+    if (!payload || typeof payload !== 'object') return payload;
+    const cloned = JSON.parse(JSON.stringify(payload));
+    delete cloned._libraryName;
+    delete cloned._libraryTags;
+    delete cloned._libraryProjectType;
+    delete cloned._libraryHoverSource;
+    delete cloned._librarySourceArea;
+    delete cloned._librarySourceCount;
+    return cloned;
+}
+
 function makeProjectFingerprint(payload) {
-    return JSON.stringify({
-        version: payload.version ?? 'mns/v2',
-        kind: payload.kind ?? 'document',
-        mode: payload.mode ?? 'studio',
-        workspace: payload.workspace || null,
-        export: payload.export || null,
-        source: payload.source
-            ? {
-                name: payload.source.name || '',
-                type: payload.source.type || '',
-                width: payload.source.width || 0,
-                height: payload.source.height || 0,
-                imageDataLength: payload.source.imageData?.length || 0,
-                imageDataStart: payload.source.imageData?.slice(0, 100) || '',
-                imageDataEnd: payload.source.imageData?.slice(-100) || ''
-            }
-            : null,
-        palette: payload.palette || [],
-        layerStack: (payload.layerStack || []).map((layer) => ({
-            layerId: layer.layerId,
-            enabled: layer.enabled !== false,
-            visible: layer.visible !== false,
-            params: layer.params || {}
-        })),
-        selection: payload.selection || null,
-        view: payload.view || null
-    });
+    return stableSerialize(stripLibraryMetadata(payload));
 }
 
 function createLibraryProjectId() {
@@ -118,8 +139,79 @@ function stripProjectExtension(name) {
     return String(name || '').replace(/\.[^/.]+$/, '');
 }
 
+function normalizeLibraryTags(tags) {
+    if (!Array.isArray(tags)) return [];
+    const seen = new Set();
+    const normalized = [];
+    tags.forEach((tag) => {
+        const trimmed = String(tag || '').trim();
+        if (!trimmed) return;
+        const key = trimmed.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        normalized.push(trimmed);
+    });
+    return normalized;
+}
+
+function isLibraryMetaRecord(entry) {
+    return !!entry && (entry.id === LIBRARY_META_ID || entry.kind === 'library-meta');
+}
+
+async function getLibraryMetaRecord() {
+    const existing = await getFromLibraryDB(LIBRARY_META_ID);
+    if (isLibraryMetaRecord(existing)) {
+        return {
+            ...existing,
+            kind: 'library-meta',
+            tags: normalizeLibraryTags(existing.tags || [])
+        };
+    }
+    return {
+        id: LIBRARY_META_ID,
+        kind: 'library-meta',
+        tags: []
+    };
+}
+
+async function setLibraryMetaTags(tags) {
+    const current = await getLibraryMetaRecord();
+    const next = {
+        ...current,
+        kind: 'library-meta',
+        tags: normalizeLibraryTags(tags)
+    };
+    await saveToLibraryDB(next);
+    return next.tags;
+}
+
+async function loadLibraryTagCatalogFromDB() {
+    const entries = await getAllFromLibraryDB();
+    const meta = entries.find((entry) => isLibraryMetaRecord(entry)) || { tags: [] };
+    const discoveredTags = entries
+        .filter((entry) => !isLibraryMetaRecord(entry))
+        .flatMap((entry) => normalizeLibraryTags(entry.tags || []));
+    return normalizeLibraryTags([...(meta.tags || []), ...discoveredTags]);
+}
+
+async function registerLibraryTags(tags) {
+    const merged = normalizeLibraryTags([...(await loadLibraryTagCatalogFromDB()), ...normalizeLibraryTags(tags)]);
+    await setLibraryMetaTags(merged);
+    return merged;
+}
+
 function getSuggestedProjectName(documentState, nameOverride = null) {
     return stripProjectExtension(nameOverride || documentState.source?.name || 'Untitled') || 'Untitled';
+}
+
+function getSuggestedStitchProjectName(documentState, nameOverride = null) {
+    const normalized = normalizeStitchDocument(documentState);
+    const primary = normalized.inputs[0];
+    const fallback = normalized.inputs.length > 1
+        ? `Stitch Project (${normalized.inputs.length} images)`
+        : primary?.name
+            || 'Stitch Project';
+    return stripProjectExtension(nameOverride || fallback) || 'Stitch Project';
 }
 
 function buildLibraryPayload(documentState) {
@@ -137,6 +229,10 @@ function buildLibraryPayload(documentState) {
     };
 }
 
+function buildStitchLibraryPayload(documentState) {
+    return stripEphemeralStitchState(documentState);
+}
+
 function normalizeLegacyDocumentPayload(payload) {
     if (!payload || typeof payload !== 'object') return payload;
     if (payload.version === 2 || payload.version === '2') {
@@ -150,12 +246,44 @@ function normalizeLegacyDocumentPayload(payload) {
     return payload;
 }
 
-let activeLibraryId = null;
-let activeLibraryName = null;
+function inferProjectTypeFromPayload(payload, fallbackType = null) {
+    if (fallbackType === 'stitch') return 'stitch';
+    if (payload?.kind === 'stitch-document' || payload?.mode === 'stitch') return 'stitch';
+    return 'studio';
+}
 
-function clearActiveLibraryOrigin() {
-    activeLibraryId = null;
-    activeLibraryName = null;
+function extractLibraryProjectMeta(rawPayload) {
+    return {
+        projectType: rawPayload?._libraryProjectType || null,
+        hoverSource: rawPayload?._libraryHoverSource || null,
+        sourceArea: Number(rawPayload?._librarySourceArea || 0) || 0,
+        sourceCount: Number(rawPayload?._librarySourceCount || 0) || 0,
+        tags: normalizeLibraryTags(rawPayload?._libraryTags || [])
+    };
+}
+
+const activeLibraryOrigins = {
+    studio: { id: null, name: null },
+    stitch: { id: null, name: null }
+};
+
+function getActiveLibraryOrigin(projectType) {
+    return activeLibraryOrigins[projectType] || activeLibraryOrigins.studio;
+}
+
+function setActiveLibraryOrigin(projectType, id, name) {
+    const origin = getActiveLibraryOrigin(projectType);
+    origin.id = id || null;
+    origin.name = name || null;
+}
+
+function clearActiveLibraryOrigin(projectType = null) {
+    if (!projectType) {
+        setActiveLibraryOrigin('studio', null, null);
+        setActiveLibraryOrigin('stitch', null, null);
+        return;
+    }
+    setActiveLibraryOrigin(projectType, null, null);
 }
 
 function downloadBlob(blob, filename) {
@@ -182,6 +310,110 @@ function loadImageFromDataUrl(dataUrl) {
         img.onload = () => resolve(img);
         img.onerror = reject;
         img.src = dataUrl;
+    });
+}
+
+function normalizeLibraryHoverSource(source) {
+    if (!source?.imageData) return null;
+    return {
+        name: String(source.name || ''),
+        type: String(source.type || ''),
+        imageData: String(source.imageData || ''),
+        width: Math.max(0, Number(source.width) || 0),
+        height: Math.max(0, Number(source.height) || 0)
+    };
+}
+
+function buildLibraryProjectRecord({
+    id,
+    name,
+    blob,
+    payload,
+    tags = [],
+    projectType = 'studio',
+    hoverSource = null,
+    sourceWidth = 0,
+    sourceHeight = 0,
+    sourceArea = 0,
+    sourceCount = 0,
+    renderWidth = 0,
+    renderHeight = 0,
+    timestamp = Date.now()
+}) {
+    return {
+        id,
+        timestamp,
+        name: String(name || 'Untitled Project'),
+        blob,
+        payload,
+        tags: normalizeLibraryTags(tags),
+        projectType,
+        hoverSource: normalizeLibraryHoverSource(hoverSource),
+        sourceWidth: Math.max(0, Number(sourceWidth) || 0),
+        sourceHeight: Math.max(0, Number(sourceHeight) || 0),
+        sourceAreaOverride: Math.max(0, Number(sourceArea) || 0),
+        sourceCount: Math.max(0, Number(sourceCount) || 0),
+        renderWidth: Math.max(0, Number(renderWidth) || 0),
+        renderHeight: Math.max(0, Number(renderHeight) || 0)
+    };
+}
+
+function releaseUnusedStitchPreviewUrls(previousPreviews = {}, nextPreviews = {}) {
+    const retained = new Set(
+        Object.values(nextPreviews)
+            .filter((value) => value && String(value).startsWith('blob:'))
+    );
+    Object.values(previousPreviews || {}).forEach((value) => {
+        if (value && String(value).startsWith('blob:') && !retained.has(value)) {
+            URL.revokeObjectURL(value);
+        }
+    });
+}
+
+function appendStitchInputs(documentState, newInputs) {
+    const normalized = normalizeStitchDocument(documentState);
+    const nextInputs = (Array.isArray(newInputs) ? newInputs : []).filter((input) => input?.imageData);
+    if (!nextInputs.length) return normalized;
+
+    const bounds = computeCompositeBounds(normalized);
+    let cursorX = normalized.inputs.length ? bounds.maxX + 48 : 0;
+    const nextPlacements = [...normalized.placements];
+    const baseZ = nextPlacements.length;
+
+    nextInputs.forEach((input, index) => {
+        nextPlacements.push({
+            inputId: input.id,
+            x: cursorX,
+            y: 0,
+            scale: 1,
+            rotation: 0,
+            visible: true,
+            locked: false,
+            z: baseZ + index,
+            opacity: 1
+        });
+        cursorX += Math.max(1, Number(input.width) || 1) + 48;
+    });
+
+    return normalizeStitchDocument({
+        ...normalized,
+        inputs: [...normalized.inputs, ...nextInputs],
+        placements: nextPlacements,
+        candidates: [],
+        activeCandidateId: null,
+        selection: {
+            inputId: nextInputs[0]?.id || normalized.selection.inputId || null
+        },
+        analysis: {
+            ...normalized.analysis,
+            status: 'idle',
+            warning: normalized.inputs.length
+                ? 'Run the analysis again to include the newly added images.'
+                : '',
+            error: '',
+            diagnostics: [],
+            previews: {}
+        }
     });
 }
 
@@ -252,7 +484,9 @@ function createEmptyBatchState() {
 
 function getInitialActiveSection() {
     try {
-        return new URL(window.location.href).searchParams.get('section') === 'library' ? 'library' : 'editor';
+        const section = new URL(window.location.href).searchParams.get('section');
+        if (section === 'library' || section === 'stitch') return section;
+        return 'editor';
     } catch (_error) {
         return 'editor';
     }
@@ -262,6 +496,7 @@ function syncSectionUrl(section) {
     try {
         const url = new URL(window.location.href);
         if (section === 'library') url.searchParams.set('section', 'library');
+        else if (section === 'stitch') url.searchParams.set('section', 'stitch');
         else url.searchParams.delete('section');
         window.history.replaceState(null, '', url);
     } catch (_error) {
@@ -284,6 +519,7 @@ function createInitialState() {
             export: { keepFolderStructure: false, playFps: 10 },
             batch: createEmptyBatchState()
         },
+        stitchDocument: createEmptyStitchDocument('light'),
         ui: {
             activeSection: getInitialActiveSection(),
             compareOpen: false,
@@ -468,12 +704,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             }));
         }
     });
+    const stitchEngine = new StitchEngine();
 
     let noticeTimer = null;
     let playbackTimer = null;
     let view = null;
     let paletteExtractionImage = null;
     let paletteExtractionOwner = null;
+    let stitchAnalysisToken = 0;
 
     function setNotice(text, type = 'info', timeout = 4200) {
         if (noticeTimer) clearTimeout(noticeTimer);
@@ -487,6 +725,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function updateDocument(mutator, meta = { render: true }) {
         store.setState((state) => ({ ...state, document: mutator(state.document) }), meta);
+    }
+
+    function updateStitchDocument(mutator, meta = { renderStitch: true }) {
+        const previous = store.getState().stitchDocument;
+        const next = normalizeStitchDocument(mutator(previous));
+        releaseUnusedStitchPreviewUrls(previous?.analysis?.previews, next?.analysis?.previews);
+        store.setState((state) => ({ ...state, stitchDocument: next }), meta);
     }
 
     function updateInstance(instanceId, updater, meta = { render: true }) {
@@ -561,36 +806,101 @@ window.addEventListener('DOMContentLoaded', async () => {
         }), { render: false });
     }
 
+    function commitActiveSection(section) {
+        const nextSection = section === 'library' ? 'library' : section === 'stitch' ? 'stitch' : 'editor';
+        if (nextSection !== 'editor') stopPlayback();
+        syncSectionUrl(nextSection);
+        store.setState((state) => ({
+            ...state,
+            document: nextSection !== 'editor'
+                ? {
+                    ...state.document,
+                    workspace: { ...state.document.workspace, batchOpen: false }
+                }
+                : state.document,
+            ui: {
+                ...state.ui,
+                activeSection: nextSection,
+                compareOpen: nextSection === 'editor' ? state.ui.compareOpen : false,
+                jsonCompareModalOpen: nextSection === 'editor' ? state.ui.jsonCompareModalOpen : false
+            },
+            eyedropperTarget: nextSection === 'editor' ? state.eyedropperTarget : null
+        }), { render: false });
+    }
+
     function notifyLibraryChanged() {
         view?.refreshLibrary?.();
     }
 
-    async function getMatchingLibraryEntries(payload) {
+    let projectAdapters = null;
+
+    function getProjectTypeForSection(section) {
+        return section === 'stitch' ? 'stitch' : 'studio';
+    }
+
+    function getLibraryProjectType(entry) {
+        if (!entry) return 'studio';
+        return inferProjectTypeFromPayload(entry.payload, entry.projectType || null);
+    }
+
+    async function createStitchInputsFromFiles(files) {
+        const inputs = [];
+        for (const file of files || []) {
+            if (!file?.type?.startsWith('image/')) continue;
+            const imageData = await fileToDataUrl(file);
+            const image = await loadImageFromDataUrl(imageData);
+            inputs.push({
+                id: createStitchInputId(),
+                name: file.name,
+                type: file.type,
+                imageData,
+                width: image.naturalWidth || image.width || 1,
+                height: image.naturalHeight || image.height || 1
+            });
+        }
+        return inputs;
+    }
+
+    async function buildStitchPreviewMap(documentState) {
+        const normalized = normalizeStitchDocument(documentState);
+        if (!normalized.candidates.length) return {};
+        return stitchEngine.buildCandidatePreviewMap(normalized);
+    }
+
+    async function getMatchingLibraryEntries(payload, projectType = null) {
         const fingerprint = makeProjectFingerprint(payload);
         try {
             const existing = await getAllFromLibraryDB();
-            return existing.filter((entry) => entry.payload && makeProjectFingerprint(entry.payload) === fingerprint);
+            return existing.filter((entry) => {
+                if (!entry.payload || isLibraryMetaRecord(entry)) return false;
+                if (projectType && getLibraryProjectType(entry) !== projectType) return false;
+                return makeProjectFingerprint(entry.payload) === fingerprint;
+            });
         } catch (_error) {
             return [];
         }
     }
 
-    async function ensureCurrentProjectCanBeReplaced(actionLabel) {
+    async function ensureProjectCanBeReplaced(projectType, actionLabel) {
+        const adapter = projectAdapters?.getAdapter(projectType);
+        if (!adapter) return true;
         const state = store.getState();
-        if (!state.document.source?.imageData) return true;
+        const currentDocument = adapter.getCurrentDocument(state);
+        if (adapter.isEmpty(currentDocument)) return true;
 
-        const exactMatches = await getMatchingLibraryEntries(buildLibraryPayload(state.document));
+        const exactMatches = await getMatchingLibraryEntries(adapter.serializeDocument(currentDocument), projectType);
         if (exactMatches.length) return true;
 
-        const shouldSave = confirm(`Save the current project to the Library before ${actionLabel}?`);
+        const shouldSave = confirm(`Save the current ${adapter.label} project to the Library before ${actionLabel}?`);
         if (shouldSave) {
-            const saved = await actions.saveProjectToLibrary(getSuggestedProjectName(state.document), {
+            const saved = await actions.saveProjectToLibrary(adapter.suggestName(currentDocument), {
                 forceNew: true,
-                preferExisting: true
+                preferExisting: true,
+                projectType
             });
             return !!saved;
         }
-        return confirm(`Continue ${actionLabel} without saving the current project to the Library?`);
+        return confirm(`Continue ${actionLabel} without saving the current ${adapter.label} project to the Library?`);
     }
 
     const actions = {
@@ -598,25 +908,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             return store.getState();
         },
         setActiveSection(section) {
-            const nextSection = section === 'library' ? 'library' : 'editor';
-            if (nextSection === 'library') stopPlayback();
-            syncSectionUrl(nextSection);
-            store.setState((state) => ({
-                ...state,
-                document: nextSection === 'library'
-                    ? {
-                        ...state.document,
-                        workspace: { ...state.document.workspace, batchOpen: false }
-                    }
-                    : state.document,
-                ui: {
-                    ...state.ui,
-                    activeSection: nextSection,
-                    compareOpen: nextSection === 'library' ? false : state.ui.compareOpen,
-                    jsonCompareModalOpen: nextSection === 'library' ? false : state.ui.jsonCompareModalOpen
-                },
-                eyedropperTarget: nextSection === 'library' ? null : state.eyedropperTarget
-            }), { render: false });
+            commitActiveSection(section);
         },
         setMode(mode) {
             updateDocument((document) => ({
@@ -633,13 +925,21 @@ window.addEventListener('DOMContentLoaded', async () => {
             }));
         },
         setTheme(enabled) {
+            const theme = enabled ? 'dark' : 'light';
             updateDocument((document) => ({
                 ...document,
                 view: {
                     ...document.view,
-                    theme: enabled ? 'dark' : 'light'
+                    theme
                 }
             }), { render: false });
+            updateStitchDocument((document) => ({
+                ...document,
+                view: {
+                    ...document.view,
+                    theme
+                }
+            }), { renderStitch: true, skipViewRender: false });
         },
         setBatchOpen(open) {
             if (!open) stopPlayback();
@@ -972,6 +1272,271 @@ window.addEventListener('DOMContentLoaded', async () => {
         clearPalette() {
             updateDocument((document) => ({ ...document, palette: [] }));
         },
+        async newStitchProject() {
+            if (!await ensureProjectCanBeReplaced('stitch', 'starting a new stitch project')) return;
+            stitchAnalysisToken += 1;
+            const theme = store.getState().stitchDocument.view?.theme || store.getState().document.view?.theme || 'light';
+            updateStitchDocument(() => createEmptyStitchDocument(theme), { renderStitch: true });
+            clearActiveLibraryOrigin('stitch');
+            commitActiveSection('stitch');
+            setNotice('Started a new stitch project.', 'success');
+        },
+        openStitchPicker() {
+            view?.openStitchPicker?.();
+        },
+        async openStitchImages(files) {
+            const nextInputs = await createStitchInputsFromFiles(files);
+            if (!nextInputs.length) {
+                setNotice('Choose one or more images to add to the Stitch workspace.', 'warning');
+                return;
+            }
+            stitchAnalysisToken += 1;
+            updateStitchDocument((document) => appendStitchInputs(document, nextInputs), { renderStitch: true });
+            commitActiveSection('stitch');
+            setNotice(`Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch.`, 'success');
+        },
+        async runStitchAnalysis() {
+            const snapshot = normalizeStitchDocument(store.getState().stitchDocument);
+            if (snapshot.inputs.length < 2) {
+                setNotice('Add at least two images before running Stitch analysis.', 'warning');
+                updateStitchDocument((document) => ({
+                    ...document,
+                    analysis: {
+                        ...document.analysis,
+                        status: 'idle',
+                        warning: snapshot.inputs.length ? 'Only one image is loaded, so overlap analysis cannot run yet.' : 'Add two or more images to analyze a stitch.',
+                        error: '',
+                        diagnostics: [],
+                        previews: {}
+                    }
+                }), { renderStitch: true });
+                return;
+            }
+
+            const token = ++stitchAnalysisToken;
+            updateStitchDocument((document) => ({
+                ...document,
+                workspace: {
+                    ...document.workspace,
+                    galleryOpen: false
+                },
+                analysis: {
+                    ...document.analysis,
+                    status: 'running',
+                    warning: '',
+                    error: '',
+                    diagnostics: [],
+                    previews: {}
+                }
+            }), { renderStitch: true });
+            setNotice('Running stitch analysis...', 'info', 0);
+
+            try {
+                const result = await stitchEngine.analyze(snapshot);
+                if (token !== stitchAnalysisToken) return;
+                const latest = normalizeStitchDocument(store.getState().stitchDocument);
+                let nextDocument = normalizeStitchDocument({
+                    ...latest,
+                    candidates: result.candidates || [],
+                    activeCandidateId: result.candidates?.[0]?.id || null,
+                    placements: result.candidates?.[0]?.placements || latest.placements,
+                    workspace: {
+                        ...latest.workspace,
+                        galleryOpen: true,
+                        alternativesOpen: true
+                    },
+                    analysis: {
+                        ...latest.analysis,
+                        status: 'ready',
+                        warning: result.warning || '',
+                        error: '',
+                        lastRunAt: Date.now(),
+                        diagnostics: result.diagnostics || [],
+                        previews: {}
+                    }
+                });
+                const previews = await buildStitchPreviewMap(nextDocument);
+                if (token !== stitchAnalysisToken) {
+                    releaseUnusedStitchPreviewUrls(previews, {});
+                    return;
+                }
+                nextDocument = normalizeStitchDocument({
+                    ...nextDocument,
+                    analysis: {
+                        ...nextDocument.analysis,
+                        previews
+                    }
+                });
+                updateStitchDocument(() => nextDocument, { renderStitch: true });
+                setNotice(result.warning || 'Stitch analysis is ready.', result.warning ? 'warning' : 'success');
+            } catch (error) {
+                if (token !== stitchAnalysisToken) return;
+                updateStitchDocument((document) => ({
+                    ...document,
+                    analysis: {
+                        ...document.analysis,
+                        status: 'error',
+                        error: error?.message || 'The stitch analysis failed.',
+                        warning: '',
+                        diagnostics: [],
+                        previews: {}
+                    }
+                }), { renderStitch: true });
+                setNotice(error?.message || 'The stitch analysis failed.', 'error', 7000);
+            }
+        },
+        setStitchGalleryOpen(open) {
+            updateStitchDocument((document) => ({
+                ...document,
+                workspace: {
+                    ...document.workspace,
+                    galleryOpen: !!open
+                }
+            }), { renderStitch: true });
+        },
+        setStitchAlternativesOpen(open) {
+            updateStitchDocument((document) => ({
+                ...document,
+                workspace: {
+                    ...document.workspace,
+                    alternativesOpen: !!open
+                }
+            }), { renderStitch: true });
+        },
+        chooseStitchCandidate(candidateId) {
+            if (!candidateId) return;
+            updateStitchDocument((document) => ({
+                ...applyCandidateToDocument(document, candidateId),
+                workspace: {
+                    ...document.workspace,
+                    galleryOpen: false,
+                    alternativesOpen: true
+                }
+            }), { renderStitch: true });
+        },
+        selectStitchInput(inputId) {
+            updateStitchDocument((document) => ({
+                ...document,
+                selection: {
+                    inputId: inputId || null
+                }
+            }), { renderStitch: true, skipViewRender: false });
+        },
+        async removeStitchInput(inputId) {
+            if (!inputId) return;
+            stitchAnalysisToken += 1;
+            updateStitchDocument((document) => {
+                const normalized = normalizeStitchDocument(document);
+                const nextInputs = normalized.inputs.filter((input) => input.id !== inputId);
+                const nextPlacements = normalized.placements.filter((placement) => placement.inputId !== inputId);
+                const nextSelection = normalized.selection.inputId === inputId
+                    ? { inputId: nextInputs[0]?.id || null }
+                    : normalized.selection;
+                return normalizeStitchDocument({
+                    ...normalized,
+                    inputs: nextInputs,
+                    placements: nextPlacements,
+                    candidates: [],
+                    activeCandidateId: null,
+                    selection: nextSelection,
+                    analysis: {
+                        ...normalized.analysis,
+                        status: 'idle',
+                        warning: nextInputs.length > 1 ? 'Run the analysis again after removing images.' : '',
+                        error: '',
+                        diagnostics: [],
+                        previews: {}
+                    }
+                });
+            }, { renderStitch: true });
+        },
+        toggleStitchInputLock(inputId) {
+            if (!inputId) return;
+            const placement = getPlacementByInput(store.getState().stitchDocument, inputId);
+            actions.updateStitchPlacement(inputId, { locked: !(placement?.locked) });
+        },
+        toggleStitchInputVisibility(inputId) {
+            if (!inputId) return;
+            const placement = getPlacementByInput(store.getState().stitchDocument, inputId);
+            actions.updateStitchPlacement(inputId, { visible: placement?.visible === false });
+        },
+        reorderStitchInput(inputId, direction) {
+            if (!inputId || !direction) return;
+            updateStitchDocument((document) => updateStitchInputOrderHelper(document, inputId, direction), { renderStitch: true });
+        },
+        updateStitchPlacement(inputId, patch, meta = { renderStitch: true }) {
+            if (!inputId || !patch || typeof patch !== 'object') return;
+            updateStitchDocument((document) => updateStitchPlacementHelper(document, inputId, patch), meta);
+        },
+        updateStitchSetting(key, value) {
+            if (!key) return;
+            updateStitchDocument((document) => ({
+                ...document,
+                settings: {
+                    ...document.settings,
+                    [key]: typeof document.settings?.[key] === 'boolean' ? !!value : Number(value)
+                },
+                analysis: {
+                    ...document.analysis,
+                    status: 'idle',
+                    warning: key === 'useFullResolutionAnalysis' && value
+                        ? 'Full-resolution analysis is enabled. It can be slower, but it may help on screenshots and UI captures.'
+                        : 'Analysis settings changed. Run the stitch analysis again to refresh the candidates.',
+                    error: ''
+                }
+            }), { renderStitch: true });
+        },
+        resetSelectedStitchPlacement() {
+            const documentState = normalizeStitchDocument(store.getState().stitchDocument);
+            const inputId = documentState.selection.inputId;
+            if (!inputId) return;
+            const activeCandidate = documentState.candidates.find((candidate) => candidate.id === documentState.activeCandidateId);
+            const candidatePlacement = activeCandidate?.placements?.find((placement) => placement.inputId === inputId);
+            if (candidatePlacement) {
+                actions.updateStitchPlacement(inputId, candidatePlacement);
+                return;
+            }
+            const index = documentState.inputs.findIndex((input) => input.id === inputId);
+            const input = documentState.inputs[index];
+            if (!input) return;
+            actions.updateStitchPlacement(inputId, {
+                x: 0,
+                y: 0,
+                scale: 1,
+                rotation: 0,
+                visible: true,
+                locked: false,
+                z: index,
+                opacity: 1
+            });
+        },
+        resetActiveStitchCandidate() {
+            const documentState = normalizeStitchDocument(store.getState().stitchDocument);
+            if (!documentState.activeCandidateId) return;
+            actions.chooseStitchCandidate(documentState.activeCandidateId);
+        },
+        resetStitchView() {
+            updateStitchDocument((document) => ({
+                ...document,
+                view: {
+                    ...document.view,
+                    zoom: 1,
+                    panX: 0,
+                    panY: 0
+                }
+            }), { renderStitch: true });
+        },
+        async exportStitchProject() {
+            const documentState = normalizeStitchDocument(store.getState().stitchDocument);
+            if (!documentState.inputs.length) {
+                setNotice('Add images to the Stitch workspace before exporting.', 'warning');
+                return;
+            }
+            const blob = await stitchEngine.exportPngBlob(documentState);
+            const baseName = getSuggestedStitchProjectName(documentState).replace(/\.[^/.]+$/, '') || 'stitch-project';
+            downloadBlob(blob, `${baseName}-stitched.png`);
+            setNotice('Stitch PNG export complete.', 'success');
+        },
         updateInstance,
         armEyedropper(target) {
             store.setState((state) => ({ ...state, eyedropperTarget: target, notice: { text: 'Click the preview to sample a color.', type: 'info' } }), { render: false });
@@ -997,24 +1562,31 @@ window.addEventListener('DOMContentLoaded', async () => {
             const forceNew = !!options.forceNew;
             const preferExisting = !!options.preferExisting;
             const state = store.getState();
-            if (!state.document.source?.imageData) {
-                setNotice('No image loaded - nothing to save.', 'warning');
+            const projectType = options.projectType || getProjectTypeForSection(state.ui.activeSection);
+            const adapter = projectAdapters?.getAdapter(projectType);
+            if (!adapter) {
+                setNotice('This project type cannot be saved to the Library yet.', 'error', 7000);
+                return null;
+            }
+            const currentDocument = adapter.getCurrentDocument(state);
+            if (adapter.isEmpty(currentDocument) || !adapter.canSave(currentDocument)) {
+                setNotice(adapter.emptyNotice || `There is no ${adapter.label} project ready to save.`, 'warning');
                 return null;
             }
 
-            const payloadParams = buildLibraryPayload(state.document);
-            const matchingEntries = await getMatchingLibraryEntries(payloadParams);
-            const activeMatch = activeLibraryId
-                ? matchingEntries.find((entry) => entry.id === activeLibraryId) || null
+            const payloadParams = adapter.serializeDocument(currentDocument);
+            const matchingEntries = await getMatchingLibraryEntries(payloadParams, projectType);
+            const activeOrigin = getActiveLibraryOrigin(projectType);
+            const activeMatch = activeOrigin.id
+                ? matchingEntries.find((entry) => entry.id === activeOrigin.id) || null
                 : null;
             const reusableMatch = preferExisting
                 ? activeMatch || matchingEntries[0] || null
                 : null;
 
             if (reusableMatch) {
-                const wasActiveMatch = reusableMatch.id === activeLibraryId;
-                activeLibraryId = reusableMatch.id;
-                activeLibraryName = reusableMatch.name;
+                const wasActiveMatch = reusableMatch.id === activeOrigin.id;
+                setActiveLibraryOrigin(projectType, reusableMatch.id, reusableMatch.name);
                 setNotice(
                     wasActiveMatch
                         ? 'Already saved - no changes detected.'
@@ -1027,8 +1599,8 @@ window.addEventListener('DOMContentLoaded', async () => {
             let name;
             let saveId;
 
-            if (!forceNew && activeLibraryId) {
-                const defaultName = activeLibraryName || getSuggestedProjectName(state.document, nameOverride);
+            if (!forceNew && activeOrigin.id) {
+                const defaultName = activeOrigin.name || adapter.suggestName(currentDocument, nameOverride);
                 const choice = prompt(
                     activeMatch
                         ? `This project already matches "${defaultName}".\n\nLeave the name as-is to keep that saved version, or type a new name to save a NEW entry:`
@@ -1043,14 +1615,14 @@ window.addEventListener('DOMContentLoaded', async () => {
                         setNotice('Already saved - no changes detected.', 'info');
                         return activeMatch;
                     }
-                    saveId = activeLibraryId;
+                    saveId = activeOrigin.id;
                     name = defaultName;
                 } else {
                     saveId = createLibraryProjectId();
                     name = trimmedChoice;
                 }
             } else {
-                const defaultName = getSuggestedProjectName(state.document, nameOverride);
+                const defaultName = adapter.suggestName(currentDocument, nameOverride);
                 const askedName = prompt('Name your project for the Library:', defaultName);
                 if (askedName === null) return null;
                 name = askedName.trim();
@@ -1058,66 +1630,163 @@ window.addEventListener('DOMContentLoaded', async () => {
                 saveId = createLibraryProjectId();
             }
 
-            setNotice('Saving to Library...', 'info', 0);
-            const blob = await engine.exportPngBlob(state.document);
-            const projectData = {
-                id: saveId,
-                timestamp: Date.now(),
-                name: name,
-                blob: blob,
-                payload: payloadParams
-            };
-            await saveToLibraryDB(projectData);
-            activeLibraryId = saveId;
-            activeLibraryName = name;
-            setNotice(`Saved "${name}" to Library.`, 'success');
-            notifyLibraryChanged();
-            return projectData;
+            try {
+                setNotice('Saving to Library...', 'info', 0);
+                const existingRecord = saveId ? await getFromLibraryDB(saveId).catch(() => null) : null;
+                const capture = await adapter.captureDocument(currentDocument, payloadParams);
+                const projectData = buildLibraryProjectRecord({
+                    id: saveId,
+                    timestamp: Date.now(),
+                    name,
+                    blob: capture.blob,
+                    payload: capture.payload || payloadParams,
+                    tags: normalizeLibraryTags(existingRecord?.tags || []),
+                    projectType,
+                    ...(capture.summary || {})
+                });
+                await saveToLibraryDB(projectData);
+                await registerLibraryTags(projectData.tags);
+                setActiveLibraryOrigin(projectType, saveId, name);
+                setNotice(`Saved "${name}" to Library.`, 'success');
+                notifyLibraryChanged();
+                return projectData;
+            } catch (error) {
+                console.error(error);
+                setNotice(error?.message || 'Could not save that project to the Library.', 'error', 7000);
+                return null;
+            }
         },
         async getLibraryProjects() {
             try {
-                return await getAllFromLibraryDB();
+                return (await getAllFromLibraryDB())
+                    .filter((entry) => !isLibraryMetaRecord(entry))
+                    .map((entry) => ({
+                        ...entry,
+                        projectType: getLibraryProjectType(entry),
+                        tags: normalizeLibraryTags(entry.tags || extractLibraryProjectMeta(entry.payload).tags || []),
+                        hoverSource: normalizeLibraryHoverSource(entry.hoverSource || extractLibraryProjectMeta(entry.payload).hoverSource || entry.payload?.source || null),
+                        sourceWidth: Number(entry.sourceWidth || entry.hoverSource?.width || extractLibraryProjectMeta(entry.payload).hoverSource?.width || entry.payload?.source?.width || 0),
+                        sourceHeight: Number(entry.sourceHeight || entry.hoverSource?.height || extractLibraryProjectMeta(entry.payload).hoverSource?.height || entry.payload?.source?.height || 0),
+                        sourceAreaOverride: Number(entry.sourceAreaOverride || extractLibraryProjectMeta(entry.payload).sourceArea || 0),
+                        sourceCount: Number(entry.sourceCount || extractLibraryProjectMeta(entry.payload).sourceCount || (entry.payload?.kind === 'stitch-document' ? entry.payload?.inputs?.length || 0 : (entry.payload?.source?.imageData ? 1 : 0)) || 0)
+                    }));
             } catch (_error) {
                 return [];
             }
         },
+        async getLibraryTagCatalog() {
+            try {
+                return await loadLibraryTagCatalogFromDB();
+            } catch (_error) {
+                return [];
+            }
+        },
+        async createLibraryTag(tag) {
+            const trimmed = String(tag || '').trim();
+            if (!trimmed) return [];
+            const tags = await registerLibraryTags([trimmed]);
+            notifyLibraryChanged();
+            return tags;
+        },
+        async setLibraryTagCatalog(tags) {
+            const nextTags = normalizeLibraryTags(tags);
+            await setLibraryMetaTags(nextTags);
+            notifyLibraryChanged();
+            return nextTags;
+        },
+        async updateLibraryProjectTags(id, tags) {
+            if (!id) return null;
+            const existing = await getFromLibraryDB(id);
+            if (!existing || isLibraryMetaRecord(existing)) return null;
+            const updated = {
+                ...existing,
+                tags: normalizeLibraryTags(tags)
+            };
+            await saveToLibraryDB(updated);
+            await registerLibraryTags(updated.tags);
+            notifyLibraryChanged();
+            return updated;
+        },
+        async applyLibraryTagsToProjects(ids, tags) {
+            const targetIds = [...new Set((ids || []).filter(Boolean))];
+            const nextTags = normalizeLibraryTags(tags);
+            if (!targetIds.length || !nextTags.length) return [];
+
+            await registerLibraryTags(nextTags);
+            const updatedProjects = [];
+            for (const id of targetIds) {
+                const existing = await getFromLibraryDB(id);
+                if (!existing || isLibraryMetaRecord(existing)) continue;
+                const updated = {
+                    ...existing,
+                    tags: normalizeLibraryTags([...(existing.tags || []), ...nextTags])
+                };
+                await saveToLibraryDB(updated);
+                updatedProjects.push(updated);
+            }
+            notifyLibraryChanged();
+            return updatedProjects;
+        },
+        async removeLibraryTagFromProjects(ids, tag) {
+            const targetIds = [...new Set((ids || []).filter(Boolean))];
+            const removeKey = String(tag || '').trim().toLowerCase();
+            if (!targetIds.length || !removeKey) return [];
+
+            const updatedProjects = [];
+            for (const id of targetIds) {
+                const existing = await getFromLibraryDB(id);
+                if (!existing || isLibraryMetaRecord(existing)) continue;
+                const updated = {
+                    ...existing,
+                    tags: normalizeLibraryTags((existing.tags || []).filter((entry) => String(entry || '').trim().toLowerCase() !== removeKey))
+                };
+                await saveToLibraryDB(updated);
+                updatedProjects.push(updated);
+            }
+            notifyLibraryChanged();
+            return updatedProjects;
+        },
         async deleteLibraryProject(id) {
             if (!id) return;
+            const existing = await getFromLibraryDB(id).catch(() => null);
             await deleteFromLibraryDB(id);
-            if (activeLibraryId === id) {
-                clearActiveLibraryOrigin();
+            const projectType = getLibraryProjectType(existing);
+            if (getActiveLibraryOrigin(projectType).id === id) {
+                clearActiveLibraryOrigin(projectType);
+            }
+            notifyLibraryChanged();
+        },
+        async deleteLibraryProjects(ids) {
+            const targetIds = [...new Set((ids || []).filter(Boolean))];
+            if (!targetIds.length) return;
+            for (const id of targetIds) {
+                const existing = await getFromLibraryDB(id).catch(() => null);
+                await deleteFromLibraryDB(id);
+                const projectType = getLibraryProjectType(existing);
+                if (getActiveLibraryOrigin(projectType).id === id) {
+                    clearActiveLibraryOrigin(projectType);
+                }
             }
             notifyLibraryChanged();
         },
         async clearLibraryProjects() {
-            await clearAllFromLibraryDB();
+            const entries = await getAllFromLibraryDB();
+            for (const entry of entries) {
+                if (isLibraryMetaRecord(entry)) continue;
+                await deleteFromLibraryDB(entry.id);
+            }
             clearActiveLibraryOrigin();
             notifyLibraryChanged();
         },
         async loadLibraryProject(payload, libraryId = null, libraryName = null) {
-            if (!await ensureCurrentProjectCanBeReplaced(`loading "${libraryName || 'this Library project'}"`)) return false;
-
             try {
                 const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
                 const rawState = normalizeLegacyDocumentPayload(JSON.parse(payloadStr));
-                const validated = validateImportPayload(rawState, rawState.kind || 'document');
-                if (validated.source && validated.source.imageData) {
-                    const image = await loadImageFromDataUrl(validated.source.imageData);
-                    await engine.loadImage(image, validated.source);
-                }
-                const layerStack = reindexStack(registry, validated.layerStack || []);
-                updateDocument((document) => ({
-                    ...document,
-                    ...validated,
-                    layerStack,
-                    source: validated.source || document.source
-                }), { render: true });
-
-                activeLibraryId = libraryId || null;
-                activeLibraryName = libraryName || null;
-                actions.setActiveSection('editor');
-                setNotice(`Loaded "${activeLibraryName || 'project'}" from Library.`, 'success');
-                return true;
+                const projectMeta = extractLibraryProjectMeta(rawState);
+                const adapter = projectAdapters?.getAdapterForPayload(rawState, projectMeta.projectType);
+                if (!adapter) throw new Error('This Library project type is not supported in the current build.');
+                if (!await ensureProjectCanBeReplaced(adapter.type, `loading "${libraryName || 'this Library project'}"`)) return false;
+                return await adapter.restorePayload(rawState, libraryId, libraryName);
             } catch (error) {
                 console.error(error);
                 setNotice('Failed to load project from Library', 'error');
@@ -1125,7 +1794,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         },
         async newProject() {
-            if (!await ensureCurrentProjectCanBeReplaced('starting a new project')) return;
+            if (!await ensureProjectCanBeReplaced('studio', 'starting a new project')) return;
             stopPlayback();
             paletteExtractionImage = null;
             paletteExtractionOwner = null;
@@ -1138,13 +1807,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                 workspace: { ...document.workspace, batchOpen: false },
                 batch: createEmptyBatchState()
             }), { render: false });
-            clearActiveLibraryOrigin();
+            clearActiveLibraryOrigin('studio');
             engine.requestRender(store.getState().document);
             setNotice('Started a new project.', 'success');
         },
         async openImageFile(file) {
             if (!file) return;
-            if (!await ensureCurrentProjectCanBeReplaced('loading a new image')) return;
+            if (!await ensureProjectCanBeReplaced('studio', 'loading a new image')) return;
             try {
                 stopPlayback();
                 paletteExtractionImage = null;
@@ -1158,9 +1827,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                     batch: createEmptyBatchState()
                 }), { render: false });
 
-                clearActiveLibraryOrigin();
+                clearActiveLibraryOrigin('studio');
                 engine.requestRender(store.getState().document);
-                await actions.saveProjectToLibrary(stripProjectExtension(file.name), { preferExisting: true });
+                await actions.saveProjectToLibrary(stripProjectExtension(file.name), { preferExisting: true, projectType: 'studio' });
 
                 setNotice(`Loaded ${file.name}.`, 'success');
             } catch (error) {
@@ -1169,7 +1838,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async openStateFile(file) {
             if (!file) return;
-            if (!await ensureCurrentProjectCanBeReplaced('loading a state file')) return;
+            if (!await ensureProjectCanBeReplaced('studio', 'loading a state file')) return;
             try {
                 stopPlayback();
                 paletteExtractionImage = null;
@@ -1204,7 +1873,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         batch: createEmptyBatchState()
                     }
                 }), { render: engine.hasImage() && !(shouldLoadImage && embeddedSource) });
-                clearActiveLibraryOrigin();
+                clearActiveLibraryOrigin('studio');
 
                 if (shouldLoadImage && embeddedSource) {
                     try {
@@ -1212,7 +1881,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         await engine.loadImage(image, embeddedSource);
                         updateDocument((document) => ({ ...document, source: embeddedSource }), { render: false });
                         engine.requestRender(store.getState().document);
-                        await actions.saveProjectToLibrary(stripProjectExtension(file.name), { preferExisting: true });
+                        await actions.saveProjectToLibrary(stripProjectExtension(file.name), { preferExisting: true, projectType: 'studio' });
                         setNotice(
                             droppedLayerCount
                                 ? `State loaded: ${file.name}. Removed ${droppedLayerCount} unsupported layer${droppedLayerCount === 1 ? '' : 's'}.`
@@ -1405,6 +2074,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             let savedCount = 0;
             let failedCount = 0;
             let lastError = null;
+            const importedTags = [];
             setNotice(`Rendering ${payloadsText.length} variants to Library DB...`, 'info', 0);
 
             onProgress?.({ phase: 'start', total: payloadsText.length });
@@ -1413,29 +2083,34 @@ window.addEventListener('DOMContentLoaded', async () => {
                 onProgress?.({ phase: 'progress', count: i, total: payloadsText.length, filename: filenames[i] });
 
                 try {
-                     const rawState = normalizeLegacyDocumentPayload(JSON.parse(payloadsText[i]));
-                     const validated = validateImportPayload(rawState, rawState.kind || 'document');
-                     if (!validated.source || !validated.source.imageData) continue;
+                    const rawState = normalizeLegacyDocumentPayload(JSON.parse(payloadsText[i]));
+                    const meta = extractLibraryProjectMeta(rawState);
+                    const adapter = projectAdapters?.getAdapterForPayload(rawState, meta.projectType);
+                    if (!adapter) {
+                        throw new Error('Unsupported project type in Library import.');
+                    }
 
-                     const layerStack = reindexStack(registry, validated.layerStack || []);
-                     const tempDoc = { ...state.document, ...validated, layerStack, source: validated.source };
-                     const image = await loadImageFromDataUrl(validated.source.imageData);
-                     await engine.loadImage(image, validated.source);
-                     const blob = await engine.exportPngBlob(tempDoc);
-                     
-                     const projectData = {
-                         id: createLibraryProjectId(),
-                         timestamp: Date.now(),
-                         name: filenames[i],
-                         blob: blob,
-                         payload: validated
-                     };
-                     await saveToLibraryDB(projectData);
-                     savedCount += 1;
+                    const prepared = await adapter.prepareImportedProject(rawState);
+                    const projectName = stripProjectExtension(rawState._libraryName || filenames[i] || adapter.suggestName(prepared.payload))
+                        || adapter.suggestName(prepared.payload)
+                        || `Library Project ${i + 1}`;
+                    const projectData = buildLibraryProjectRecord({
+                        id: createLibraryProjectId(),
+                        timestamp: Date.now(),
+                        name: projectName,
+                        blob: prepared.blob,
+                        payload: prepared.payload,
+                        tags: meta.tags,
+                        projectType: adapter.type,
+                        ...(prepared.summary || {})
+                    });
+                    await saveToLibraryDB(projectData);
+                    importedTags.push(...projectData.tags);
+                    savedCount += 1;
                 } catch (err) {
-                     failedCount += 1;
-                     lastError = err;
-                     console.error(`[Library] Error processing file ${filenames[i]}:`, err);
+                    failedCount += 1;
+                    lastError = err;
+                    console.error(`[Library] Error processing file ${filenames[i]}:`, err);
                 }
 
                 onProgress?.({ phase: 'progress', count: i + 1, total: payloadsText.length, filename: filenames[i] });
@@ -1452,6 +2127,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
 
             onProgress?.({ phase: 'complete', total: payloadsText.length });
+            if (importedTags.length) {
+                await registerLibraryTags(importedTags);
+            }
             notifyLibraryChanged();
             if (!savedCount) {
                 throw new Error(lastError?.message || 'No Library items were saved to the database.');
@@ -1557,7 +2235,181 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     };
 
-    view = createWorkspaceUI(root, registry, actions);
+    projectAdapters = createProjectAdapterRegistry([
+        {
+            type: 'studio',
+            label: 'Editor',
+            getCurrentDocument(state) {
+                return state.document;
+            },
+            isEmpty(document) {
+                return !document?.source?.imageData && !(document?.layerStack || []).length;
+            },
+            canSave(document) {
+                return !!document?.source?.imageData;
+            },
+            emptyNotice: 'Load an image in the Editor before saving to the Library.',
+            suggestName(document, nameOverride = null) {
+                return getSuggestedProjectName(document, nameOverride);
+            },
+            serializeDocument(document) {
+                return buildLibraryPayload(document);
+            },
+            validatePayload(rawPayload) {
+                const normalized = stripLibraryMetadata(normalizeLegacyDocumentPayload(rawPayload));
+                const validated = validateImportPayload(normalized, 'document');
+                return {
+                    ...validated,
+                    layerStack: reindexStack(registry, validated.layerStack || [])
+                };
+            },
+            async captureDocument(document, payload = null) {
+                const finalPayload = payload || buildLibraryPayload(document);
+                if (!finalPayload.source?.imageData) {
+                    throw new Error('Load an image in the Editor before saving to the Library.');
+                }
+                const blob = await engine.exportPngBlob(document);
+                return {
+                    payload: finalPayload,
+                    blob,
+                    summary: {
+                        hoverSource: finalPayload.source,
+                        sourceWidth: Number(finalPayload.source?.width || 0),
+                        sourceHeight: Number(finalPayload.source?.height || 0),
+                        sourceArea: Number(finalPayload.source?.width || 0) * Number(finalPayload.source?.height || 0),
+                        sourceCount: finalPayload.source?.imageData ? 1 : 0,
+                        renderWidth: Number(engine.runtime.renderWidth || finalPayload.source?.width || 0),
+                        renderHeight: Number(engine.runtime.renderHeight || finalPayload.source?.height || 0)
+                    }
+                };
+            },
+            async prepareImportedProject(rawPayload) {
+                const validated = this.validatePayload(rawPayload);
+                if (!validated.source?.imageData) {
+                    throw new Error('Studio Library imports must include an embedded source image.');
+                }
+                const tempDoc = {
+                    ...store.getState().document,
+                    ...validated,
+                    layerStack: validated.layerStack,
+                    source: validated.source
+                };
+                const image = await loadImageFromDataUrl(validated.source.imageData);
+                await engine.loadImage(image, validated.source);
+                const blob = await engine.exportPngBlob(tempDoc);
+                return {
+                    payload: validated,
+                    blob,
+                    summary: {
+                        hoverSource: validated.source,
+                        sourceWidth: Number(validated.source?.width || 0),
+                        sourceHeight: Number(validated.source?.height || 0),
+                        sourceArea: Number(validated.source?.width || 0) * Number(validated.source?.height || 0),
+                        sourceCount: validated.source?.imageData ? 1 : 0,
+                        renderWidth: Number(engine.runtime.renderWidth || validated.source?.width || 0),
+                        renderHeight: Number(engine.runtime.renderHeight || validated.source?.height || 0)
+                    }
+                };
+            },
+            async restorePayload(rawPayload, libraryId = null, libraryName = null) {
+                stopPlayback();
+                paletteExtractionImage = null;
+                paletteExtractionOwner = null;
+                const validated = this.validatePayload(rawPayload);
+                if (validated.source?.imageData) {
+                    const image = await loadImageFromDataUrl(validated.source.imageData);
+                    await engine.loadImage(image, validated.source);
+                }
+                updateDocument((document) => ({
+                    ...document,
+                    ...validated,
+                    layerStack: validated.layerStack,
+                    source: validated.source || document.source,
+                    workspace: normalizeWorkspace('studio', validated.workspace || document.workspace, !!validated.selection?.layerInstanceId)
+                }), { render: true });
+                setActiveLibraryOrigin('studio', libraryId, libraryName);
+                commitActiveSection('editor');
+                setNotice(`Loaded "${libraryName || 'project'}" from Library.`, 'success');
+                return true;
+            }
+        },
+        {
+            type: 'stitch',
+            label: 'Stitch',
+            getCurrentDocument(state) {
+                return state.stitchDocument;
+            },
+            isEmpty(document) {
+                return !normalizeStitchDocument(document).inputs.length;
+            },
+            canSave(document) {
+                return normalizeStitchDocument(document).inputs.length > 0;
+            },
+            emptyNotice: 'Add images to Stitch before saving to the Library.',
+            suggestName(document, nameOverride = null) {
+                return getSuggestedStitchProjectName(document, nameOverride);
+            },
+            serializeDocument(document) {
+                return buildStitchLibraryPayload(document);
+            },
+            validatePayload(rawPayload) {
+                const normalized = stripLibraryMetadata(normalizeLegacyDocumentPayload(rawPayload));
+                return normalizeStitchDocument(validateImportPayload(normalized, 'stitch-document'));
+            },
+            async captureDocument(document) {
+                const normalized = normalizeStitchDocument(document);
+                const payload = buildStitchLibraryPayload(normalized);
+                const blob = await stitchEngine.exportPngBlob(normalized);
+                const summary = summarizeStitchDocument(normalized);
+                return {
+                    payload,
+                    blob,
+                    summary: {
+                        ...summary,
+                        hoverSource: summary.primarySource
+                    }
+                };
+            },
+            async prepareImportedProject(rawPayload) {
+                const validated = this.validatePayload(rawPayload);
+                const payload = buildStitchLibraryPayload(validated);
+                const blob = await stitchEngine.exportPngBlob(validated);
+                const summary = summarizeStitchDocument(validated);
+                return {
+                    payload,
+                    blob,
+                    summary: {
+                        ...summary,
+                        hoverSource: summary.primarySource
+                    }
+                };
+            },
+            async restorePayload(rawPayload, libraryId = null, libraryName = null) {
+                stitchAnalysisToken += 1;
+                let validated = this.validatePayload(rawPayload);
+                let previews = {};
+                try {
+                    previews = await buildStitchPreviewMap(validated);
+                } catch (_error) {
+                    previews = {};
+                }
+                validated = normalizeStitchDocument({
+                    ...validated,
+                    analysis: {
+                        ...validated.analysis,
+                        previews
+                    }
+                });
+                updateStitchDocument(() => validated, { renderStitch: true });
+                setActiveLibraryOrigin('stitch', libraryId, libraryName);
+                commitActiveSection('stitch');
+                setNotice(`Loaded "${libraryName || 'project'}" from Library.`, 'success');
+                return true;
+            }
+        }
+    ]);
+
+    view = createWorkspaceUI(root, registry, actions, { stitchEngine });
     await engine.init(view.getRenderRefs().canvas);
     engine.attachRefs(view.getRenderRefs());
 
@@ -1567,6 +2419,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             engine.attachRefs(view.getRenderRefs());
         }
         if (meta.render && engine.hasImage()) engine.requestRender(state.document);
+        if (meta.renderStitch) stitchEngine.requestRender(state.stitchDocument);
     });
 
     view.render(store.getState());
@@ -1574,7 +2427,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     setNotice(
         store.getState().ui.activeSection === 'library'
             ? 'Browse saved projects in the Library, or switch to Editor to start a new one.'
-            : 'Load an image to start editing.',
+            : store.getState().ui.activeSection === 'stitch'
+                ? 'Add two or more images in Stitch to start building a composite.'
+                : 'Load an image to start editing.',
         'info',
         6500
     );

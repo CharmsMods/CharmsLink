@@ -1,43 +1,63 @@
-# Modular Studio V2 - Architecture and AI Context Guide
+# Modular Studio V2 - Current Architecture and AI Handoff Guide
 
-This file is the handoff document for future AI work on Modular Studio V2. It should describe the app as it actually works now, not as it worked in an older revision.
+This document describes the app as it works now.
 
-The current architecture is a single-page editor with an integrated Library section. The old multi-window Library model has been retired from the main workflow because it was unreliable on GitHub Pages even when it appeared fine on local hosting.
+It is meant to be handed to a future AI together with the site files so the AI can understand:
+
+- what the product currently is
+- which files own which responsibilities
+- how save/load flows actually work
+- where editor logic ends and Library/Stitch logic begin
+- which old assumptions are now wrong
+
+If the code and this file disagree, the code is authoritative and this file should be updated.
 
 ## 1. Product Model
 
-The app has two user-facing sections inside the main site:
+Modular Studio V2 is now a single-page app with three top-level sections:
 
 1. `Editor`
 2. `Library`
+3. `Stitch`
 
-They are switched through a top-level section bar rendered inside the main app shell. The Editor and Library now live in the same page context and no longer depend on cross-window messaging for normal use.
+All three sections live inside the same page and same JS runtime.
 
-High-level responsibilities:
+Important historical note:
 
-- The `Editor` owns live document state, WebGL rendering, editing controls, export, and import.
-- The `Library` owns browsing saved projects, inspecting layer stacks, importing/exporting Library JSON bundles, and loading saved projects back into the Editor.
+- The old separate-window Library workflow was retired from the main path because it was unreliable on GitHub Pages even when it seemed fine on local hosting.
+- `library.html` is now only a redirect to `index.html?section=library`.
 
-Important architectural consequence:
+Current section responsibilities:
 
-- The Library is now an in-app section, not a popup or secondary browser window.
-- The main reason for this change was reliability on GitHub Pages.
+- `Editor`
+  - The original modular image-processing engine.
+  - Uses the registry-driven layer stack and the WebGL pipeline.
+  - Owns normal state-file save/load for studio documents.
+
+- `Library`
+  - Integrated project browser backed by IndexedDB.
+  - Can hold mixed project types from both `Editor` and `Stitch`.
+  - Owns Library import/export, tag catalog, selection workflows, secure bundle save/load, preview gallery, and detail inspection.
+
+- `Stitch`
+  - A second engine with its own document model and UI.
+  - Handles overlap-first multi-image stitching with candidate generation and manual correction.
+  - Saves into the same Library as Editor projects.
 
 ## 2. Entry Points
 
 ### `index.html`
 
-- Primary app entry.
-- Loads `src/jszip.min.js` first so ZIP export is available to the integrated Library.
+- Main app entry.
+- Loads `src/jszip.min.js`.
 - Loads `src/main.js` as the main ES module.
 
 ### `library.html`
 
-- No longer hosts a standalone Library app.
-- It now redirects to `index.html?section=library`.
-- This exists as a backward-compatibility route so old bookmarks or direct navigation still land in the Library section.
+- Redirect-only compatibility route.
+- Sends the user to `index.html?section=library`.
 
-## 3. Directory Structure
+## 3. Current Directory Responsibilities
 
 ### Root
 
@@ -45,96 +65,130 @@ Important architectural consequence:
 - `library.html`
 - `style.css`
 - `ai_context.txt`
-- `LEGACY/`
-  - Old V1-era files that are not part of the current runtime path.
 
-### `src/`
+### `src/main.js`
 
-- `src/main.js`
-  - Main application entry.
-  - Creates state, engine, UI, editor actions, IndexedDB helpers, and Library actions.
+- Main bootstrap.
+- Creates the store.
+- Creates the Studio engine and the Stitch engine.
+- Owns IndexedDB helpers.
+- Owns app-level actions.
+- Owns the project adapter registry that lets the Library save/load mixed engine types.
 
-- `src/ui/workspaces.js`
-  - Main UI shell for the single-page app.
-  - Renders the top section switcher.
-  - Renders the editor toolbar.
-  - Renders the editor workspace shell.
-  - Mounts the integrated Library panel.
+### `src/ui/workspaces.js`
 
-- `src/ui/libraryPanel.js`
-  - Integrated Library section logic.
-  - Renders the Library grid/fullscreen/detail views.
-  - Handles Library modals, upload/import/export, and direct calls into editor actions.
+- Main shell for the single-page app.
+- Renders:
+  - top section switcher
+  - Editor toolbar
+  - Stitch toolbar
+  - notice strip
+  - Editor workspace
+  - integrated Library panel
+  - integrated Stitch workspace
 
-- `src/ui/previewViewport.js`
-  - Preview coordinate and transform helpers.
+### `src/ui/libraryPanel.js`
 
-- `src/io/documents.js`
-  - JSON save/load helpers and validation.
+- Entire integrated Library UI.
+- Owns:
+  - gallery rendering
+  - fullscreen cycling view
+  - detail view
+  - side drawer
+  - tag filters
+  - multi-select
+  - save-library wizard
+  - secure import/export modals
+  - drag-safe modal behavior
 
-- `src/state/store.js`
-  - Lightweight store implementation.
+### `src/stitch/`
 
-- `src/state/documentHelpers.js`
-  - View/document normalization and helper logic.
+- `document.js`
+  - Stitch document shape, normalization, placements, bounds, summaries, manual fallback candidate.
 
-- `src/registry/`
-  - Registry loading, validation, and layer instancing helpers.
+- `analysis.js`
+  - Pure JS/Canvas overlap analysis.
+  - Downscales, extracts simple features, matches them, runs similarity-only RANSAC, and builds ranked candidates.
 
-- `src/engine/`
-  - Custom WebGL image processing engine.
+- `engine.js`
+  - 2D canvas stitch renderer.
+  - Candidate preview rendering.
+  - PNG export.
+  - Worker-backed analysis dispatch when supported.
 
-- `src/engine/layerPreviewProviders.js`
-  - Registry-style provider map for the Layer tab sub-preview canvas.
-  - This is where per-layer custom preview views should be added in the future.
+- `worker.js`
+  - Web Worker wrapper around stitch analysis.
 
-- `src/analysis/scopes.js`
-  - Scope/analysis helpers for editor views.
+- `ui.js`
+  - Stitch workspace UI.
+  - Input list, analysis controls, canvas stage, alternatives strip, candidate gallery, selection controls.
 
-- `src/jszip.min.js`
-  - Bundled JSZip used by the Library ZIP export.
+### `src/io/projectAdapters.js`
 
-### `Shaders/`
+- Tiny registry for engine-aware project adapters.
+- Used by the Library save/load/import paths.
 
-- Physical GLSL assets used by the engine and registry.
+### `src/io/documents.js`
 
-## 4. Single-Page Shell Layout
+- Studio state save/load helpers.
+- Generic `mns/v2` payload validation helper.
 
-The top-level app shell now has these main regions:
+### `src/engine/`
 
-1. Section switcher bar
-   - Buttons: `Editor`, `Library`
+- The original Studio WebGL image processing engine.
 
-2. Editor toolbar slot
-   - Visible only while the Editor section is active
+### `src/engine/layerPreviewProviders.js`
 
-3. Notice strip
-   - Shared by both sections
+- Provider-style framework for the Layer tab sub-preview canvas.
+- Texture-layer previews and custom noise previews now live here.
+- This is the correct extension point for future per-layer sub-preview work.
 
-4. Editor workspace shell
-   - Visible only while `state.ui.activeSection === 'editor'`
+## 4. Shell and Section Routing
 
-5. Library section panel
-   - Visible only while `state.ui.activeSection === 'library'`
+Top-level section switching is controlled by `state.ui.activeSection`.
 
-The Editor and Library are sibling sections in the same DOM tree. They are shown/hidden by UI state, not opened in separate windows.
+Allowed values:
+
+- `'editor'`
+- `'library'`
+- `'stitch'`
+
+`src/main.js` reads `?section=` on startup:
+
+- `?section=library` -> Library
+- `?section=stitch` -> Stitch
+- anything else -> Editor
+
+`actions.setActiveSection(section)` syncs the URL with `history.replaceState(...)`.
+
+Important behavior:
+
+- Switching `Editor <-> Stitch` does not trigger save/discard prompts.
+- Studio and Stitch keep separate in-memory drafts at the same time.
+- Replacement prompts happen only when loading/replacing a project inside one engine.
+
+Cleanup on non-Editor section switches:
+
+- batch playback stops
+- compare overlays close
+- eyedropper target is cleared
+- Editor batch UI is forced closed
 
 ## 5. State Model
 
-### Top-level store
-
-The editor store contains:
+### Top-level store fields
 
 - `state.document`
+- `state.stitchDocument`
 - `state.ui`
 - `state.notice`
 - `state.eyedropperTarget`
 
 ### `state.document`
 
-This is the persistent/saveable document state and is still the only part the engine should care about for rendering.
+This is the Studio document.
 
-Important fields include:
+Important fields:
 
 - `version`
 - `kind`
@@ -148,20 +202,52 @@ Important fields include:
 - `export`
 - `batch`
 
-Important `view` fields include:
+Studio document mode:
 
-- `layerPreviewsOpen`
-- `layerPreviewIndex`
+- `kind: 'document'`
+- `mode: 'studio'`
+
+### `state.stitchDocument`
+
+This is the Stitch document.
+
+Important fields:
+
+- `version: 'mns/v2'`
+- `kind: 'stitch-document'`
+- `mode: 'stitch'`
+- `workspace`
+- `inputs[]`
+- `settings`
+- `candidates[]`
+- `activeCandidateId`
+- `placements[]`
+- `selection`
+- `view`
+- `export`
+- `analysis`
+
+Important Stitch workspace UI flags:
+
+- `workspace.galleryOpen`
+- `workspace.alternativesOpen`
+
+Important Stitch analysis fields:
+
+- `analysis.status`
+- `analysis.warning`
+- `analysis.error`
+- `analysis.lastRunAt`
+- `analysis.diagnostics`
+- `analysis.previews`
+
+`analysis.previews` is ephemeral. It is intentionally stripped before a Stitch project is serialized for Library persistence.
 
 ### `state.ui`
 
-This now includes the top-level section selection:
+Important fields:
 
 - `activeSection`
-  - `'editor'` or `'library'`
-
-It also still includes editor-only ephemeral UI flags such as:
-
 - `compareOpen`
 - `jsonCompareModalOpen`
 - `jsonCompareResults`
@@ -170,502 +256,591 @@ It also still includes editor-only ephemeral UI flags such as:
 - `loadImageOnOpen`
 - `saveImageOnSave`
 
-Important rule:
+This is ephemeral UI state. It is not part of saved project payloads.
 
-- Section switching is UI state only, so `activeSection` belongs in `state.ui`, not `state.document`.
+## 6. Studio Engine Architecture
 
-## 6. Initial Section Routing
+The Editor side is still the original modular image-processing app:
 
-`src/main.js` now reads the current URL to determine the initial section:
+- registry-driven layer stack
+- custom WebGL rendering pipeline
+- source image plus layer stack controls
+- scopes and compare views
+- batch folder processing
 
-- `?section=library` -> start in Library
-- anything else -> start in Editor
+Normal flow:
 
-`actions.setActiveSection(section)` also syncs the URL using `history.replaceState(...)` so the current section can be represented in the address bar without a full reload.
+1. A UI event calls an `actions.*` method.
+2. `state.document` changes.
+3. `createWorkspaceUI(...).render(state)` rerenders the shell.
+4. If the update requests Studio rendering and the Studio engine has an image, the engine rerenders using `state.document`.
 
-Section switching also performs some cleanup when entering the Library:
+The addition of Stitch did not replace the Studio engine. It added a second engine beside it.
 
-- stops batch playback
-- closes compare overlays
-- closes the batch dialog
-- clears any armed eyedropper target
+## 7. Stitch Engine Architecture
 
-This is why `library.html` can safely redirect to `index.html?section=library`.
+Stitch is a separate subsystem, not a layer mode inside the Studio engine.
 
-## 7. Editor Architecture
+### Goals of v1
 
-The Editor architecture is still fundamentally the same:
+- Overlap-first, not collage-first.
+- Pure JS/Canvas CPU analysis.
+- Candidate gallery first, then manual refinement.
+- Similarity transforms only:
+  - translation
+  - rotation
+  - uniform scale
 
-- registry-driven layers
-- store-driven UI
-- custom WebGL engine
-- preview and export pipeline
+Explicitly deferred:
 
-Flow:
+- perspective warp
+- mesh warp
+- arbitrary non-uniform stretch
+- OpenCV/WASM dependency
 
-1. UI interaction calls an `actions.*` method.
-2. The store updates.
-3. `createWorkspaceUI(...).render(state)` rerenders the DOM shell.
-4. If the update requests rendering and the engine has an image, the engine rerenders using `state.document`.
+### Stitch analysis pipeline
 
-The section integration did not change the core render engine model.
+`src/stitch/analysis.js` currently does:
 
-## 8. Layer System
+1. downscale each input image by default
+2. grayscale conversion
+3. gradient/edge-style preprocessing
+4. screenshot-first border/viewport overlap search for same-scale captures
+5. weighted overlap scoring that favors informative edge/text regions instead of large flat UI areas
+6. local feature extraction
+7. simple patch descriptor comparison
+8. ratio-filtered and mutual matching
+9. RANSAC similarity fit
+10. graph-based candidate generation from pairwise matches
+11. manual fallback candidate if overlap is weak or missing
 
-Layers are still defined primarily in `src/registry/layerRegistry.json`.
+Important implementation detail:
 
-Each layer definition includes:
+- pairwise similarity estimates are local-coordinate transforms between images
+- candidate traversal must invert the forward pair transform when placing a target image from a known source placement
+- if this direction is wrong, valid pair matches can still produce obviously incorrect stitched layouts
+- placement composition must treat Stitch placements as transforms with `x/y` translation, not raw `tx/ty` fields; otherwise good pair matches can collapse back to `0,0`
 
-- `layerId`
-- group metadata
-- defaults
-- UI controls
-- bindings
-- executor/shader information
+If the browser supports Workers, analysis runs through `src/stitch/worker.js`.
+If not, it falls back to same-thread analysis.
 
-The current runtime still uses registry helpers for:
+Important Stitch analysis setting:
 
-- layer instancing
-- validation
-- relabeling
-- normalization
+- `settings.useFullResolutionAnalysis`
+  - `false` by default
+  - when enabled, the prep step skips the normal downscale and analyzes the original image sizes
+  - the screenshot search path also stays in original resolution instead of silently collapsing back to a tiny search proxy
+  - this is especially useful for screenshots and UI captures, where downscaling can throw away the sharp edges and tiny features the matcher needs
+  - it can be noticeably slower and use more memory
 
-`reindexStack(...)` remains important because it rebuilds normalized layer instances from registry defaults and persisted params.
+Important current analysis modes in diagnostics:
 
-## 8.1 Layer Preview Framework
+- `method: 'screenshot'`
+  - axis-aligned screenshot/border overlap search won
+- `method: 'translation'`
+  - generic translation matcher won
+- `method: 'similarity'`
+  - feature/RANSAC similarity matcher won
 
-The Layer tab has a dedicated sub-preview canvas shown under `Sub-Layer Previews`.
+Translation-oriented diagnostics can also include:
 
-This is not the same thing as the main editor preview and it should not rely on random scratch-buffer state.
+- `similarity`
+- `pixelMatch`
+- `edgeMatch`
 
-Current architecture:
+Those are useful when debugging screenshot failures because they show whether the overlap was actually matching pixels or just producing a large but weak candidate.
 
-- `src/ui/workspaces.js`
-  - Renders the Layer tab sub-preview shell (`subLayerCanvas` / `subLayerLabel`).
+### Stitch document and render model
 
-- `NoiseStudioEngine.updateSubLayerPreview(...)`
-  - Asks `getLayerPreviewViews(...)` for the currently selected layer.
-  - Draws the currently selected preview view into the sub-preview canvas.
+Editing is world-space / resolution-free:
 
-- `src/engine/layerPreviewProviders.js`
-  - Holds the provider map keyed by `layerId`.
-  - Each provider returns preview definitions shaped like:
-    - `key`
-    - `label`
-    - `getTexture()` or `draw(canvas)`
+- images are placed in a shared coordinate system
+- the editing canvas fits those bounds to the visible stage
+- export rasterizes the current visible composite bounds with padding
 
-- `NoiseStudioEngine.drawChangedPixelsPreview(...)`
-  - Shared custom-draw helper for change-map style previews.
-  - Draws a grayscale version of the layer input and tints only the pixels that changed.
-  - Warm orange currently indicates darker/lower output shifts and cyan indicates brighter/higher output shifts.
+### Stitch workspace UX
 
-- Provider rendering is done inside the selected layer's own FBO pool / resolution context.
-  - This is important.
-  - The old bug was caused by reading `pool.preview.tex` without guaranteeing it actually contained the requested subview.
+Toolbar actions:
 
-Noise layer preview support is now the reference implementation:
+- new stitch project
+- add images
+- run analysis
+- open candidate gallery
+- export stitched PNG
+- save to Library
+- reset view
 
-- `Isolated Noise`
-  - Renders the standalone generated noise texture.
+Per-canvas/manual tools in v1:
 
-- `Noise Mask`
-  - Renders the effective mask texture for the noise layer.
-  - If no mask controls are enabled, the preview falls back to white, because that matches the real "full effect area" behavior used by noise compositing.
+- select image
+- drag position
+- edit X/Y numerically
+- edit scale
+- edit rotation
+- hide/show
+- lock/unlock
+- reorder stack
+- reset selected image
+- reset current candidate
 
-The Texture group now has provider coverage for:
+### Stitch candidate behavior
 
-- `noise`
-- `blur`
-- `hankelBlur`
-- `tiltShiftBlur`
-- `bilateral`
-- `denoise`
+- Analysis builds a ranked `candidates[]` list.
+- After analysis, the gallery opens automatically.
+- Choosing a candidate applies its placements to the current draft.
+- The alternatives strip remains available so the user can switch candidates without rerunning analysis.
 
-Current shared texture-layer view pattern:
+### Important Stitch save/load behavior
 
-- processed layer output
-- changed-pixels view on grayscale input
-- effect mask view when the layer supports masking
+- Stitch projects save to the same Library as Studio projects.
+- Loading a Stitch project from the Library restores `state.stitchDocument`.
+- The app automatically switches to the `Stitch` section after load.
 
-Current custom texture-layer labels:
+## 8. Project Adapter System
 
-- noise: `Isolated Noise`, `Noise Mask`, `Noise Composite`
-- blur / hankel blur: `Blurred Pixels`
-- tilt-shift blur: `Focus Falloff`
-- bilateral: `Edge-Preserving Change`
-- denoise: `Removed Noise`
+The Library save/load/import pipeline is now engine-aware.
 
-Noise rendering is now deterministic per document/layer state:
+This is handled in `src/main.js` via `createProjectAdapterRegistry(...)`.
 
-- The noise executor no longer uses `Math.random()` on every render pass.
-- The seed is derived from source metadata, noise instance identity, and current params.
-- This keeps the main canvas and sub-preview views aligned instead of generating different noise every time a preview is rerendered.
+Current adapters:
 
-Guidance for future work:
+- `studio`
+- `stitch`
 
-- If a new layer needs custom sub-preview views, add a provider in `src/engine/layerPreviewProviders.js`.
-- Do not hardcode preview labels or scratch-texture assumptions inside `pipeline.js`.
-- If a preview needs a special intermediate texture, expose a small executor/helper for that layer, similar to `renderNoiseSourcePreview(...)`.
+Each adapter is responsible for:
 
-## 9. Library System - New Architecture
+- returning the engine's current draft from app state
+- determining whether that draft is empty/saveable
+- serializing a clean project payload
+- validating imported payloads
+- rendering a Library preview blob
+- restoring a payload back into the correct engine
+- providing summary metadata for the Library record
 
-The Library is now an integrated section implemented by `src/ui/libraryPanel.js`.
+This adapter layer is what makes mixed Library storage possible without hard-coding Library behavior to the Studio engine.
 
-This file replaces the old standalone `src/ui/library.js` workflow.
+## 9. Library Storage Model
 
-### 9.1 Core design
+The Library is backed by IndexedDB:
 
-The Library does not maintain its own copy of live editor state.
+- DB name: `ModularStudioDB`
+- object store: `LibraryProjects`
 
-Instead it works from IndexedDB records that contain:
+There is also a reserved metadata record:
+
+```text
+id: '__library_meta__'
+kind: 'library-meta'
+tags: [...]
+```
+
+That record stores the persistent tag catalog so tags can exist even if no current project is using them.
+
+### Current Library record shape
+
+A saved project record now effectively contains:
 
 - `id`
 - `timestamp`
 - `name`
 - `blob`
+  - rendered preview PNG blob
 - `payload`
+  - either Studio or Stitch project payload
+- `tags`
+- `projectType`
+  - `'studio'` or `'stitch'`
+- `hoverSource`
+  - source image metadata used by Library compare hover
+- `sourceWidth`
+- `sourceHeight`
+- `sourceAreaOverride`
+  - especially important for Stitch because aggregate input area matters more than the first image size
+- `sourceCount`
+- `renderWidth`
+- `renderHeight`
 
-The Library panel reads from IndexedDB and renders:
+### Compare Source rule
 
-- grid view
-- fullscreen click-through view
-- project detail overlay
-- modal confirmations/alerts
-- upload/render progress overlay
+For Studio Library projects:
 
-### 9.2 Why the old window model was retired
+- `hoverSource` is the embedded original source image.
 
-The previous system used a separate `library.html` page and cross-window coordination. Even after attempts to harden the transport, the GitHub Pages deployment still failed in real use while local hosting appeared fine.
+For Stitch Library projects:
 
-The underlying issue was not the Library data model itself. It was the browser-context boundary:
+- `hoverSource` is the first uploaded input image.
 
-- separate windows
-- popup/window linkage
-- refresh/reopen state
-- hosting-specific behavior
+This is intentional. It makes hover-compare still work in a multi-image project without inventing a composite "source".
 
-The single-page Library eliminates that entire failure class by making Library actions direct function calls inside one page.
+### Source size sorting rule for Stitch
 
-## 10. IndexedDB Library Storage
+For Stitch Library projects:
 
-Database:
+- `sourceWidth/sourceHeight` track the first input image for compatibility and hover display
+- `sourceAreaOverride` stores aggregate total input area across all inputs
 
-- `ModularStudioDB`
-- current code opens it at `DB_VERSION = 2`
+The Library sort UI uses that override so Stitch projects sort meaningfully by original input size.
 
-Object store:
+## 10. Current Project Payloads
 
-- `LibraryProjects`
+### Studio project payload
 
-Key path:
+Used for Editor/Studio projects:
 
-- `id`
-
-Current record shape:
-
-```js
+```json
 {
-  id: String,
-  timestamp: Number,
-  name: String,
-  blob: Blob,
-  payload: Object
+  "version": "mns/v2",
+  "kind": "document",
+  "mode": "studio",
+  "workspace": {},
+  "palette": [],
+  "selection": {},
+  "view": {},
+  "export": {},
+  "source": {},
+  "layerStack": []
 }
 ```
 
-Editor-side helper functions in `src/main.js`:
+### Stitch project payload
 
-- `initDB()`
-- `saveToLibraryDB(project)`
-- `deleteFromLibraryDB(id)`
-- `clearAllFromLibraryDB()`
-- `getAllFromLibraryDB()`
+Used for Stitch projects:
 
-These are still kept in `main.js` because the Editor owns the authoritative Library persistence actions.
-
-Important migration note:
-
-- The app now defends against older local IndexedDB schemas that may have the database name but not the `LibraryProjects` object store.
-- `initDB()` first opens the normal target version.
-- If the store is still missing on success, it closes the DB and immediately reopens at `db.version + 1` to force an upgrade path that creates the missing store.
-- This was added specifically because GitHub Pages users could retain an older schema locally even after a hard refresh.
-
-## 11. Save-to-Library Logic
-
-`actions.saveProjectToLibrary(nameOverride, optionsOrForceNew)` is the main persistence entry point.
-
-Behavior:
-
-1. Requires a loaded source image with `source.imageData`.
-2. Builds a full document-style payload, not just layer data.
-3. Current Library payload shape is effectively:
-
-```js
+```json
 {
-  version: 'mns/v2',
-  kind: 'document',
-  mode: 'studio',
-  workspace,
-  palette,
-  selection,
-  view,
-  export,
-  source,
-  layerStack
+  "version": "mns/v2",
+  "kind": "stitch-document",
+  "mode": "stitch",
+  "workspace": {},
+  "inputs": [],
+  "settings": {},
+  "candidates": [],
+  "activeCandidateId": null,
+  "placements": [],
+  "selection": {},
+  "view": {},
+  "export": {},
+  "analysis": {}
 }
 ```
 
-4. Generates a fingerprint with `makeProjectFingerprint(payload)`.
-5. If the caller uses `preferExisting: true`, an identical existing Library record is reused instead of creating another copy.
-6. If the currently active Library record is unchanged, it can short-circuit with "Already saved - no changes detected."
-7. When editing a project originally loaded from the Library, it prompts for overwrite-vs-new behavior.
-8. When the current project already matches the active Library record, the prompt wording changes so the user can either keep the current saved version or type a new name to branch a manual version.
-9. Renders a fresh preview PNG blob through the engine.
-10. Saves the record into IndexedDB.
-11. Updates `activeLibraryId` / `activeLibraryName`.
-12. Calls `notifyLibraryChanged()` so the integrated Library panel refreshes.
+Important rule:
 
-Important nuance:
+- Stitch serialization strips `analysis.previews` because those are runtime object URLs/data URLs, not durable project state.
 
-- The app no longer deletes duplicate records globally during save.
-- Manual saves can preserve intentionally named versions.
-- Protective/automatic save flows prefer reusing an exact existing match.
+### Library-export metadata fields
 
-## 12. Tracking the Active Library Record
+Single-project JSON files exported from the Library can include:
 
-The editor still tracks the currently loaded Library entry with:
+- `_libraryName`
+- `_libraryTags`
+- `_libraryProjectType`
+- `_libraryHoverSource`
+- `_librarySourceArea`
+- `_librarySourceCount`
 
-- `activeLibraryId`
-- `activeLibraryName`
+These fields are for Library round-tripping. They are stripped before normal engine validation.
 
-This matters because it controls whether saving should:
+## 11. Save / Load Behavior
 
-- overwrite the current Library entry
-- or create a new one
+### Save to Library
 
-The integrated Library also uses this indirectly when loading records back into the Editor.
+`actions.saveProjectToLibrary(...)` is now adapter-based.
 
-Important lifecycle rule:
+Flow:
 
-- `activeLibraryId` / `activeLibraryName` are cleared when an external file import starts a new branch of work.
-- This now happens for `newProject()`, `openImageFile(...)`, and successful `openStateFile(...)` imports.
-- This prevents a later save from accidentally overwriting an older Library entry that no longer represents the current editor state.
+1. Determine which engine is being saved.
+2. Ask that adapter for the current draft.
+3. Refuse save if the draft is empty or not saveable.
+4. Serialize a clean payload.
+5. Fingerprint it with `makeProjectFingerprint(...)`.
+6. Reuse an exact existing Library record when `preferExisting` is requested.
+7. If the draft originated from a Library record, prompt for overwrite-vs-new behavior.
+8. Ask the adapter to render a preview blob and summary metadata.
+9. Save the resulting mixed-engine record into IndexedDB.
+10. Preserve tags on overwrite.
 
-## 13. Direct Library Actions in `main.js`
+### Load from Library
 
-The integrated Library now calls these direct actions instead of sending window messages:
+`actions.loadLibraryProject(payload, libraryId, libraryName)` now:
 
-- `actions.getLibraryProjects()`
-  - Reads all Library records.
+1. inspects the payload
+2. chooses the correct adapter
+3. runs the engine-specific replacement guard
+4. restores the payload through that adapter
+5. updates the correct active Library origin
+6. switches to the correct top-level section
 
-- `actions.deleteLibraryProject(id)`
-  - Deletes a single Library record.
-  - Clears `activeLibraryId` / `activeLibraryName` if the deleted record was currently active.
-  - Refreshes the integrated Library.
+### Active Library origin tracking
 
-- `actions.clearLibraryProjects()`
-  - Clears the entire Library store.
-  - Resets `activeLibraryId` / `activeLibraryName`.
-  - Refreshes the integrated Library.
+The app no longer tracks only one active Library project.
 
-- `actions.loadLibraryProject(payload, libraryId, libraryName)`
-  - Directly loads a saved Library payload into the editor.
-  - Calls a shared replacement guard before swapping editor state.
-  - If the current project is not already backed by an exact Library match, the user is prompted to save it or explicitly discard it.
-  - Accepts both current `mns/v2` payloads and older legacy `version: 2` payloads.
-  - Loads embedded source image data into the engine if present.
-  - Reindexes the layer stack.
-  - Restores active Library origin tracking.
-  - Switches back to the `Editor` section.
+It now tracks separate origins for:
 
-- `actions.processLibraryPayloads(payloadsText, filenames, onProgress)`
-  - Takes uploaded Library JSON payloads.
-  - Normalizes legacy `version: 2` payloads into `mns/v2` before validation.
-  - Validates them.
-  - Uses the editor engine to render preview blobs.
-  - Saves new Library records.
-  - Reports progress through a direct callback instead of cross-window messages.
-  - Restores the previous source image in the engine afterward when possible.
-  - Explicitly rerenders the current editor document after engine restoration when the editor still has a source image.
-  - Tracks how many Library items were actually saved.
-  - Throws when zero items were saved so the UI does not falsely report success.
-  - Uses a warning notice when only some items succeed.
-  - Refreshes the integrated Library.
+- `studio`
+- `stitch`
 
-- `actions.openLibrary()`
-  - Now just switches the app to the `Library` section.
-  - It no longer opens a popup or a secondary window.
+That means:
 
-## 13.1 Replacement Safeguards
+- Editor can know which Library record it came from
+- Stitch can know which Library record it came from
+- switching sections does not destroy overwrite context
 
-The current app now treats several actions as "project replacement" or "project branching" moments:
+## 12. Replacement Guards
 
-- `newProject()`
-- `openImageFile(file)`
-- `openStateFile(file)`
-- `loadLibraryProject(...)`
+Project replacement checks are now engine-specific.
 
-They now share a common rule:
+The helper:
 
-1. If there is no current source image, proceed immediately.
-2. If the current editor state already exactly matches something in the Library, proceed without another save prompt.
-3. Otherwise ask whether to save the current project to the Library first.
-4. If the user declines saving, ask for explicit discard confirmation before replacing state.
+- `ensureProjectCanBeReplaced(projectType, actionLabel)`
 
-This is the main guard against orphaning in-progress work during common user journeys.
+does this:
 
-## 14. Integrated Library Panel Behavior
+1. gets the correct adapter
+2. checks if that engine's current draft is empty
+3. checks whether the current draft already matches an exact Library record
+4. if not, asks the user whether to save first
+5. if the user chooses save, it routes through `actions.saveProjectToLibrary(..., { projectType })`
 
-`src/ui/libraryPanel.js` owns all Library-specific UI logic.
+This is why:
 
-### 14.1 Internal state
+- loading a Studio state file does not look at the Stitch draft
+- loading a Stitch Library project does not look at the Studio draft
+- simple tab switching still does not prompt
 
-It keeps local UI state for:
+## 13. Library Panel Behavior
 
-- `libraryData`
-- hover-original mode
-- fullscreen/grid mode
-- current fullscreen index
-- currently open detail record
-- refresh token to avoid stale async refresh results
+`src/ui/libraryPanel.js` owns all Library-only UI state locally.
 
-This state is intentionally local to the Library panel because it is UI-only and should not pollute the editor store.
+It does not mirror Library UI state into the global app store.
 
-### 14.2 Data source
+Local panel state includes things like:
 
-The Library panel does not mirror the Library into the global store.
+- rendered Library data
+- visible filtered data
+- side panel open state
+- compare hover toggle
+- fullscreen mode
+- select mode
+- selected ids
+- active tag filters
+- pending tag applications
+- modal state
+- parameter expansion state
 
-Instead it calls:
+### Current Library browse model
 
-- `actions.getLibraryProjects()`
+The Library is not a rigid equal-cell grid anymore.
 
-and transforms records into UI items with:
+It is a gallery-style masonry layout:
 
-- `url` from `URL.createObjectURL(blob)`
-- `hoverSrc` from `payload.source.imageData`
+- cards can take advantage of available width
+- preview images are kept larger
+- wasted white space is minimized
+- the right-side drawer holds sort/filter/tag tools
 
-### 14.3 Refresh model
+### Current sort/filter features
 
-The integrated Library refreshes through direct calls, not message passing.
+Sort keys:
 
-Main trigger points:
+- saved date
+- project name
+- original image size
+- rendered image size
 
-- activating the `Library` section
-- saving to the Library
-- deleting a Library record
-- clearing the Library
-- processing uploaded Library JSON files
-- explicit `view.refreshLibrary()` calls from `main.js`
+Tag filtering supports:
 
-### 14.4 Detail modal defaults filtering
+- `All`
+- `Untagged`
+- multi-toggle tag selection
 
-The old standalone Library used a runtime handshake to obtain layer defaults.
+### Current selection workflow
 
-That handshake is gone.
+The Library has a true multi-select mode.
 
-The integrated Library now gets defaults directly from the loaded registry via `workspaces.js`, which passes:
+- toolbar button: `Select`
+- selected projects can be batch deleted
+- tags can be created without immediately applying them
+- existing tags can be applied to selected projects separately
+- removing tags from selection requires confirmation
 
-- `layerId -> defaults`
+### Save Library wizard
 
-into `createLibraryPanel(...)`.
+The Library can save the whole Library, not just one project.
 
-This is more reliable because it removes yet another communication boundary.
+Current Library-wide save formats:
 
-## 15. Library UI Features Preserved
+1. Plain bundle JSON
+   - readable
+   - includes export date, projects, tags, metadata
 
-The integrated Library preserves the major behaviors of the old Library:
+2. Secure packed JSON
+   - gzip + base64
+   - optional encryption
+   - optional duplicate encrypted copies for recovery/tamper resilience
 
-- grid browsing
-- hover-to-show-original
-- fullscreen click-through browsing
-- detail modal
-- load into editor
-- delete single project
-- clear all with confirmation
-- save full library as one JSON bundle
-- export all projects as zipped individual JSON files
-- upload JSON / bulk render into Library
+### Library import behavior
 
-Notable improvement:
+The Library import path can currently parse:
 
-- All of this now happens without relying on another page being open.
+- a normal single-project JSON
+- a plain Library bundle JSON
+- a secure packed Library bundle JSON
 
-## 16. Upload / Render-to-Library Flow
+If the current Library already has projects and the incoming file is a Library bundle:
 
-When the user uploads JSON from the integrated Library:
+- the user can merge
+- or replace
+- and if replacing, can optionally save the current Library first through the Save Library workflow
 
-1. `libraryPanel.js` opens a file input.
-2. It reads the selected files as text.
-3. It unrolls bundled arrays using `_libraryName` when present.
-4. It calls `actions.processLibraryPayloads(unrolledPayloads, unrolledNames, setProgress)`.
-5. The editor engine normalizes older legacy payloads if needed, validates them, renders preview blobs, and stores them in IndexedDB.
-6. The Library panel refreshes directly after completion.
+### Mixed-engine Library import
 
-The progress overlay is now driven by the direct `onProgress` callback instead of a transport message like `START_RENDER` or `UPDATE_PROGRESS`.
+`actions.processLibraryPayloads(...)` is adapter-based now.
 
-## 17. ZIP Export
+For each payload it:
 
-The integrated Library uses the global `window.JSZip` loaded from `src/jszip.min.js` in `index.html`.
+1. parses JSON
+2. extracts `_library*` metadata
+3. chooses the correct adapter
+4. validates the payload
+5. renders a preview blob with the correct engine
+6. stores a mixed-engine record in IndexedDB
 
-ZIP export behavior:
+This means Editor and Stitch projects can coexist in:
 
-- one `.mns.json` file per Library record
-- payloads are normalized to current `mns/v2` document shape during export
-- filename preserved where possible
-- downloaded as `modular_studio_exports.zip`
+- single Library records
+- bundle exports
+- secure bundle exports
+- ZIP exports
 
-## 18. Redirected `library.html`
+## 14. Library Detail View and Inspection
 
-`library.html` is now just a redirect page.
+Library detail view now behaves differently for different project types.
 
-Purpose:
+### Studio detail view
 
-- preserve older links/bookmarks
-- provide a direct path into the Library section
+- project summary
+- saved time
+- source/render dimensions
+- source/render area
+- tags
+- layer cards with filtered parameter display
+- expandable structured values for long arrays/objects
 
-It should not be treated as an independent runtime surface anymore.
+### Stitch detail view
 
-## 19. Removed/Retired Architecture
+- project summary
+- project type
+- source count
+- input list
+- stitch settings summary
 
-These are no longer part of the primary architecture:
+It does not try to fake a Studio layer stack for Stitch projects.
 
-- standalone `src/ui/library.js`
-- popup-based `window.open('library.html', ...)` Library flow
-- cross-window transport abstractions for Library/editor communication
-- Library default handshake messages
-- Library refresh via browser window messaging
+## 15. Studio Layer Sub-Preview Framework
 
-If these concepts appear in older notes, they are outdated.
+The Layer tab sub-preview canvas has already been reworked into a provider system.
 
-## 20. Hosting Notes
+Current architecture:
 
-The original reason for the integrated Library refactor was deployment reliability on GitHub Pages.
+- `src/engine/layerPreviewProviders.js`
+  - layer-specific preview provider registry
+- `src/engine/pipeline.js`
+  - preview render integration
+- `src/engine/executors/index.js`
+  - deterministic noise generation updates used by noise previews
 
-Current expectation:
+Important behavior:
 
-- Since the Library is in the same page, Pages should no longer depend on popup behavior or cross-window state.
-- The app still depends on browser features like IndexedDB, File APIs, and WebGL, but not on a second window or tab for Library use.
+- previews should come from explicit providers, not incidental scratch textures
+- noise previews are now deterministic for a given state
+- texture layers already have custom preview coverage
 
-If a future GitHub Pages issue appears, investigate in this order:
+If future work adds more per-layer custom views, use the provider framework instead of patching ad hoc preview state into the pipeline.
 
-1. IndexedDB behavior
-2. path resolution / asset loading
-3. source image embedding in payloads
-4. WebGL/rendering behavior
-5. section-routing / URL-state behavior
+## 16. Important Current Files to Read First
 
-Do not assume the problem is still a cross-window issue, because that architecture is no longer the primary path.
+If a future AI needs to understand the app quickly, start with:
 
-## 21. Guidance for Future AI Changes
+1. `src/main.js`
+2. `src/ui/workspaces.js`
+3. `src/ui/libraryPanel.js`
+4. `src/stitch/document.js`
+5. `src/stitch/engine.js`
+6. `src/stitch/analysis.js`
+7. `src/io/projectAdapters.js`
 
-If future work changes any of these, update this file:
+Then branch into:
 
-- top-level section architecture
-- Library storage model
-- `library.html` behavior
-- Library import/export formats
-- IndexedDB schema
-- editor/document state shape
-- render pipeline architecture
+- `src/engine/pipeline.js`
+- `src/engine/layerPreviewProviders.js`
+- `src/registry/`
 
-Do not leave this document describing an older architecture just because old files or stale assumptions still exist in memory from a previous session.
+## 17. Important Gotchas
+
+### Do not reintroduce multi-window assumptions
+
+The current app architecture assumes:
+
+- same page
+- same runtime
+- direct function calls between sections
+
+Do not rebuild normal Library behavior around popup windows unless there is a very strong reason.
+
+### Studio and Stitch are separate drafts
+
+Do not collapse them into one document model casually.
+
+Current behavior depends on:
+
+- Studio draft surviving while the user works in Stitch
+- Stitch draft surviving while the user returns to Editor or Library
+
+### Library compare source is type-dependent
+
+For Stitch, hover compare intentionally uses the first input image, not a synthetic composite source.
+
+### Object URLs exist in two places
+
+- Library gallery preview blobs
+- Stitch candidate preview maps
+
+Be careful to revoke unused blob URLs when replacing those lists.
+
+### Old Library assumptions are now stale
+
+These are no longer correct:
+
+- "The app only has Editor and Library"
+- "Library records are always Studio payloads"
+- "The active Library project is tracked by one global id/name pair"
+- "Library load always routes back into Editor"
+- "The Library detail panel always shows a layer stack"
+
+## 18. Regression Checklist After Future Changes
+
+When touching app shell or Library logic, check:
+
+1. `Editor <-> Stitch` tab switching does not prompt to save/discard.
+2. Studio draft survives working in Stitch.
+3. Stitch draft survives returning from Editor or Library.
+4. Saving a Stitch project creates a normal Library card.
+5. Loading a Stitch Library card switches to `Stitch`.
+6. Library hover compare still works for both Studio and Stitch.
+7. Plain bundle export/import preserves both project types.
+8. Secure bundle export/import preserves both project types.
+9. ZIP export still writes one JSON per project.
+10. Studio state save/load still behaves as before.
+
+## 19. Summary
+
+The app is no longer just "Noise Studio plus an integrated Library".
+
+It is now:
+
+- the original modular Studio editor
+- an integrated mixed-project Library
+- a second engine called Stitch
+
+The key architectural shift is that the Library is now engine-aware through adapters, while the app keeps Studio and Stitch as separate live drafts inside one page.
