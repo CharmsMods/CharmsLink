@@ -6,6 +6,7 @@ import { NoiseStudioEngine } from './engine/pipeline.js';
 import { StitchEngine } from './stitch/engine.js';
 import {
     applyCandidateToDocument,
+    coerceStitchSettingValue,
     computeCompositeBounds,
     createEmptyStitchDocument,
     createStitchInputId,
@@ -411,6 +412,7 @@ function appendStitchInputs(documentState, newInputs) {
                 ? 'Run the analysis again to include the newly added images.'
                 : '',
             error: '',
+            backend: '',
             diagnostics: [],
             previews: {}
         }
@@ -1306,6 +1308,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         status: 'idle',
                         warning: snapshot.inputs.length ? 'Only one image is loaded, so overlap analysis cannot run yet.' : 'Add two or more images to analyze a stitch.',
                         error: '',
+                        backend: '',
                         diagnostics: [],
                         previews: {}
                     }
@@ -1325,6 +1328,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     status: 'running',
                     warning: '',
                     error: '',
+                    backend: '',
                     diagnostics: [],
                     previews: {}
                 }
@@ -1332,14 +1336,55 @@ window.addEventListener('DOMContentLoaded', async () => {
             setNotice('Running stitch analysis...', 'info', 0);
 
             try {
-                const result = await stitchEngine.analyze(snapshot);
+                let lastProgressMessage = '';
+                const result = await stitchEngine.analyze(snapshot, {
+                    onProgress(progress) {
+                        if (token !== stitchAnalysisToken) return;
+                        const label = String(progress?.label || '').trim();
+                        const detail = String(progress?.detail || '').trim();
+                        const message = [label, detail].filter(Boolean).join(' ');
+                        if (!message || message === lastProgressMessage) return;
+                        lastProgressMessage = message;
+                        console.info('[Stitch]', progress);
+                        updateStitchDocument((document) => {
+                            if (document.analysis?.status !== 'running') return document;
+                            return {
+                                ...document,
+                                analysis: {
+                                    ...document.analysis,
+                                    warning: message
+                                }
+                            };
+                        }, { renderStitch: true });
+                    }
+                });
                 if (token !== stitchAnalysisToken) return;
                 const latest = normalizeStitchDocument(store.getState().stitchDocument);
+                const analysisCandidates = result.candidates || [];
+                const preferredCandidate = (() => {
+                    if (!analysisCandidates.length) return null;
+                    if (snapshot.settings?.warpMode === 'mesh') {
+                        return analysisCandidates.find((candidate) => candidate.modelType === 'mesh') || analysisCandidates[0];
+                    }
+                    if (snapshot.settings?.warpMode === 'perspective') {
+                        return analysisCandidates.find((candidate) => candidate.modelType === 'perspective') || analysisCandidates[0];
+                    }
+                    if ((snapshot.settings?.sceneMode === 'photo' || snapshot.settings?.sceneMode === 'auto') && snapshot.settings?.warpDistribution === 'balanced') {
+                        return analysisCandidates.find((candidate) => candidate.modelType === 'mesh') || analysisCandidates[0];
+                    }
+                    return analysisCandidates[0];
+                })();
+                console.info('[Stitch] Candidate summary', analysisCandidates.map((candidate) => ({
+                    name: candidate.name,
+                    modelType: candidate.modelType,
+                    score: candidate.score,
+                    confidence: candidate.confidence
+                })), { preferredCandidateId: preferredCandidate?.id || null });
                 let nextDocument = normalizeStitchDocument({
                     ...latest,
-                    candidates: result.candidates || [],
-                    activeCandidateId: result.candidates?.[0]?.id || null,
-                    placements: result.candidates?.[0]?.placements || latest.placements,
+                    candidates: analysisCandidates,
+                    activeCandidateId: preferredCandidate?.id || analysisCandidates[0]?.id || null,
+                    placements: preferredCandidate?.placements || analysisCandidates[0]?.placements || latest.placements,
                     workspace: {
                         ...latest.workspace,
                         galleryOpen: true,
@@ -1351,6 +1396,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         warning: result.warning || '',
                         error: '',
                         lastRunAt: Date.now(),
+                        backend: result.backend || '',
                         diagnostics: result.diagnostics || [],
                         previews: {}
                     }
@@ -1378,6 +1424,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         status: 'error',
                         error: error?.message || 'The stitch analysis failed.',
                         warning: '',
+                        backend: '',
                         diagnostics: [],
                         previews: {}
                     }
@@ -1444,6 +1491,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         status: 'idle',
                         warning: nextInputs.length > 1 ? 'Run the analysis again after removing images.' : '',
                         error: '',
+                        backend: '',
                         diagnostics: [],
                         previews: {}
                     }
@@ -1474,15 +1522,16 @@ window.addEventListener('DOMContentLoaded', async () => {
                 ...document,
                 settings: {
                     ...document.settings,
-                    [key]: typeof document.settings?.[key] === 'boolean' ? !!value : Number(value)
+                    [key]: coerceStitchSettingValue(key, value)
                 },
                 analysis: {
                     ...document.analysis,
                     status: 'idle',
                     warning: key === 'useFullResolutionAnalysis' && value
                         ? 'Full-resolution analysis is enabled. It can be slower, but it may help on screenshots and UI captures.'
-                        : 'Analysis settings changed. Run the stitch analysis again to refresh the candidates.',
-                    error: ''
+                        : 'Stitch settings changed. Run the analysis again to refresh the ranked candidates.',
+                    error: '',
+                    backend: ''
                 }
             }), { renderStitch: true });
         },

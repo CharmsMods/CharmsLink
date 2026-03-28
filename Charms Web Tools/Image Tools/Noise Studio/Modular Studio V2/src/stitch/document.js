@@ -1,12 +1,28 @@
+import { computeWarpBounds, normalizeWarpData } from './warp.js';
+
 const DEFAULT_EXPORT_BACKGROUND = '#ffffff';
-const DEFAULT_ANALYSIS_MAX_DIMENSION = 320;
-const DEFAULT_MAX_FEATURES = 120;
-const DEFAULT_MATCH_RATIO = 0.8;
-const DEFAULT_RANSAC_ITERATIONS = 180;
-const DEFAULT_INLIER_THRESHOLD = 18;
-const DEFAULT_MAX_CANDIDATES = 6;
+const DEFAULT_ANALYSIS_MAX_DIMENSION = 2048;
+const DEFAULT_MAX_FEATURES = 4000;
+const DEFAULT_MATCH_RATIO = 0.75;
+const DEFAULT_RANSAC_ITERATIONS = 5000;
+const DEFAULT_INLIER_THRESHOLD = 4.5;
+const DEFAULT_MAX_CANDIDATES = 8;
 const DEFAULT_PADDING = 32;
 const INPUT_GAP = 48;
+const SCENE_MODES = ['auto', 'screenshot', 'photo'];
+const WARP_MODES = ['auto', 'off', 'perspective', 'mesh'];
+const MESH_DENSITIES = ['low', 'medium', 'high'];
+const WARP_DISTRIBUTIONS = ['anchored', 'balanced'];
+const BLEND_MODES = ['auto', 'alpha', 'feather', 'seam'];
+const PHOTO_BACKENDS = ['opencv-wasm'];
+const ANALYSIS_BACKENDS = ['screenshot-js', 'opencv-wasm'];
+const LEGACY_DEFAULTS = Object.freeze({
+    analysisMaxDimension: 320,
+    maxFeatures: 120,
+    matchRatio: 0.8,
+    ransacIterations: 180,
+    inlierThreshold: 18
+});
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -29,7 +45,8 @@ function copyPlacement(placement = {}) {
         visible: placement.visible !== false,
         locked: !!placement.locked,
         z: Number.isFinite(Number(placement.z)) ? Number(placement.z) : 0,
-        opacity: roundValue(clamp(Number(placement.opacity) || 1, 0, 1))
+        opacity: roundValue(clamp(Number(placement.opacity) || 1, 0, 1)),
+        warp: normalizeWarpData(placement.warp)
     };
 }
 
@@ -72,7 +89,13 @@ export function createEmptyStitchDocument(theme = 'light') {
         inputs: [],
         settings: {
             analysisMaxDimension: DEFAULT_ANALYSIS_MAX_DIMENSION,
-            useFullResolutionAnalysis: false,
+            useFullResolutionAnalysis: true,
+            sceneMode: 'auto',
+            warpMode: 'mesh',
+            meshDensity: 'high',
+            warpDistribution: 'balanced',
+            blendMode: 'auto',
+            photoBackend: 'opencv-wasm',
             maxFeatures: DEFAULT_MAX_FEATURES,
             matchRatio: DEFAULT_MATCH_RATIO,
             ransacIterations: DEFAULT_RANSAC_ITERATIONS,
@@ -95,6 +118,7 @@ export function createEmptyStitchDocument(theme = 'light') {
             warning: '',
             error: '',
             lastRunAt: 0,
+            backend: '',
             diagnostics: [],
             previews: {}
         }
@@ -115,15 +139,47 @@ function normalizeInput(input, index = 0) {
     };
 }
 
+export function coerceStitchSettingValue(key, value) {
+    if (key === 'useFullResolutionAnalysis') return !!value;
+    if (key === 'sceneMode') return SCENE_MODES.includes(value) ? value : 'auto';
+    if (key === 'warpMode') return WARP_MODES.includes(value) ? value : 'auto';
+    if (key === 'meshDensity') return MESH_DENSITIES.includes(value) ? value : 'medium';
+    if (key === 'warpDistribution') return WARP_DISTRIBUTIONS.includes(value) ? value : 'balanced';
+    if (key === 'blendMode') return BLEND_MODES.includes(value) ? value : 'auto';
+    if (key === 'photoBackend') return PHOTO_BACKENDS.includes(value) ? value : 'opencv-wasm';
+    if (key === 'analysisMaxDimension') return clamp(Math.round(Number(value) || DEFAULT_ANALYSIS_MAX_DIMENSION), 128, 2048);
+    if (key === 'maxFeatures') return clamp(Math.round(Number(value) || DEFAULT_MAX_FEATURES), 20, 4000);
+    if (key === 'matchRatio') return clamp(Number(value) || DEFAULT_MATCH_RATIO, 0.4, 0.99);
+    if (key === 'ransacIterations') return clamp(Math.round(Number(value) || DEFAULT_RANSAC_ITERATIONS), 40, 5000);
+    if (key === 'inlierThreshold') return clamp(Number(value) || DEFAULT_INLIER_THRESHOLD, 0.5, 48);
+    if (key === 'maxCandidates') return clamp(Math.round(Number(value) || DEFAULT_MAX_CANDIDATES), 1, 12);
+    return value;
+}
+
+function hasLegacyDefaultAnalysisTuple(settings = {}) {
+    return Number(settings?.analysisMaxDimension) === LEGACY_DEFAULTS.analysisMaxDimension
+        && Number(settings?.maxFeatures) === LEGACY_DEFAULTS.maxFeatures
+        && Number(settings?.matchRatio) === LEGACY_DEFAULTS.matchRatio
+        && Number(settings?.ransacIterations) === LEGACY_DEFAULTS.ransacIterations
+        && Number(settings?.inlierThreshold) === LEGACY_DEFAULTS.inlierThreshold;
+}
+
 function normalizeSettings(settings = {}) {
+    const useUpgradedDefaults = settings?.photoBackend == null && hasLegacyDefaultAnalysisTuple(settings);
     return {
-        analysisMaxDimension: clamp(Math.round(Number(settings.analysisMaxDimension) || DEFAULT_ANALYSIS_MAX_DIMENSION), 128, 768),
-        useFullResolutionAnalysis: !!settings.useFullResolutionAnalysis,
-        maxFeatures: clamp(Math.round(Number(settings.maxFeatures) || DEFAULT_MAX_FEATURES), 20, 300),
-        matchRatio: clamp(Number(settings.matchRatio) || DEFAULT_MATCH_RATIO, 0.4, 0.99),
-        ransacIterations: clamp(Math.round(Number(settings.ransacIterations) || DEFAULT_RANSAC_ITERATIONS), 40, 1200),
-        inlierThreshold: clamp(Number(settings.inlierThreshold) || DEFAULT_INLIER_THRESHOLD, 3, 80),
-        maxCandidates: clamp(Math.round(Number(settings.maxCandidates) || DEFAULT_MAX_CANDIDATES), 1, 12)
+        analysisMaxDimension: coerceStitchSettingValue('analysisMaxDimension', useUpgradedDefaults ? DEFAULT_ANALYSIS_MAX_DIMENSION : settings.analysisMaxDimension),
+        useFullResolutionAnalysis: coerceStitchSettingValue('useFullResolutionAnalysis', settings.useFullResolutionAnalysis),
+        sceneMode: coerceStitchSettingValue('sceneMode', settings.sceneMode),
+        warpMode: coerceStitchSettingValue('warpMode', settings.warpMode),
+        meshDensity: coerceStitchSettingValue('meshDensity', settings.meshDensity),
+        warpDistribution: coerceStitchSettingValue('warpDistribution', settings.warpDistribution),
+        blendMode: coerceStitchSettingValue('blendMode', settings.blendMode),
+        photoBackend: coerceStitchSettingValue('photoBackend', settings.photoBackend),
+        maxFeatures: coerceStitchSettingValue('maxFeatures', useUpgradedDefaults ? DEFAULT_MAX_FEATURES : settings.maxFeatures),
+        matchRatio: coerceStitchSettingValue('matchRatio', useUpgradedDefaults ? DEFAULT_MATCH_RATIO : settings.matchRatio),
+        ransacIterations: coerceStitchSettingValue('ransacIterations', useUpgradedDefaults ? DEFAULT_RANSAC_ITERATIONS : settings.ransacIterations),
+        inlierThreshold: coerceStitchSettingValue('inlierThreshold', useUpgradedDefaults ? DEFAULT_INLIER_THRESHOLD : settings.inlierThreshold),
+        maxCandidates: coerceStitchSettingValue('maxCandidates', settings.maxCandidates)
     };
 }
 
@@ -132,7 +188,11 @@ function normalizeCandidates(candidates = []) {
         id: String(candidate?.id || `candidate-${index + 1}`),
         name: String(candidate?.name || `Candidate ${index + 1}`),
         score: Number(candidate?.score) || 0,
+        confidence: clamp(Number(candidate?.confidence) || 0, 0, 1),
+        rank: Math.max(1, Math.round(Number(candidate?.rank) || (index + 1))),
         source: String(candidate?.source || 'analysis'),
+        modelType: String(candidate?.modelType || 'rigid'),
+        blendMode: coerceStitchSettingValue('blendMode', candidate?.blendMode),
         coverage: clamp(Number(candidate?.coverage) || 0, 0, 1),
         placements: (Array.isArray(candidate?.placements) ? candidate.placements : []).map((placement) => copyPlacement(placement)),
         diagnostics: Array.isArray(candidate?.diagnostics) ? candidate.diagnostics : [],
@@ -189,6 +249,7 @@ export function normalizeStitchDocument(document = {}) {
             warning: String(document.analysis?.warning || ''),
             error: String(document.analysis?.error || ''),
             lastRunAt: Number(document.analysis?.lastRunAt) || 0,
+            backend: ANALYSIS_BACKENDS.includes(document.analysis?.backend) ? document.analysis.backend : '',
             diagnostics: Array.isArray(document.analysis?.diagnostics) ? document.analysis.diagnostics : [],
             previews: document.analysis?.previews && typeof document.analysis.previews === 'object'
                 ? document.analysis.previews
@@ -253,6 +314,7 @@ function rotatePoint(x, y, radians) {
 }
 
 export function computePlacementBounds(input, placement) {
+    if (placement?.warp) return computeWarpBounds(input, placement);
     const width = Math.max(1, Number(input?.width) || 1);
     const height = Math.max(1, Number(input?.height) || 1);
     const scale = Math.max(0.01, Number(placement?.scale) || 1);
@@ -323,7 +385,11 @@ export function buildManualLayoutCandidate(inputs, reason = '') {
         id: createStitchCandidateId(),
         name: inputs.length > 1 ? 'Manual Layout' : 'Single Image',
         score: inputs.length ? 0.01 : 0,
+        confidence: inputs.length ? 0.08 : 0,
+        rank: 1,
         source: 'manual',
+        modelType: 'manual',
+        blendMode: 'alpha',
         coverage: inputs.length ? 1 : 0,
         placements,
         diagnostics: [],
@@ -375,7 +441,11 @@ export function stripEphemeralStitchState(document) {
             id: candidate.id,
             name: candidate.name,
             score: candidate.score,
+            confidence: candidate.confidence,
+            rank: candidate.rank,
             source: candidate.source,
+            modelType: candidate.modelType,
+            blendMode: candidate.blendMode,
             coverage: candidate.coverage,
             placements: candidate.placements.map((placement) => copyPlacement(placement)),
             diagnostics: candidate.diagnostics,
@@ -417,6 +487,7 @@ export function summarizeStitchDocument(document) {
     const normalized = normalizeStitchDocument(document);
     const primary = getPrimaryStitchInput(normalized);
     const bounds = computeCompositeBounds(normalized);
+    const activeCandidate = normalized.candidates.find((candidate) => candidate.id === normalized.activeCandidateId) || null;
     return {
         primarySource: primary ? {
             name: primary.name,
@@ -430,6 +501,8 @@ export function summarizeStitchDocument(document) {
         sourceArea: getAggregateInputArea(normalized),
         sourceCount: normalized.inputs.length,
         renderWidth: Math.max(0, Math.round(bounds.width)),
-        renderHeight: Math.max(0, Math.round(bounds.height))
+        renderHeight: Math.max(0, Math.round(bounds.height)),
+        activeModelType: activeCandidate?.modelType || 'rigid',
+        activeConfidence: Number(activeCandidate?.confidence || 0) || 0
     };
 }

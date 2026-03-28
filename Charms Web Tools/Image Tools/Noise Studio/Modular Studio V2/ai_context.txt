@@ -105,19 +105,34 @@ Current section responsibilities:
 
 - `document.js`
   - Stitch document shape, normalization, placements, bounds, summaries, manual fallback candidate.
+  - Owns persisted Stitch settings including `photoBackend` and `warpDistribution`.
 
 - `analysis.js`
-  - Pure JS/Canvas overlap analysis.
-  - Downscales, extracts simple features, matches them, runs similarity-only RANSAC, and builds ranked candidates.
+  - Legacy JS/Canvas analysis path.
+  - Still used for screenshot-style sets and same-thread fallback.
+  - Builds rigid/screenshot candidates and powers the screenshot worker backend.
+
+- `classifier.js`
+  - Lightweight local screenshot-vs-photo classifier used by `sceneMode: 'auto'`.
 
 - `engine.js`
   - 2D canvas stitch renderer.
   - Candidate preview rendering.
   - PNG export.
-  - Worker-backed analysis dispatch when supported.
+  - Analysis dispatch and backend routing.
+  - Chooses screenshot JS vs OpenCV/WASM photo analysis.
+  - Owns worker boot/progress handling for both backends.
 
 - `worker.js`
-  - Web Worker wrapper around stitch analysis.
+  - Web Worker wrapper for the legacy JS screenshot analysis path.
+
+- `opencv-worker.js`
+  - Dedicated classic worker for photo analysis.
+  - Loads vendored OpenCV.js/WASM locally.
+  - Runs ORB feature extraction, matching, homography solving, candidate graph traversal, and mesh refinement.
+
+- `vendor/opencv/`
+  - Vendored OpenCV.js runtime assets used by the photo worker.
 
 - `ui.js`
   - Stitch workspace UI.
@@ -227,6 +242,32 @@ Important fields:
 - `export`
 - `analysis`
 
+Important current Stitch setting families:
+
+- detection
+  - `sceneMode`
+- warp
+  - `warpMode`
+  - `meshDensity`
+  - `warpDistribution`
+- blend
+  - `blendMode`
+- advanced
+  - `analysisMaxDimension`
+  - `useFullResolutionAnalysis`
+  - `maxFeatures`
+  - `matchRatio`
+  - `ransacIterations`
+  - `inlierThreshold`
+  - `maxCandidates`
+
+Important current Stitch candidate fields:
+
+- `rank`
+- `confidence`
+- `modelType`
+- `blendMode`
+
 Important Stitch workspace UI flags:
 
 - `workspace.galleryOpen`
@@ -238,6 +279,7 @@ Important Stitch analysis fields:
 - `analysis.warning`
 - `analysis.error`
 - `analysis.lastRunAt`
+- `analysis.backend`
 - `analysis.diagnostics`
 - `analysis.previews`
 
@@ -281,57 +323,113 @@ The addition of Stitch did not replace the Studio engine. It added a second engi
 
 Stitch is a separate subsystem, not a layer mode inside the Studio engine.
 
-### Goals of v1
+### Current Stitch analysis goals
 
 - Overlap-first, not collage-first.
-- Pure JS/Canvas CPU analysis.
 - Candidate gallery first, then manual refinement.
-- Similarity transforms only:
-  - translation
-  - rotation
-  - uniform scale
+- Split analysis backends:
+  - screenshot-style inputs use the JS/Canvas matcher
+  - photo-style inputs use the OpenCV.js/WASM worker
+- Keep the existing Stitch placement/render/export model by materializing analysis results into rigid wrappers plus optional warp meshes.
 
-Explicitly deferred:
+Still important limitations:
 
-- perspective warp
-- mesh warp
-- arbitrary non-uniform stretch
-- OpenCV/WASM dependency
+- Mesh regularization is still heuristic, not a full global bundle/mesh optimizer.
+- Photo stitching is stronger than the original rigid path, but it is not yet a dense panorama-grade solver.
+- The screenshot backend and photo backend are intentionally different systems with different strengths.
 
 ### Stitch analysis pipeline
 
-`src/stitch/analysis.js` currently does:
+The current pipeline is split by backend.
 
-1. downscale each input image by default
-2. grayscale conversion
-3. gradient/edge-style preprocessing
-4. screenshot-first border/viewport overlap search for same-scale captures
-5. weighted overlap scoring that favors informative edge/text regions instead of large flat UI areas
-6. local feature extraction
-7. simple patch descriptor comparison
-8. ratio-filtered and mutual matching
-9. RANSAC similarity fit
-10. graph-based candidate generation from pairwise matches
+`src/stitch/engine.js` now does:
+
+1. normalize the document and prepare grayscale inputs
+2. if `sceneMode === 'auto'`, run the lightweight classifier to choose screenshot vs photo
+3. route screenshot sets to the JS analysis path
+4. route photo sets to `src/stitch/opencv-worker.js`
+
+The screenshot backend (`src/stitch/analysis.js`) still does:
+
+1. downscale each input by default
+2. gradient/edge-style preprocessing
+3. screenshot-first overlap search for same-scale captures
+4. translation/similarity matching and rigid candidate ranking
+
+The photo backend (`src/stitch/opencv-worker.js`) now does:
+
+1. grayscale prep at analysis resolution or full resolution
+2. ORB feature extraction
+3. BF KNN descriptor matching with Lowe-ratio and mutual filtering
+4. RANSAC homography solving with overlap/inlier/reprojection rejection
+5. graph traversal to compose image-to-anchor homographies
+6. homography-derived `perspective` candidates
+7. dense overlap support seeding across the shared region, not just sparse match inliers
+8. edge-aware optical-flow mesh refinement for `mesh` candidates
+9. adaptive mesh sizing based on support density and residual disagreement
+10. ranked candidate scoring with `rank`, `confidence`, `modelType`, and `blendMode`
 11. manual fallback candidate if overlap is weak or missing
 
 Important implementation detail:
 
-- pairwise similarity estimates are local-coordinate transforms between images
-- candidate traversal must invert the forward pair transform when placing a target image from a known source placement
-- if this direction is wrong, valid pair matches can still produce obviously incorrect stitched layouts
-- placement composition must treat Stitch placements as transforms with `x/y` translation, not raw `tx/ty` fields; otherwise good pair matches can collapse back to `0,0`
+- photo candidate traversal is currently cycle-guarded; without that, pair graphs can loop forever during anchor solving
+- photo mesh refinement now supports two deformation-sharing modes:
+  - `warpDistribution: 'balanced'`
+    - spreads residual deformation across both images
+  - `warpDistribution: 'anchored'`
+    - keeps more deformation on the deeper/non-anchor side
+- the photo mesh solver now seeds many more local support points from overlap detail/edge regions instead of relying only on the original inlier matches
+- low-detail / blank-space regions are now deprioritized or skipped during dense support seeding so empty areas do not steer the mesh
+- local mesh corrections are now thresholded twice:
+  - implausibly large prepared-space optical-flow shifts are rejected
+  - surviving world-space local residuals are capped to a small per-image warp budget
+- adaptive mesh density is now chosen per solved image from support count and residual disagreement, rather than always using one fixed grid size
+- mesh residuals are intentionally regularized so unsupported outer edges stay closer to rectangular instead of letting a local seam pull the whole far edge apart
+- large local corrections are no longer rewarded just for being large; the mesh now prefers small believable cleanup corrections over aggressive stretches
 
-If the browser supports Workers, analysis runs through `src/stitch/worker.js`.
-If not, it falls back to same-thread analysis.
+If the browser supports Workers:
+
+- screenshot analysis runs through `src/stitch/worker.js`
+- photo analysis runs through `src/stitch/opencv-worker.js`
+
+If Worker or WASM support is missing:
+
+- screenshot analysis can still fall back to same-thread JS analysis
+- photo analysis currently requires the OpenCV worker path and will fail with a visible error instead of silently falling back
 
 Important Stitch analysis setting:
 
 - `settings.useFullResolutionAnalysis`
-  - `false` by default
+  - `true` by default for new Stitch drafts
   - when enabled, the prep step skips the normal downscale and analyzes the original image sizes
   - the screenshot search path also stays in original resolution instead of silently collapsing back to a tiny search proxy
   - this is especially useful for screenshots and UI captures, where downscaling can throw away the sharp edges and tiny features the matcher needs
   - it can be noticeably slower and use more memory
+
+Current higher-level Stitch settings:
+
+- `settings.sceneMode`
+  - `'auto' | 'screenshot' | 'photo'`
+- `settings.warpMode`
+  - `'auto' | 'off' | 'perspective' | 'mesh'`
+- `settings.meshDensity`
+  - `'low' | 'medium' | 'high'`
+- `settings.warpDistribution`
+  - `'anchored' | 'balanced'`
+- `settings.blendMode`
+  - `'auto' | 'alpha' | 'feather' | 'seam'`
+- `settings.photoBackend`
+  - currently `'opencv-wasm'`
+
+Current new-document defaults are intentionally photo-heavy:
+
+- `useFullResolutionAnalysis: true`
+- `warpMode: 'mesh'`
+- `meshDensity: 'high'`
+- `warpDistribution: 'balanced'`
+- `analysisMaxDimension: 2048`
+- `maxFeatures: 4000`
+- `ransacIterations: 5000`
 
 Important current analysis modes in diagnostics:
 
@@ -341,6 +439,8 @@ Important current analysis modes in diagnostics:
   - generic translation matcher won
 - `method: 'similarity'`
   - feature/RANSAC similarity matcher won
+- `method: 'opencv-homography'`
+  - photo backend pairwise homography validation
 
 Translation-oriented diagnostics can also include:
 
@@ -357,6 +457,24 @@ Editing is world-space / resolution-free:
 - images are placed in a shared coordinate system
 - the editing canvas fits those bounds to the visible stage
 - export rasterizes the current visible composite bounds with padding
+
+Important current placement detail:
+
+- Stitch placements can now include optional `warp` data
+- supported warp types:
+  - `perspective`
+  - `mesh`
+- the rigid wrapper (`x/y/scale/rotation`) still exists even when warp data is present
+- renderer/export/hit-test now share the same warp mesh model
+- warped drawing is done through triangle tessellation on the 2D canvas path
+- mesh candidates can now carry adaptive `cols/rows` values above the old fixed low/medium/high defaults
+
+Candidate metadata now commonly includes:
+
+- `rank`
+- `confidence`
+- `modelType`
+- `blendMode`
 
 ### Stitch workspace UX
 
@@ -383,12 +501,27 @@ Per-canvas/manual tools in v1:
 - reset selected image
 - reset current candidate
 
+Current Stitch help system:
+
+- Stitch now has its own inline help-icon / popover pattern
+- help content exists only for Stitch in the current build
+- hover opens help on desktop
+- focus works for keyboard navigation
+- click/tap works for touch
+- only one help popover stays open at a time
+
 ### Stitch candidate behavior
 
 - Analysis builds a ranked `candidates[]` list.
 - After analysis, the gallery opens automatically.
 - Choosing a candidate applies its placements to the current draft.
 - The alternatives strip remains available so the user can switch candidates without rerunning analysis.
+- screenshot-like sets tend to keep `screenshot` / `rigid` candidates on top
+- photo-like sets can emit `perspective` and `mesh` candidates ahead of rigid ones
+- `mesh` candidates can now share deformation across both images when `warpDistribution` is `balanced`
+- photo mesh candidates try to keep unsupported outer edges closer to a sane rectangle instead of letting local overlap correction blow out the whole far edge
+- `blendMode: 'seam'` is now content-aware in the renderer/export path; it no longer behaves like only a stronger rectangular feather
+- `blendMode: 'auto'` keeps screenshot candidates crisp and gives photo-like candidates softer blends
 
 ### Important Stitch save/load behavior
 
@@ -767,11 +900,13 @@ If a future AI needs to understand the app quickly, start with:
 3. `src/ui/libraryPanel.js`
 4. `src/stitch/document.js`
 5. `src/stitch/engine.js`
-6. `src/stitch/analysis.js`
+6. `src/stitch/opencv-worker.js`
 7. `src/io/projectAdapters.js`
 
 Then branch into:
 
+- `src/stitch/analysis.js`
+- `src/stitch/classifier.js`
 - `src/engine/pipeline.js`
 - `src/engine/layerPreviewProviders.js`
 - `src/registry/`

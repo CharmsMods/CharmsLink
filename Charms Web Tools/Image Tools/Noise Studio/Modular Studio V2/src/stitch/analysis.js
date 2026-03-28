@@ -1,4 +1,5 @@
 import { buildManualLayoutCandidate, buildInitialPlacementsFromCandidate, createStitchCandidateId, normalizeStitchDocument } from './document.js';
+import { getMeshGridDimensions, localPointToWorld, worldPointToLocal, worldVectorToLocalDelta } from './warp.js';
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -1038,6 +1039,432 @@ function buildAdjacency(edges) {
     return map;
 }
 
+function buildEdgeLookup(edges) {
+    const lookup = new Map();
+    for (const edge of edges) {
+        lookup.set(`${edge.fromId}->${edge.toId}`, edge);
+        lookup.set(`${edge.toId}->${edge.fromId}`, {
+            ...edge,
+            fromId: edge.toId,
+            toId: edge.fromId,
+            transform: invertTransform(edge.transform)
+        });
+    }
+    return lookup;
+}
+
+function getPreparedInputMap(preparedInputs) {
+    return new Map(preparedInputs.map((input) => [
+        input.id,
+        input.magnitude ? input : { ...input, magnitude: buildGradient(input.gray, input.width, input.height) }
+    ]));
+}
+
+function summarizePreparedContent(preparedInput) {
+    const magnitude = preparedInput.magnitude || buildGradient(preparedInput.gray, preparedInput.width, preparedInput.height);
+    const histogram = new Array(16).fill(0);
+    let samples = 0;
+    let flat = 0;
+    let textured = 0;
+    for (let y = 1; y < preparedInput.height - 1; y += 2) {
+        for (let x = 1; x < preparedInput.width - 1; x += 2) {
+            const index = (y * preparedInput.width) + x;
+            const gray = preparedInput.gray[index];
+            const edge = magnitude[index];
+            histogram[Math.max(0, Math.min(15, gray >> 4))] += 1;
+            if (edge < 10) flat += 1;
+            if (edge > 24) textured += 1;
+            samples += 1;
+        }
+    }
+    let entropy = 0;
+    histogram.forEach((count) => {
+        if (!count) return;
+        const probability = count / Math.max(1, samples);
+        entropy -= probability * Math.log2(probability);
+    });
+    return {
+        entropy,
+        flatRatio: flat / Math.max(1, samples),
+        texturedRatio: textured / Math.max(1, samples)
+    };
+}
+
+function inferSceneMode(settings, edges, preparedInputs) {
+    if (settings.sceneMode === 'screenshot' || settings.sceneMode === 'photo') return settings.sceneMode;
+    let screenshotScore = 0;
+    let photoScore = 0;
+    for (const edge of edges) {
+        if (edge.method === 'screenshot') {
+            screenshotScore += (edge.score || 0) + ((edge.pixelMatch || 0) * 80) + ((edge.edgeMatch || 0) * 60);
+            if ((edge.pixelMatch || 0) < 0.9 || (edge.similarity || 0) < 0.9) {
+                photoScore += ((1 - (edge.pixelMatch || 0)) * 120) + ((1 - (edge.similarity || 0)) * 80);
+            }
+        } else {
+            photoScore += (edge.score || 0) + ((edge.coverage || 0) * 42);
+        }
+        const rotationAmount = Math.abs(edge.transform?.rotation || 0);
+        const scaleDelta = Math.abs((edge.transform?.scale || 1) - 1);
+        if (rotationAmount > 0.02 || scaleDelta > 0.03) {
+            photoScore += 28;
+        }
+    }
+    const contentSummaries = preparedInputs.map((input) => summarizePreparedContent(input));
+    const averageEntropy = averageCandidateScore(contentSummaries.map((summary) => summary.entropy), 0);
+    const averageFlatRatio = averageCandidateScore(contentSummaries.map((summary) => summary.flatRatio), 0);
+    const averageTexturedRatio = averageCandidateScore(contentSummaries.map((summary) => summary.texturedRatio), 0);
+    const averagePixelMatch = averageCandidateScore(edges.map((edge) => edge.pixelMatch || 0), 0);
+    const averageSimilarity = averageCandidateScore(edges.map((edge) => edge.similarity || 0), 0);
+    photoScore += (averageEntropy * 18) + ((1 - averageFlatRatio) * 90) + (averageTexturedRatio * 44);
+    screenshotScore += (averageFlatRatio * 92) + ((1 - averageTexturedRatio) * 30);
+    if (averageFlatRatio < 0.56 && averageTexturedRatio > 0.32 && averagePixelMatch < 0.92 && averageSimilarity < 0.9) {
+        photoScore += 140;
+    }
+    return screenshotScore >= photoScore * 1.12 ? 'screenshot' : 'photo';
+}
+
+function averageCandidateScore(entries, fallback = 0) {
+    if (!entries.length) return fallback;
+    return entries.reduce((sum, entry) => sum + entry, 0) / entries.length;
+}
+
+function getPlacementById(placements, inputId) {
+    return placements.find((placement) => placement.inputId === inputId) || null;
+}
+
+function getOverlapBounds(sourceInput, sourcePlacement, targetInput, targetPlacement) {
+    const sourceCorners = [
+        localPointToWorld(0, 0, sourcePlacement),
+        localPointToWorld(sourceInput.width, 0, sourcePlacement),
+        localPointToWorld(0, sourceInput.height, sourcePlacement),
+        localPointToWorld(sourceInput.width, sourceInput.height, sourcePlacement)
+    ];
+    const targetCorners = [
+        localPointToWorld(0, 0, targetPlacement),
+        localPointToWorld(targetInput.width, 0, targetPlacement),
+        localPointToWorld(0, targetInput.height, targetPlacement),
+        localPointToWorld(targetInput.width, targetInput.height, targetPlacement)
+    ];
+    const sourceMinX = Math.min(...sourceCorners.map((corner) => corner.x));
+    const sourceMaxX = Math.max(...sourceCorners.map((corner) => corner.x));
+    const sourceMinY = Math.min(...sourceCorners.map((corner) => corner.y));
+    const sourceMaxY = Math.max(...sourceCorners.map((corner) => corner.y));
+    const targetMinX = Math.min(...targetCorners.map((corner) => corner.x));
+    const targetMaxX = Math.max(...targetCorners.map((corner) => corner.x));
+    const targetMinY = Math.min(...targetCorners.map((corner) => corner.y));
+    const targetMaxY = Math.max(...targetCorners.map((corner) => corner.y));
+    const minX = Math.max(sourceMinX, targetMinX);
+    const maxX = Math.min(sourceMaxX, targetMaxX);
+    const minY = Math.max(sourceMinY, targetMinY);
+    const maxY = Math.min(sourceMaxY, targetMaxY);
+    return {
+        minX,
+        minY,
+        maxX,
+        maxY,
+        width: Math.max(0, maxX - minX),
+        height: Math.max(0, maxY - minY)
+    };
+}
+
+function samplePreparedValue(prepared, x, y, plane = 'gray') {
+    const ix = clamp(Math.round(x), 0, prepared.width - 1);
+    const iy = clamp(Math.round(y), 0, prepared.height - 1);
+    return prepared[plane][(iy * prepared.width) + ix];
+}
+
+function measurePatchDifference(sourcePrepared, targetPrepared, sourceX, sourceY, targetX, targetY, patchRadius) {
+    if (
+        sourceX < patchRadius || sourceY < patchRadius
+        || sourceX >= sourcePrepared.width - patchRadius || sourceY >= sourcePrepared.height - patchRadius
+        || targetX < patchRadius || targetY < patchRadius
+        || targetX >= targetPrepared.width - patchRadius || targetY >= targetPrepared.height - patchRadius
+    ) {
+        return Infinity;
+    }
+
+    let total = 0;
+    let samples = 0;
+    for (let oy = -patchRadius; oy <= patchRadius; oy += 2) {
+        for (let ox = -patchRadius; ox <= patchRadius; ox += 2) {
+            const sourceGray = samplePreparedValue(sourcePrepared, sourceX + ox, sourceY + oy, 'gray');
+            const targetGray = samplePreparedValue(targetPrepared, targetX + ox, targetY + oy, 'gray');
+            const sourceEdge = samplePreparedValue(sourcePrepared, sourceX + ox, sourceY + oy, 'magnitude');
+            const targetEdge = samplePreparedValue(targetPrepared, targetX + ox, targetY + oy, 'magnitude');
+            total += Math.abs(sourceGray - targetGray) + (Math.abs(sourceEdge - targetEdge) * 0.45);
+            samples += 1;
+        }
+    }
+    return total / Math.max(1, samples);
+}
+
+function searchLocalWarpDelta(sourceInput, sourcePlacement, sourcePrepared, targetInput, targetPlacement, targetPrepared, localX, localY, maxSearch, patchRadius) {
+    const sourceScaleX = sourcePrepared.width / Math.max(1, sourceInput.width || sourcePrepared.originalWidth || sourcePrepared.width);
+    const sourceScaleY = sourcePrepared.height / Math.max(1, sourceInput.height || sourcePrepared.originalHeight || sourcePrepared.height);
+    const targetScaleX = targetPrepared.width / Math.max(1, targetInput.width || targetPrepared.originalWidth || targetPrepared.width);
+    const targetScaleY = targetPrepared.height / Math.max(1, targetInput.height || targetPrepared.originalHeight || targetPrepared.height);
+    const sourcePreparedX = localX * sourceScaleX;
+    const sourcePreparedY = localY * sourceScaleY;
+    const predictedWorld = localPointToWorld(localX, localY, sourcePlacement);
+    const predictedTargetLocal = worldPointToLocal(predictedWorld.x, predictedWorld.y, targetPlacement);
+    const predictedTargetX = predictedTargetLocal.x * targetScaleX;
+    const predictedTargetY = predictedTargetLocal.y * targetScaleY;
+    const searchRadius = Math.max(1, Math.round(maxSearch * Math.min(targetScaleX, targetScaleY)));
+    const baseScore = measurePatchDifference(sourcePrepared, targetPrepared, sourcePreparedX, sourcePreparedY, predictedTargetX, predictedTargetY, patchRadius);
+    if (!Number.isFinite(baseScore)) return null;
+
+    let bestScore = baseScore;
+    let bestOffsetX = 0;
+    let bestOffsetY = 0;
+    for (let dy = -searchRadius; dy <= searchRadius; dy += 1) {
+        for (let dx = -searchRadius; dx <= searchRadius; dx += 1) {
+            const score = measurePatchDifference(
+                sourcePrepared,
+                targetPrepared,
+                sourcePreparedX,
+                sourcePreparedY,
+                predictedTargetX + dx,
+                predictedTargetY + dy,
+                patchRadius
+            );
+            if (score < bestScore) {
+                bestScore = score;
+                bestOffsetX = dx;
+                bestOffsetY = dy;
+            }
+        }
+    }
+
+    const improvement = baseScore - bestScore;
+    if (improvement <= 0.4) return null;
+
+    const bestTargetLocal = {
+        x: (predictedTargetX + bestOffsetX) / Math.max(0.0001, targetScaleX),
+        y: (predictedTargetY + bestOffsetY) / Math.max(0.0001, targetScaleY)
+    };
+    const bestWorld = localPointToWorld(bestTargetLocal.x, bestTargetLocal.y, targetPlacement);
+    const worldDelta = {
+        x: bestWorld.x - predictedWorld.x,
+        y: bestWorld.y - predictedWorld.y
+    };
+    const localDelta = worldVectorToLocalDelta(worldDelta.x, worldDelta.y, sourcePlacement);
+    const deltaMagnitude = Math.hypot(localDelta.x, localDelta.y);
+    return {
+        dx: localDelta.x,
+        dy: localDelta.y,
+        weight: clamp((improvement / 16) * (1 - Math.min(1, deltaMagnitude / Math.max(8, maxSearch * 2.5))), 0, 1),
+        improvement
+    };
+}
+
+function smoothWarpPoints(points, cols, rows) {
+    return points.map((point, index) => {
+        const col = index % cols;
+        const row = Math.floor(index / cols);
+        const neighbors = [];
+        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+            for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+                const nextCol = col + offsetX;
+                const nextRow = row + offsetY;
+                if (nextCol < 0 || nextRow < 0 || nextCol >= cols || nextRow >= rows) continue;
+                neighbors.push(points[(nextRow * cols) + nextCol]);
+            }
+        }
+        const neighborWeight = neighbors.reduce((sum, neighbor) => sum + (neighbor.weight || 0), 0);
+        if (neighborWeight < 0.05) return point;
+        return {
+            ...point,
+            dx: neighbors.reduce((sum, neighbor) => sum + (neighbor.dx * (neighbor.weight || 0)), 0) / neighborWeight,
+            dy: neighbors.reduce((sum, neighbor) => sum + (neighbor.dy * (neighbor.weight || 0)), 0) / neighborWeight,
+            weight: point.weight
+        };
+    });
+}
+
+function buildFallbackWarpPoints(input, placement, candidatePlacements, edgeLookup, type, density) {
+    const grid = getMeshGridDimensions(density, type);
+    let influenceX = 0;
+    let influenceY = 0;
+    let neighbors = 0;
+    for (const neighborPlacement of candidatePlacements) {
+        if (neighborPlacement.inputId === placement.inputId) continue;
+        const edge = edgeLookup.get(`${placement.inputId}->${neighborPlacement.inputId}`) || edgeLookup.get(`${neighborPlacement.inputId}->${placement.inputId}`);
+        if (!edge) continue;
+        influenceX += clamp((neighborPlacement.x - placement.x) / Math.max(1, input.width), -1, 1);
+        influenceY += clamp((neighborPlacement.y - placement.y) / Math.max(1, input.height), -1, 1);
+        neighbors += 1;
+    }
+    if (!neighbors) return null;
+    const averageX = influenceX / neighbors;
+    const averageY = influenceY / neighbors;
+    const magnitude = type === 'mesh' ? 6 : 4;
+    const points = [];
+    for (let row = 0; row < grid.rows; row += 1) {
+        const v = grid.rows > 1 ? row / (grid.rows - 1) : 0;
+        for (let col = 0; col < grid.cols; col += 1) {
+            const u = grid.cols > 1 ? col / (grid.cols - 1) : 0;
+            const centeredU = (u - 0.5) * 2;
+            const centeredV = (v - 0.5) * 2;
+            points.push({
+                u,
+                v,
+                dx: averageX * centeredU * magnitude * (type === 'mesh' ? (1 - (Math.abs(centeredV) * 0.25)) : 1),
+                dy: averageY * centeredV * magnitude * (type === 'mesh' ? (1 - (Math.abs(centeredU) * 0.25)) : 1),
+                weight: 0.18
+            });
+        }
+    }
+    return {
+        type,
+        density,
+        cols: grid.cols,
+        rows: grid.rows,
+        strength: 0.24,
+        smoothness: type === 'mesh' ? 0.72 : 0.84,
+        support: 0.18,
+        averageWeight: 0.18,
+        points
+    };
+}
+
+function buildWarpForPlacement(input, placement, candidatePlacements, inputsById, preparedById, edgeLookup, settings, type = 'mesh') {
+    const sourcePrepared = preparedById.get(input.id);
+    if (!sourcePrepared) return null;
+    const density = type === 'perspective' ? 'low' : settings.meshDensity;
+    const grid = getMeshGridDimensions(density, type);
+    const basePoints = [];
+    let supportedPoints = 0;
+    let totalWeight = 0;
+
+    for (let row = 0; row < grid.rows; row += 1) {
+        const v = grid.rows > 1 ? row / (grid.rows - 1) : 0;
+        for (let col = 0; col < grid.cols; col += 1) {
+            const u = grid.cols > 1 ? col / (grid.cols - 1) : 0;
+            const localX = u * input.width;
+            const localY = v * input.height;
+            const deltas = [];
+            for (const neighborPlacement of candidatePlacements) {
+                if (neighborPlacement.inputId === placement.inputId) continue;
+                const edge = edgeLookup.get(`${placement.inputId}->${neighborPlacement.inputId}`) || edgeLookup.get(`${neighborPlacement.inputId}->${placement.inputId}`);
+                if (!edge) continue;
+                const neighborInput = inputsById.get(neighborPlacement.inputId);
+                const targetPrepared = preparedById.get(neighborPlacement.inputId);
+                if (!neighborInput || !targetPrepared) continue;
+                const overlap = getOverlapBounds(input, placement, neighborInput, neighborPlacement);
+                if (overlap.width < Math.max(32, input.width * 0.12) || overlap.height < Math.max(32, input.height * 0.12)) continue;
+                const sample = searchLocalWarpDelta(
+                    input,
+                    placement,
+                    sourcePrepared,
+                    neighborInput,
+                    neighborPlacement,
+                    targetPrepared,
+                    localX,
+                    localY,
+                    type === 'mesh' ? 28 : 14,
+                    type === 'mesh' ? 6 : 8
+                );
+                if (sample && sample.weight > 0) {
+                    deltas.push(sample);
+                }
+            }
+            if (!deltas.length) {
+                basePoints.push({ u, v, dx: 0, dy: 0, weight: 0 });
+                continue;
+            }
+            supportedPoints += 1;
+            const pointWeight = deltas.reduce((sum, delta) => sum + delta.weight, 0);
+            totalWeight += pointWeight;
+            basePoints.push({
+                u,
+                v,
+                dx: clamp(deltas.reduce((sum, delta) => sum + (delta.dx * delta.weight), 0) / Math.max(0.0001, pointWeight), -24, 24),
+                dy: clamp(deltas.reduce((sum, delta) => sum + (delta.dy * delta.weight), 0) / Math.max(0.0001, pointWeight), -24, 24),
+                weight: clamp(pointWeight / Math.max(1, deltas.length), 0, 1)
+            });
+        }
+    }
+
+    if (supportedPoints < Math.max(3, grid.cols)) {
+        return buildFallbackWarpPoints(input, placement, candidatePlacements, edgeLookup, type, density);
+    }
+    const smoothed = smoothWarpPoints(basePoints, grid.cols, grid.rows);
+    const averageWeight = totalWeight / Math.max(1, supportedPoints);
+    return {
+        type,
+        density,
+        cols: grid.cols,
+        rows: grid.rows,
+        strength: clamp(averageWeight * 1.5, 0.25, 3),
+        smoothness: type === 'mesh' ? 0.68 : 0.82,
+        support: supportedPoints / Math.max(1, basePoints.length),
+        averageWeight,
+        points: smoothed
+    };
+}
+
+function buildWarpVariantFromCandidate(baseCandidate, document, preparedById, inputsById, edgeLookup, settings, type = 'mesh') {
+    const placements = baseCandidate.placements.map((placement) => {
+        const input = inputsById.get(placement.inputId);
+        if (!input) return placement;
+        const warp = buildWarpForPlacement(input, placement, baseCandidate.placements, inputsById, preparedById, edgeLookup, settings, type);
+        if (!warp) return placement;
+        return {
+            ...placement,
+            warp
+        };
+    });
+    const supportedPlacements = placements.filter((placement) => placement.warp);
+    if (!supportedPlacements.length) return null;
+    const support = averageCandidateScore(supportedPlacements.map((placement) => placement.warp.support), 0);
+    const weight = averageCandidateScore(supportedPlacements.map((placement) => placement.warp.averageWeight), 0);
+    const distortionPenalty = averageCandidateScore(
+        supportedPlacements.map((placement) => averageCandidateScore(
+            (placement.warp.points || []).map((point) => Math.hypot(point.dx, point.dy)),
+            0
+        )),
+        0
+    );
+    return {
+        ...baseCandidate,
+        id: createStitchCandidateId(),
+        name: `${type === 'mesh' ? 'Mesh' : 'Perspective'} ${baseCandidate.name}`,
+        modelType: type,
+        blendMode: settings.blendMode === 'auto' ? (type === 'mesh' ? 'seam' : 'feather') : settings.blendMode,
+        placements: buildInitialPlacementsFromCandidate(document, placements),
+        diagnostics: [...(baseCandidate.diagnostics || []), `${type} warp support ${(support * 100).toFixed(0)}%`],
+        score: baseCandidate.score + (support * 36) + (weight * 22) - (distortionPenalty * (type === 'mesh' ? 0.28 : 0.18)),
+        warning: baseCandidate.warning || ''
+    };
+}
+
+function enrichRigidCandidate(candidate, sceneMode, settings) {
+    const blendMode = settings.blendMode === 'auto'
+        ? (sceneMode === 'screenshot' ? 'alpha' : 'feather')
+        : settings.blendMode;
+    return {
+        ...candidate,
+        modelType: sceneMode === 'screenshot' ? 'screenshot' : 'rigid',
+        blendMode,
+        score: candidate.score + (candidate.coverage * 18) + (sceneMode === 'screenshot' ? 18 : 9)
+    };
+}
+
+function rankCandidates(candidates) {
+    const sorted = [...candidates].sort((a, b) => b.score - a.score);
+    const maxScore = sorted[0]?.score || 1;
+    const minScore = sorted[sorted.length - 1]?.score || 0;
+    return sorted.map((candidate, index) => {
+        const normalizedScore = maxScore === minScore ? 1 : ((candidate.score - minScore) / Math.max(0.0001, maxScore - minScore));
+        const rankFactor = sorted.length <= 1 ? 1 : (1 - (index / (sorted.length - 1)));
+        return {
+            ...candidate,
+            rank: index + 1,
+            confidence: clamp((normalizedScore * 0.45) + ((candidate.coverage || 0) * 0.3) + (rankFactor * 0.25), 0, 1)
+        };
+    });
+}
+
 function buildCandidateFromAnchor(document, adjacency, anchorId, scoreMap = new Map()) {
     const normalized = normalizeStitchDocument(document);
     const queue = [{ inputId: anchorId, placement: createIdentityPlacement(normalized.inputs.find((input) => input.id === anchorId), 0), score: 1 }];
@@ -1092,6 +1519,10 @@ function buildCandidateFromAnchor(document, adjacency, anchorId, scoreMap = new 
         name: `Anchor ${normalized.inputs.find((input) => input.id === anchorId)?.name || anchorId}`,
         score: totalScore + placedCount,
         source: 'analysis',
+        confidence: 0,
+        rank: 1,
+        modelType: 'rigid',
+        blendMode: 'auto',
         coverage: placedCount / Math.max(1, normalized.inputs.length),
         placements: buildInitialPlacementsFromCandidate(normalized, orderedPlacements),
         diagnostics,
@@ -1108,7 +1539,14 @@ function dedupeCandidates(candidates) {
             Math.round(placement.x),
             Math.round(placement.y),
             Math.round((placement.scale || 1) * 1000),
-            Math.round((placement.rotation || 0) * 1000)
+            Math.round((placement.rotation || 0) * 1000),
+            placement.warp?.type || '',
+            placement.warp?.cols || 0,
+            placement.warp?.rows || 0,
+            placement.warp?.points ? placement.warp.points.slice(0, 6).map((point) => [
+                Math.round(point.dx * 10),
+                Math.round(point.dy * 10)
+            ]) : []
         ]));
         if (seen.has(key)) continue;
         seen.add(key);
@@ -1138,18 +1576,55 @@ export function analyzePreparedStitchInputs(document, preparedInputs) {
         };
     }
 
+    const sceneMode = inferSceneMode(normalized.settings, edges, preparedInputs);
     const adjacency = buildAdjacency(edges);
-    const candidates = normalized.inputs.map((input) => buildCandidateFromAnchor(normalized, adjacency, input.id, new Map()));
+    const edgeLookup = buildEdgeLookup(edges);
+    const preparedById = getPreparedInputMap(preparedInputs);
+    const inputsById = new Map(normalized.inputs.map((input) => [input.id, input]));
+    const rigidCandidates = normalized.inputs.map((input) => enrichRigidCandidate(buildCandidateFromAnchor(normalized, adjacency, input.id, new Map()), sceneMode, normalized.settings));
+    const candidates = [...rigidCandidates];
+
+    if (sceneMode === 'photo' && normalized.settings.warpMode !== 'off') {
+        const baseForWarp = rigidCandidates.slice(0, Math.min(3, rigidCandidates.length));
+        for (const baseCandidate of baseForWarp) {
+            if (normalized.settings.warpMode === 'auto' || normalized.settings.warpMode === 'perspective') {
+                const perspectiveVariant = buildWarpVariantFromCandidate(
+                    baseCandidate,
+                    normalized,
+                    preparedById,
+                    inputsById,
+                    edgeLookup,
+                    normalized.settings,
+                    'perspective'
+                );
+                if (perspectiveVariant) candidates.push(perspectiveVariant);
+            }
+            if (normalized.settings.warpMode === 'auto' || normalized.settings.warpMode === 'mesh') {
+                const meshVariant = buildWarpVariantFromCandidate(
+                    baseCandidate,
+                    normalized,
+                    preparedById,
+                    inputsById,
+                    edgeLookup,
+                    normalized.settings,
+                    'mesh'
+                );
+                if (meshVariant) candidates.push(meshVariant);
+            }
+        }
+    }
+
     candidates.push(buildManualLayoutCandidate(normalized.inputs, 'Manual fallback layout.'));
-    const deduped = dedupeCandidates(candidates)
-        .sort((a, b) => b.score - a.score)
+    const deduped = rankCandidates(dedupeCandidates(candidates))
         .slice(0, normalized.settings.maxCandidates || 6);
 
     return {
         candidates: deduped,
         warning: deduped[0]?.source === 'manual'
             ? 'The strongest result still needed manual placement.'
-            : '',
+            : (sceneMode === 'photo'
+                ? 'Photo mode generated ranked rigid and warped candidates.'
+                : ''),
         diagnostics: edges
             .sort((a, b) => b.score - a.score)
             .map((edge) => ({
@@ -1162,5 +1637,6 @@ export function analyzePreparedStitchInputs(document, preparedInputs) {
                 pixelMatch: edge.pixelMatch,
                 edgeMatch: edge.edgeMatch
             }))
+            .concat([{ pair: 'scene', method: sceneMode, score: deduped[0]?.score || 0, matches: deduped.length, coverage: deduped[0]?.coverage || 0 }])
     };
 }

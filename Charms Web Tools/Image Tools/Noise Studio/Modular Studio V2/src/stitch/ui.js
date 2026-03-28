@@ -1,4 +1,5 @@
 import { getActivePlacements, getPlacementByInput, getSelectedStitchInput, normalizeStitchDocument } from './document.js';
+import { STITCH_ANALYSIS_GROUPS, STITCH_SELECTION_ACTION_HELP, STITCH_SELECTION_FIELDS } from './meta.js';
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -12,7 +13,8 @@ function escapeHtml(value) {
 function formatNumber(value, digits = 2) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return '0';
-    return numeric.toFixed(digits).replace(/\.?0+$/, '');
+    const formatted = numeric.toFixed(digits).replace(/\.?0+$/, '');
+    return formatted === '-' || formatted === '-0' ? '0' : formatted;
 }
 
 function formatPercent(value) {
@@ -26,19 +28,82 @@ function formatDimensions(width, height) {
     return `${w.toLocaleString()} x ${h.toLocaleString()}`;
 }
 
+function formatModelType(value) {
+    const label = String(value || 'rigid')
+        .replace(/[-_]/g, ' ')
+        .replace(/\b\w/g, (match) => match.toUpperCase());
+    return label === 'Rigid' ? 'Rigid' : label;
+}
+
+function tooltipMarkup(id, help) {
+    return `
+        <span class="stitch-tooltip-wrap" data-stitch-tooltip-wrap="${id}">
+            <button
+                type="button"
+                class="stitch-help-button"
+                data-stitch-tooltip-button="${id}"
+                aria-label="Open help"
+                aria-expanded="false"
+            >?</button>
+            <div class="stitch-tooltip-popover" data-stitch-tooltip="${id}" role="tooltip">${escapeHtml(help)}</div>
+        </span>
+    `;
+}
+
+function renderSettingField(document, field) {
+    const value = document.settings?.[field.key];
+    const labelRow = `
+        <span class="stitch-setting-label">
+            <span>${escapeHtml(field.label)}</span>
+            ${tooltipMarkup(`setting:${field.key}`, field.help)}
+        </span>
+    `;
+    if (field.type === 'select') {
+        return `
+            <label class="stitch-setting">
+                ${labelRow}
+                <select data-stitch-setting="${field.key}">
+                    ${field.options.map((option) => `
+                        <option value="${option.value}" ${String(value) === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>
+                    `).join('')}
+                </select>
+            </label>
+        `;
+    }
+    if (field.type === 'checkbox') {
+        return `
+            <label class="stitch-setting-checkbox">
+                <input type="checkbox" data-stitch-setting="${field.key}" ${value ? 'checked' : ''}>
+                <div class="stitch-setting-checkbox-content">
+                    <span class="stitch-setting-label stitch-setting-label-checkbox">
+                        <strong>${escapeHtml(field.label)}</strong>
+                        ${tooltipMarkup(`setting:${field.key}`, field.help)}
+                    </span>
+                </div>
+            </label>
+        `;
+    }
+    return `
+        <label class="stitch-setting">
+            ${labelRow}
+            <input type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}" data-stitch-setting="${field.key}" ${field.key === 'analysisMaxDimension' && document.settings.useFullResolutionAnalysis ? 'disabled' : ''}>
+        </label>
+    `;
+}
+
 export function createStitchWorkspace(root, { actions, stitchEngine }) {
     root.innerHTML = `
         <div class="stitch-shell">
             <div class="stitch-main">
                 <aside class="stitch-sidebar stitch-sidebar-left">
-                    <div class="stitch-sidebar-section">
+                    <div class="stitch-sidebar-section stitch-sidebar-section-inputs">
                         <div class="stitch-section-header">
                             <strong>Inputs</strong>
                             <button type="button" class="mini-button" data-stitch-action="add-images">Add Images</button>
                         </div>
                         <div class="stitch-input-list" data-stitch-role="input-list"></div>
                     </div>
-                    <div class="stitch-sidebar-section">
+                    <div class="stitch-sidebar-section stitch-sidebar-section-analysis">
                         <div class="stitch-section-header">
                             <strong>Analysis</strong>
                             <button type="button" class="mini-button" data-stitch-action="open-gallery">Gallery</button>
@@ -48,7 +113,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
                 </aside>
                 <section class="stitch-center">
                     <div class="stitch-stage-header">
-                        <div>
+                        <div class="stitch-stage-title">
                             <div class="eyebrow">Stitch Preview</div>
                             <h2 data-stitch-role="title">Stitch Workspace</h2>
                         </div>
@@ -64,7 +129,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
                     <div class="stitch-alternatives" data-stitch-role="alternatives"></div>
                 </section>
                 <aside class="stitch-sidebar stitch-sidebar-right">
-                    <div class="stitch-sidebar-section">
+                    <div class="stitch-sidebar-section stitch-sidebar-section-selection">
                         <div class="stitch-section-header">
                             <strong>Selection</strong>
                             <button type="button" class="mini-button" data-stitch-action="reset-selected">Reset Image</button>
@@ -105,8 +170,77 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
 
     let currentDocument = normalizeStitchDocument();
     let dragState = null;
+    let openTooltipId = null;
+    const canUseHoverTooltips = typeof window.matchMedia === 'function'
+        ? window.matchMedia('(hover: hover)').matches
+        : false;
 
     stitchEngine.attachCanvas(refs.canvas);
+
+    function applyTooltipState() {
+        const tooltips = root.querySelectorAll('[data-stitch-tooltip-wrap]');
+        tooltips.forEach((node) => {
+            const id = node.dataset.stitchTooltipWrap;
+            const isOpen = id === openTooltipId;
+            node.classList.toggle('is-open', isOpen);
+            
+            const button = node.querySelector('[data-stitch-tooltip-button]');
+            const popover = node.querySelector('[data-stitch-tooltip]');
+            
+            if (button) button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            
+            if (isOpen && button && popover) {
+                // Ensure popover is visible for measurement
+                popover.style.display = 'block';
+                popover.style.visibility = 'hidden';
+                popover.style.pointerEvents = 'none';
+
+                const triggerRect = button.getBoundingClientRect();
+                const popoverRect = popover.getBoundingClientRect();
+                const viewportWidth = window.innerWidth;
+                const viewportHeight = window.innerHeight;
+
+                // Default: below, right-aligned to trigger
+                let top = triggerRect.bottom + 8;
+                let left = triggerRect.right - popoverRect.width;
+
+                // Horizontal bounds check
+                if (left < 10) {
+                    left = triggerRect.left; // Try left-aligned
+                }
+                if (left + popoverRect.width > viewportWidth - 10) {
+                    left = viewportWidth - popoverRect.width - 10;
+                }
+                if (left < 10) left = 10;
+
+                // Vertical bounds check
+                if (top + popoverRect.height > viewportHeight - 10) {
+                    // Flip to top if it would go off bottom
+                    top = triggerRect.top - popoverRect.height - 8;
+                }
+                
+                // Final safety clamp for vertical
+                if (top < 10) top = 10;
+
+                popover.style.top = `${top}px`;
+                popover.style.left = `${left}px`;
+                popover.style.visibility = 'visible';
+                popover.style.pointerEvents = 'auto';
+            } else if (!isOpen && popover) {
+                // Reset styles when closed
+                popover.style.top = '';
+                popover.style.left = '';
+                popover.style.display = '';
+                popover.style.visibility = '';
+                popover.style.pointerEvents = '';
+            }
+        });
+    }
+
+    function setOpenTooltip(id) {
+        openTooltipId = id || null;
+        applyTooltipState();
+    }
 
     function renderInputs(document) {
         const orderedInputs = [...document.inputs].sort((a, b) => {
@@ -139,41 +273,24 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
 
     function renderAnalysis(document) {
         const analysis = document.analysis || {};
+        const topCandidate = (document.candidates || [])[0] || null;
         refs.analysisCard.innerHTML = `
             <div class="stitch-analysis-line"><strong>Status</strong><span>${escapeHtml(analysis.status || 'idle')}</span></div>
             <div class="stitch-analysis-line"><strong>Inputs</strong><span>${document.inputs.length}</span></div>
             <div class="stitch-analysis-line"><strong>Candidates</strong><span>${document.candidates.length}</span></div>
+            ${topCandidate ? `<div class="stitch-analysis-line"><strong>Top Result</strong><span>${escapeHtml(formatModelType(topCandidate.modelType))} | ${formatPercent(topCandidate.confidence || 0)}</span></div>` : ''}
             ${analysis.warning ? `<div class="stitch-analysis-note is-warning">${escapeHtml(analysis.warning)}</div>` : ''}
             ${analysis.error ? `<div class="stitch-analysis-note is-error">${escapeHtml(analysis.error)}</div>` : ''}
-            <div class="stitch-setting-grid">
-                <label class="stitch-setting">
-                    <span>Analysis Size</span>
-                    <input type="number" min="128" max="768" step="16" value="${document.settings.analysisMaxDimension}" data-stitch-setting="analysisMaxDimension" ${document.settings.useFullResolutionAnalysis ? 'disabled' : ''}>
-                </label>
-                <label class="stitch-setting">
-                    <span>Max Features</span>
-                    <input type="number" min="20" max="300" step="5" value="${document.settings.maxFeatures}" data-stitch-setting="maxFeatures">
-                </label>
-                <label class="stitch-setting">
-                    <span>Match Ratio</span>
-                    <input type="number" min="0.4" max="0.99" step="0.01" value="${document.settings.matchRatio}" data-stitch-setting="matchRatio">
-                </label>
-                <label class="stitch-setting">
-                    <span>RANSAC</span>
-                    <input type="number" min="40" max="1200" step="10" value="${document.settings.ransacIterations}" data-stitch-setting="ransacIterations">
-                </label>
-                <label class="stitch-setting">
-                    <span>Threshold</span>
-                    <input type="number" min="3" max="80" step="1" value="${document.settings.inlierThreshold}" data-stitch-setting="inlierThreshold">
-                </label>
-            </div>
-            <label class="stitch-setting-checkbox">
-                <input type="checkbox" data-stitch-setting="useFullResolutionAnalysis" ${document.settings.useFullResolutionAnalysis ? 'checked' : ''}>
-                <div>
-                    <strong>Use Full Resolution</strong>
-                    <span>Skip the analysis downscale step and use the original image sizes. This can be much slower, but it can help on screenshots and UI captures.</span>
-                </div>
-            </label>
+            ${STITCH_ANALYSIS_GROUPS.map((group) => `
+                <section class="stitch-settings-group">
+                    <div class="stitch-settings-group-header">
+                        <strong>${escapeHtml(group.title)}</strong>
+                    </div>
+                    <div class="stitch-setting-grid ${group.fields.some((field) => field.type === 'checkbox') ? 'has-checkbox' : ''}">
+                        ${group.fields.map((field) => renderSettingField(document, field)).join('')}
+                    </div>
+                </section>
+            `).join('')}
             <div class="button-cluster stitch-analysis-actions">
                 <button type="button" class="toolbar-button" data-stitch-action="run-analysis" ${document.inputs.length < 2 ? 'disabled' : ''}>${analysis.status === 'running' ? 'Analyzing...' : 'Run Analysis'}</button>
                 <button type="button" class="toolbar-button" data-stitch-action="reset-candidate" ${document.activeCandidateId ? '' : 'disabled'}>Reset Candidate</button>
@@ -194,23 +311,45 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
                 <strong>${escapeHtml(input.name)}</strong>
                 <span>${escapeHtml(formatDimensions(input.width, input.height))}</span>
             </div>
-            <label class="stitch-setting">
-                <span>Position X</span>
-                <input type="number" step="1" value="${formatNumber(placement.x, 0)}" data-stitch-placement="x" data-input-id="${input.id}">
-            </label>
-            <label class="stitch-setting">
-                <span>Position Y</span>
-                <input type="number" step="1" value="${formatNumber(placement.y, 0)}" data-stitch-placement="y" data-input-id="${input.id}">
-            </label>
-            <label class="stitch-setting">
-                <span>Scale</span>
-                <input type="number" min="0.05" max="8" step="0.01" value="${formatNumber(placement.scale, 2)}" data-stitch-placement="scale" data-input-id="${input.id}">
-            </label>
-            <label class="stitch-setting">
-                <span>Rotation (deg)</span>
-                <input type="number" min="-180" max="180" step="0.5" value="${formatNumber((placement.rotation || 0) * (180 / Math.PI), 1)}" data-stitch-placement="rotation" data-input-id="${input.id}">
-            </label>
-            <div class="button-cluster">
+            <div class="stitch-setting-grid stitch-setting-grid-selection">
+                ${STITCH_SELECTION_FIELDS.map((field) => `
+                    <label class="stitch-setting">
+                        <span class="stitch-setting-label">
+                            <span>${escapeHtml(field.label)}</span>
+                            ${tooltipMarkup(`placement:${field.key}`, field.help)}
+                        </span>
+                        <input
+                            type="number"
+                            ${field.key === 'scale' ? 'min="0.05" max="8" step="0.01"' : ''}
+                            ${field.key === 'rotation' ? 'min="-180" max="180" step="0.5"' : ''}
+                            ${field.key === 'x' || field.key === 'y' ? 'step="1"' : ''}
+                            value="${field.key === 'rotation' ? formatNumber((placement.rotation || 0) * (180 / Math.PI), 1) : formatNumber(placement[field.key], field.key === 'scale' ? 2 : 0)}"
+                            data-stitch-placement="${field.key}"
+                            data-input-id="${input.id}"
+                        >
+                    </label>
+                `).join('')}
+            </div>
+            ${placement.warp ? `
+                <div class="stitch-analysis-note">
+                    Auto warp: ${escapeHtml(formatModelType(placement.warp.type))} grid ${escapeHtml(String(placement.warp.cols))} x ${escapeHtml(String(placement.warp.rows))}
+                </div>
+            ` : ''}
+            <div class="stitch-selection-help-row">
+                <span class="stitch-selection-help-chip">
+                    <strong>Reset Image</strong>
+                    ${tooltipMarkup('action:reset', STITCH_SELECTION_ACTION_HELP.reset)}
+                </span>
+                <span class="stitch-selection-help-chip">
+                    <strong>Hide / Show</strong>
+                    ${tooltipMarkup('action:visibility', STITCH_SELECTION_ACTION_HELP.visibility)}
+                </span>
+                <span class="stitch-selection-help-chip">
+                    <strong>Lock</strong>
+                    ${tooltipMarkup('action:lock', STITCH_SELECTION_ACTION_HELP.lock)}
+                </span>
+            </div>
+            <div class="button-cluster stitch-selection-actions">
                 <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}">${placement.visible === false ? 'Show' : 'Hide'}</button>
                 <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}">${placement.locked ? 'Unlock' : 'Lock'}</button>
             </div>
@@ -239,7 +378,8 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
                             data-candidate-id="${candidate.id}"
                         >
                             <strong>${escapeHtml(candidate.name)}</strong>
-                            <span>${formatPercent(candidate.coverage)} coverage</span>
+                            <span>#${candidate.rank || 0} | ${escapeHtml(formatModelType(candidate.modelType))}</span>
+                            <span>${formatPercent(candidate.coverage)} coverage | ${formatPercent(candidate.confidence || 0)} confidence</span>
                         </button>
                     `).join('')}
                 </div>
@@ -259,8 +399,9 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
                     </div>
                     <div class="stitch-gallery-meta">
                         <strong>${escapeHtml(candidate.name)}</strong>
-                        <span>Coverage ${formatPercent(candidate.coverage)}</span>
-                        <span>Score ${formatNumber(candidate.score, 2)}</span>
+                        <span>Rank #${candidate.rank || 0} | ${escapeHtml(formatModelType(candidate.modelType))}</span>
+                        <span>Coverage ${formatPercent(candidate.coverage)} | Confidence ${formatPercent(candidate.confidence || 0)}</span>
+                        <span>Score ${formatNumber(candidate.score, 2)} | Blend ${escapeHtml(formatModelType(candidate.blendMode || 'auto'))}</span>
                         ${candidate.warning ? `<div class="stitch-analysis-note is-warning">${escapeHtml(candidate.warning)}</div>` : ''}
                     </div>
                     <div class="stitch-gallery-actions">
@@ -275,12 +416,13 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         const activeCandidate = document.candidates.find((candidate) => candidate.id === document.activeCandidateId);
         refs.title.textContent = document.inputs.length
             ? activeCandidate
-                ? `${activeCandidate.name} (${document.inputs.length} input${document.inputs.length === 1 ? '' : 's'})`
+                ? `${activeCandidate.name} (${formatModelType(activeCandidate.modelType)} | ${document.inputs.length} input${document.inputs.length === 1 ? '' : 's'})`
                 : `Stitch Draft (${document.inputs.length} input${document.inputs.length === 1 ? '' : 's'})`
             : 'Stitch Workspace';
         refs.metrics.innerHTML = `
             <span>Render ${formatDimensions(stitchEngine.runtime.renderWidth, stitchEngine.runtime.renderHeight)}</span>
             <span>${document.inputs.length} source${document.inputs.length === 1 ? '' : 's'}</span>
+            ${activeCandidate ? `<span>${escapeHtml(formatPercent(activeCandidate.confidence || 0))} confidence</span>` : ''}
         `;
     }
 
@@ -293,6 +435,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         renderAlternatives(currentDocument);
         renderGallery(currentDocument);
         refs.empty.classList.toggle('is-visible', !currentDocument.inputs.length);
+        applyTooltipState();
         stitchEngine.requestRender(currentDocument);
     }
 
@@ -349,6 +492,12 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
     refs.canvas.addEventListener('pointercancel', finishDrag);
 
     root.addEventListener('click', async (event) => {
+        const tooltipButton = event.target.closest('[data-stitch-tooltip-button]');
+        if (tooltipButton) {
+            const tooltipId = tooltipButton.dataset.stitchTooltipButton;
+            setOpenTooltip(openTooltipId === tooltipId ? null : tooltipId);
+            return;
+        }
         const target = event.target.closest('[data-stitch-action]');
         if (!target) return;
         const action = target.dataset.stitchAction;
@@ -412,6 +561,12 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         }
     });
 
+    root.addEventListener('click', (event) => {
+        if (!openTooltipId) return;
+        if (event.target.closest('[data-stitch-tooltip-wrap]')) return;
+        setOpenTooltip(null);
+    });
+
     root.addEventListener('change', (event) => {
         const target = event.target;
         if (target.matches('[data-stitch-setting]')) {
@@ -429,6 +584,52 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
             actions.updateStitchPlacement(inputId, { [key]: value });
         }
     });
+
+    root.addEventListener('pointerover', (event) => {
+        if (!canUseHoverTooltips) return;
+        const button = event.target.closest('[data-stitch-tooltip-button]');
+        if (!button) return;
+        setOpenTooltip(button.dataset.stitchTooltipButton);
+    });
+
+    root.addEventListener('pointerout', (event) => {
+        if (!canUseHoverTooltips) return;
+        const wrap = event.target.closest('[data-stitch-tooltip-wrap]');
+        if (!wrap) return;
+        if (event.relatedTarget && wrap.contains(event.relatedTarget)) return;
+        if (openTooltipId === wrap.dataset.stitchTooltipWrap) setOpenTooltip(null);
+    });
+
+    root.addEventListener('focusin', (event) => {
+        const button = event.target.closest('[data-stitch-tooltip-button]');
+        if (!button) return;
+        setOpenTooltip(button.dataset.stitchTooltipButton);
+    });
+
+    root.addEventListener('focusout', (event) => {
+        const wrap = event.target.closest('[data-stitch-tooltip-wrap]');
+        if (!wrap) return;
+        if (event.relatedTarget && wrap.contains(event.relatedTarget)) return;
+        if (openTooltipId === wrap.dataset.stitchTooltipWrap) setOpenTooltip(null);
+    });
+
+    root.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && openTooltipId) {
+            setOpenTooltip(null);
+        }
+    });
+
+    root.ownerDocument.addEventListener('pointerdown', (event) => {
+        if (!openTooltipId) return;
+        if (!root.contains(event.target)) setOpenTooltip(null);
+    });
+
+    // Close tooltips on scroll to prevent "floating" detached from trigger
+    root.addEventListener('scroll', (event) => {
+        if (openTooltipId && event.target.closest('.stitch-sidebar, .stitch-main')) {
+            setOpenTooltip(null);
+        }
+    }, { capture: true, passive: true });
 
     return {
         activate() {
