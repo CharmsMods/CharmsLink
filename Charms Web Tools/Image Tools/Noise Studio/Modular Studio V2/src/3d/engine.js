@@ -2,8 +2,11 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { WebGLPathTracer } from 'three-gpu-pathtracer';
+import { DenoiseMaterial, WebGLPathTracer } from 'three-gpu-pathtracer';
+import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 import { normalizeThreeDDocument } from './document.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -111,18 +114,18 @@ async function dataUrlToBlob(dataUrl) {
     return response.blob();
 }
 
-function createHiddenCanvas(width, height) {
+function createRenderCanvas(width, height) {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    canvas.style.position = 'fixed';
-    canvas.style.left = '-10000px';
-    canvas.style.top = '-10000px';
-    canvas.style.width = '1px';
-    canvas.style.height = '1px';
-    canvas.style.opacity = '0';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    canvas.style.maxWidth = '100%';
+    canvas.style.maxHeight = '100%';
+    canvas.style.display = 'block';
+    canvas.style.objectFit = 'contain';
+    canvas.style.background = '#050607';
     canvas.style.pointerEvents = 'none';
-    document.body.appendChild(canvas);
     return canvas;
 }
 
@@ -142,6 +145,8 @@ const LINKED_SCALE_AXES = {
     YZ: [1, 2]
 };
 
+const BOOLEAN_ATTRIBUTE_KEYS = ['position', 'normal', 'uv'];
+
 function isEditableTarget(target) {
     if (!target) return false;
     const tagName = String(target.tagName || '').toLowerCase();
@@ -159,6 +164,62 @@ function getObjectWorldCenter(object) {
         return box.getCenter(new THREE.Vector3());
     }
     return object.getWorldPosition(new THREE.Vector3());
+}
+
+function isBooleanCompatibleItem(item) {
+    return item?.kind === 'model' || item?.kind === 'primitive';
+}
+
+function getPrimaryMaterial(material) {
+    if (Array.isArray(material)) return material.find(Boolean) || null;
+    return material || null;
+}
+
+function createAttributeSlice(attribute, start, count) {
+    const itemSize = attribute.itemSize || 1;
+    const typedArray = attribute.array.slice(start * itemSize, (start + count) * itemSize);
+    const nextAttribute = new THREE.BufferAttribute(typedArray, itemSize, attribute.normalized);
+    if (attribute.name) nextAttribute.name = attribute.name;
+    return nextAttribute;
+}
+
+function createNonIndexedGeometrySlice(sourceGeometry, start = 0, count = Infinity) {
+    const working = sourceGeometry.index ? sourceGeometry.toNonIndexed() : sourceGeometry.clone();
+    const position = working.getAttribute('position');
+    const maxCount = position?.count || 0;
+    const nextStart = Math.max(0, Math.min(maxCount, Math.round(start)));
+    const nextCount = Math.max(0, Math.min(maxCount - nextStart, Math.round(count)));
+    const geometry = new THREE.BufferGeometry();
+
+    if (nextCount > 0) {
+        Object.entries(working.attributes).forEach(([name, attribute]) => {
+            geometry.setAttribute(name, createAttributeSlice(attribute, nextStart, nextCount));
+        });
+        geometry.morphTargetsRelative = working.morphTargetsRelative;
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+    }
+
+    working.dispose?.();
+    return geometry;
+}
+
+function getMeshBooleanGeometryParts(mesh) {
+    if (!mesh?.geometry?.getAttribute?.('position')) return [];
+    const materialList = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    if (Array.isArray(mesh.material) && Array.isArray(mesh.geometry.groups) && mesh.geometry.groups.length) {
+        return mesh.geometry.groups
+            .filter((group) => Number(group?.count || 0) > 0)
+            .map((group) => ({
+                geometry: createNonIndexedGeometrySlice(mesh.geometry, group.start, group.count),
+                material: materialList[group.materialIndex] || materialList[0] || null
+            }));
+    }
+
+    return [{
+        geometry: createNonIndexedGeometrySlice(mesh.geometry),
+        material: materialList[0] || null
+    }];
 }
 
 function chooseLinkedPlaneScaleRatio(object, startScale, axisIndices) {
@@ -187,12 +248,79 @@ function disposePathTracerSafely(pathTracer) {
     }
 }
 
+function createDenoisePass() {
+    const material = new DenoiseMaterial();
+    const quad = new FullScreenQuad(material);
+    return { material, quad };
+}
+
+function disposeDenoisePass(pass) {
+    if (!pass) return;
+    pass.quad?.dispose?.();
+    pass.material?.dispose?.();
+}
+
+function configurePathTracerQuality(pathTracer, renderSettings = {}) {
+    if (!pathTracer) return false;
+
+    let changed = false;
+    const nextBounces = Math.max(1, Math.round(Number(renderSettings.bounces) || 10));
+    const nextTransmissiveBounces = renderSettings.transmissiveBounces == null
+        ? 10
+        : Math.max(0, Math.round(Number(renderSettings.transmissiveBounces) || 0));
+    const nextFilterGlossyFactor = Math.max(0, Number(renderSettings.filterGlossyFactor) || 0);
+
+    if (pathTracer.multipleImportanceSampling !== true) {
+        pathTracer.multipleImportanceSampling = true;
+        changed = true;
+    }
+    if (pathTracer.bounces !== nextBounces) {
+        pathTracer.bounces = nextBounces;
+        changed = true;
+    }
+    if (pathTracer.transmissiveBounces !== nextTransmissiveBounces) {
+        pathTracer.transmissiveBounces = nextTransmissiveBounces;
+        changed = true;
+    }
+    if (pathTracer.filterGlossyFactor !== nextFilterGlossyFactor) {
+        pathTracer.filterGlossyFactor = nextFilterGlossyFactor;
+        changed = true;
+    }
+
+    return changed;
+}
+
+function renderDenoisedTexture(renderer, pass, sourceTexture, renderSettings = {}) {
+    if (!renderer || !pass?.material || !pass?.quad || !sourceTexture) return;
+
+    pass.material.map = sourceTexture;
+    pass.material.sigma = Math.max(0.1, Number(renderSettings.denoiseSigma) || 5);
+    pass.material.threshold = Math.max(0.0001, Number(renderSettings.denoiseThreshold) || 0.03);
+    pass.material.kSigma = Math.max(0.1, Number(renderSettings.denoiseKSigma) || 1);
+    pass.material.opacity = 1;
+
+    const previousRenderTarget = renderer.getRenderTarget();
+    const previousAutoClear = renderer.autoClear;
+
+    renderer.setRenderTarget(null);
+    renderer.autoClear = true;
+    renderer.clear();
+    pass.quad.render(renderer);
+    renderer.autoClear = previousAutoClear;
+    renderer.setRenderTarget(previousRenderTarget);
+}
+
 export class ThreeDEngine {
     constructor(container) {
         this.container = container;
         this.destroyed = false;
         this.loader = new GLTFLoader();
+        this.geometryLoader = new THREE.BufferGeometryLoader();
         this.textureLoader = new THREE.TextureLoader();
+        this.booleanEvaluator = new Evaluator();
+        this.booleanEvaluator.useGroups = true;
+        this.booleanEvaluator.consolidateGroups = true;
+        this.booleanEvaluator.removeUnusedMaterials = true;
         this.sceneObjects = new Map();
         this.itemLights = new Map();
         this.itemHelpers = new Map();
@@ -255,6 +383,13 @@ export class ThreeDEngine {
         this.pathTracer.tiles.set(2, 2);
         this.pathTracer.renderDelay = 0;
         this.pathTracer.minSamples = 0;
+        configurePathTracerQuality(this.pathTracer, this.activeDocument.render);
+        this.viewportDenoisePass = createDenoisePass();
+        this.meshViewMaterial = new THREE.MeshBasicMaterial({
+            color: 0xe7eefc,
+            wireframe: true,
+            side: THREE.DoubleSide
+        });
         this.rebuildPathTracerScene();
 
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
@@ -362,7 +497,7 @@ export class ThreeDEngine {
         return this.container.clientWidth / Math.max(1, this.container.clientHeight);
     }
 
-    withPathTracerExclusions(callback) {
+    withEditorObjectsHidden(callback) {
         const changedObjects = [];
         this.editorObjects.forEach((object) => {
             if (object?.visible) {
@@ -378,6 +513,10 @@ export class ThreeDEngine {
                 object.visible = true;
             });
         }
+    }
+
+    withPathTracerExclusions(callback) {
+        return this.withEditorObjectsHidden(callback);
     }
 
     rebuildPathTracerScene() {
@@ -631,8 +770,11 @@ export class ThreeDEngine {
 
     onResize() {
         if (!this.container || this.destroyed) return;
-        const width = Math.max(1, this.container.clientWidth);
-        const height = Math.max(1, this.container.clientHeight);
+        const width = Math.round(Number(this.container.clientWidth) || 0);
+        const height = Math.round(Number(this.container.clientHeight) || 0);
+        if (width < 2 || height < 2) {
+            return;
+        }
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(width, height);
@@ -699,6 +841,7 @@ export class ThreeDEngine {
         this.syncFlyStateFromCamera(this.controls.target.clone());
         this.camera.lookAt(this.controls.target);
         this.controls.enabled = this._cameraMode === 'orbit' && !this._editLocked && !this.transformControl.dragging;
+        this.transformControl.enabled = !this._editLocked && !this.transformControl.object?.userData?.locked;
         if (this._cameraMode === 'orbit') {
             this.controls.update();
         } else {
@@ -708,10 +851,14 @@ export class ThreeDEngine {
 
         this.renderer.toneMapping = TONE_MAPPING_MAP[document.render.toneMapping] || THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = document.render.exposure;
+        const qualityChanged = configurePathTracerQuality(this.pathTracer, document.render);
         this.renderMode = document.render.mode;
         this.targetSamples = document.render.samplesTarget;
         if (this.renderMode === 'pathtrace' && previousRenderMode !== 'pathtrace') {
             this.queuePathTraceWarmup('Preparing path tracer...');
+        } else if (this.renderMode === 'pathtrace' && qualityChanged) {
+            this.queuePathTraceWarmup('Updating path trace settings...');
+            this.pathTracer.reset();
         } else if (this.renderMode !== 'pathtrace') {
             this._pathTraceWarmupPending = false;
             this.emitPathTraceLoading(false);
@@ -727,6 +874,239 @@ export class ThreeDEngine {
         this.keyLight.visible = showPreviewLights;
     }
 
+    disposeBooleanSegments(segments = [], { disposeMaterials = false } = {}) {
+        segments.forEach(({ geometry, material }) => {
+            geometry?.dispose?.();
+            if (disposeMaterials) {
+                material?.dispose?.();
+            }
+        });
+    }
+
+    normalizeBooleanGeometryAttributes(geometry, includeUv = false) {
+        const position = geometry?.getAttribute?.('position');
+        if (!position) return false;
+
+        if (!geometry.getAttribute('normal')) {
+            geometry.computeVertexNormals();
+        }
+
+        if (includeUv && !geometry.getAttribute('uv')) {
+            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(position.count * 2), 2));
+        }
+
+        Object.keys(geometry.attributes).forEach((name) => {
+            if (!BOOLEAN_ATTRIBUTE_KEYS.includes(name) || (name === 'uv' && !includeUv)) {
+                geometry.deleteAttribute(name);
+            }
+        });
+
+        if (!geometry.getAttribute('normal') && geometry.getAttribute('position')) {
+            geometry.computeVertexNormals();
+        }
+
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
+        return true;
+    }
+
+    collectBooleanMeshSegments(root, referenceObject = root, { cloneMaterials = true } = {}) {
+        if (!root || !referenceObject) return [];
+        root.updateMatrixWorld(true);
+        referenceObject.updateMatrixWorld(true);
+        const referenceInverse = new THREE.Matrix4().copy(referenceObject.matrixWorld).invert();
+        const segments = [];
+
+        root.traverse((child) => {
+            if (!child?.isMesh || child.visible === false || !child.geometry?.getAttribute?.('position')) return;
+            const toReference = new THREE.Matrix4().multiplyMatrices(referenceInverse, child.matrixWorld);
+            getMeshBooleanGeometryParts(child).forEach(({ geometry, material }) => {
+                geometry.applyMatrix4(toReference);
+                segments.push({
+                    geometry,
+                    material: cloneMaterials
+                        ? material?.clone?.() || new THREE.MeshStandardMaterial({
+                            color: 0xffffff,
+                            roughness: 0.65,
+                            metalness: 0
+                        })
+                        : null
+                });
+            });
+        });
+
+        return segments;
+    }
+
+    mergeBooleanSegmentGeometry(segments, useGroups = false) {
+        if (!segments.length) {
+            throw new Error('No mesh data was available for the boolean operation.');
+        }
+
+        const includeUv = segments.some(({ geometry }) => geometry?.getAttribute?.('uv'));
+        const prepared = segments
+            .map(({ geometry }) => geometry)
+            .filter((geometry) => this.normalizeBooleanGeometryAttributes(geometry, includeUv));
+
+        if (!prepared.length) {
+            throw new Error('No compatible mesh attributes were available for the boolean operation.');
+        }
+
+        const merged = mergeGeometries(prepared, useGroups);
+        if (!merged) {
+            throw new Error('Could not combine the mesh data for boolean slicing.');
+        }
+
+        if (!merged.getAttribute('normal') && merged.getAttribute('position')) {
+            merged.computeVertexNormals();
+        }
+        merged.computeBoundingBox();
+        merged.computeBoundingSphere();
+        return merged;
+    }
+
+    buildBooleanBrushFromObject(root, referenceObject = root) {
+        const segments = this.collectBooleanMeshSegments(root, referenceObject, { cloneMaterials: true });
+        try {
+            if (!segments.length) return null;
+            const geometry = this.mergeBooleanSegmentGeometry(segments, true);
+            const materials = segments.map(({ material }) => material || new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.65,
+                metalness: 0
+            }));
+            const brush = new Brush(geometry, materials.length === 1 ? materials[0] : materials);
+            brush.name = root.name || 'Brush';
+            brush.castShadow = true;
+            brush.receiveShadow = true;
+            brush.updateMatrixWorld(true);
+            segments.forEach(({ geometry: segmentGeometry }) => segmentGeometry?.dispose?.());
+            return brush;
+        } catch (error) {
+            this.disposeBooleanSegments(segments, { disposeMaterials: true });
+            throw error;
+        }
+    }
+
+    buildBooleanSnapshotGeometry(root, referenceObject = root) {
+        const segments = this.collectBooleanMeshSegments(root, referenceObject, { cloneMaterials: false });
+        try {
+            const geometry = this.mergeBooleanSegmentGeometry(segments, false);
+            this.disposeBooleanSegments(segments);
+            return geometry;
+        } catch (error) {
+            this.disposeBooleanSegments(segments);
+            throw error;
+        }
+    }
+
+    async createRenderableObject(item) {
+        if (isBooleanCompatibleItem(item) && Array.isArray(item.booleanCuts) && item.booleanCuts.length) {
+            return this.createBooleanSlicedObject(item);
+        }
+
+        return item.kind === 'primitive'
+            ? this.createPrimitiveObject(item)
+            : item.kind === 'image-plane'
+                ? this.createImagePlaneObject(item)
+                : this.createModelObject(item);
+    }
+
+    async createBooleanSlicedObject(item) {
+        const baseObject = item.kind === 'primitive'
+            ? this.createPrimitiveObject(item)
+            : await this.createModelObject(item);
+
+        try {
+            let currentBrush = this.buildBooleanBrushFromObject(baseObject, baseObject);
+            if (!currentBrush) {
+                const empty = new THREE.Group();
+                empty.name = item.name || 'Sliced Object';
+                return empty;
+            }
+
+            const baseBrush = currentBrush;
+            for (const cut of item.booleanCuts || []) {
+                if (cut?.mode !== 'subtract' || !cut.geometry) continue;
+
+                const cutterGeometry = this.geometryLoader.parse(cut.geometry);
+                const position = cutterGeometry.getAttribute('position');
+                if (!position || position.count < 3) {
+                    cutterGeometry.dispose?.();
+                    continue;
+                }
+
+                const sharedMaterial = getPrimaryMaterial(currentBrush.material) || new THREE.MeshStandardMaterial({
+                    color: 0xffffff,
+                    roughness: 0.65,
+                    metalness: 0
+                });
+                const cutterBrush = new Brush(cutterGeometry, sharedMaterial);
+                const nextBrush = new Brush(new THREE.BufferGeometry(), sharedMaterial);
+                this.booleanEvaluator.evaluate(currentBrush, cutterBrush, SUBTRACTION, nextBrush);
+                if (currentBrush !== baseBrush) {
+                    currentBrush.geometry?.dispose?.();
+                }
+                cutterBrush.geometry?.dispose?.();
+                currentBrush = nextBrush;
+            }
+
+            currentBrush.name = item.name || baseObject.name || 'Sliced Object';
+            currentBrush.castShadow = true;
+            currentBrush.receiveShadow = true;
+            if (!currentBrush.geometry.getAttribute('normal') && currentBrush.geometry.getAttribute('position')) {
+                currentBrush.geometry.computeVertexNormals();
+            }
+            currentBrush.geometry.computeBoundingBox?.();
+            currentBrush.geometry.computeBoundingSphere?.();
+            currentBrush.userData.threeDOriginalMaterialTemplate = cloneMaterialSet(currentBrush.material);
+            return currentBrush;
+        } catch (error) {
+            const detail = String(error?.message || '').trim();
+            throw new Error(
+                detail
+                    ? `Could not slice "${item.name || 'item'}". Boolean cuts work best on closed watertight meshes. ${detail}`
+                    : `Could not slice "${item.name || 'item'}". Boolean cuts work best on closed watertight meshes.`
+            );
+        } finally {
+            disposeObject3D(baseObject);
+        }
+    }
+
+    async captureBooleanCutSnapshot(targetItemId, cutterItemId) {
+        if (!targetItemId || !cutterItemId || targetItemId === cutterItemId) {
+            throw new Error('Choose a different target and cutter object.');
+        }
+
+        const targetItem = this.activeDocument.scene.items.find((item) => item.id === targetItemId) || null;
+        const cutterItem = this.activeDocument.scene.items.find((item) => item.id === cutterItemId) || null;
+        if (!isBooleanCompatibleItem(targetItem) || !isBooleanCompatibleItem(cutterItem)) {
+            throw new Error('Only model and primitive objects can be used for solid slicing.');
+        }
+
+        const targetObject = this.sceneObjects.get(targetItemId);
+        const cutterObject = this.sceneObjects.get(cutterItemId);
+        if (!targetObject || !cutterObject) {
+            throw new Error('The selected cutter or target is not ready in the 3D viewport yet.');
+        }
+
+        const geometry = this.buildBooleanSnapshotGeometry(cutterObject, targetObject);
+        const position = geometry.getAttribute('position');
+        if (!position || position.count < 3) {
+            geometry.dispose?.();
+            throw new Error('The cutter did not produce any solid mesh data to slice with.');
+        }
+
+        const snapshot = {
+            mode: 'subtract',
+            sourceName: cutterItem.name || cutterObject.name || 'Cutter',
+            createdAt: Date.now(),
+            geometry: geometry.toJSON()
+        };
+        geometry.dispose?.();
+        return snapshot;
+    }
+
     buildItemSignature(item) {
         if (item.kind === 'light') {
             return JSON.stringify({
@@ -740,7 +1120,8 @@ export class ThreeDEngine {
             primitiveType: item.asset?.primitiveType || '',
             dataUrl: item.asset?.dataUrl || '',
             width: item.asset?.width || 0,
-            height: item.asset?.height || 0
+            height: item.asset?.height || 0,
+            booleanCuts: item.booleanCuts || []
         });
     }
 
@@ -766,11 +1147,7 @@ export class ThreeDEngine {
             if (existing) this.removeSceneItem(item.id);
             const created = item.kind === 'light'
                 ? this.createLightObject(item)
-                : item.kind === 'primitive'
-                    ? this.createPrimitiveObject(item)
-                : item.kind === 'image-plane'
-                    ? await this.createImagePlaneObject(item)
-                    : await this.createModelObject(item);
+                : await this.createRenderableObject(item);
             markSceneItem(created, item.id);
             this.scene.add(created);
             this.sceneObjects.set(item.id, created);
@@ -1111,12 +1488,17 @@ export class ThreeDEngine {
         } else {
             this.transformControl.detach();
         }
+        this.transformControl.enabled = !this._editLocked && !object?.userData?.locked;
     }
 
     setTransformMode(mode) {
         if (mode === 'translate' || mode === 'rotate' || mode === 'scale') {
             this.transformControl.setMode(mode);
         }
+    }
+
+    getTransformMode() {
+        return this.transformControl.getMode?.() || this.transformControl.mode || 'translate';
     }
 
     frameSelectedObject() {
@@ -1224,7 +1606,9 @@ export class ThreeDEngine {
     }
 
     async capturePreview(size = 320) {
-        if (this.renderMode === 'raster' || this.pathTracer.samples < 1) {
+        if (this.renderMode === 'mesh') {
+            this.renderMeshScene();
+        } else if (this.renderMode === 'raster' || this.pathTracer.samples < 1) {
             this.renderer.render(this.scene, this.camera);
         }
         const sourceCanvas = this.renderer.domElement;
@@ -1291,6 +1675,63 @@ export class ThreeDEngine {
         });
     }
 
+    renderMeshScene() {
+        const previousOverrideMaterial = this.scene.overrideMaterial;
+        try {
+            this.scene.overrideMaterial = this.meshViewMaterial;
+            this.withEditorObjectsHidden(() => {
+                this.renderer.render(this.scene, this.camera);
+            });
+        } finally {
+            this.scene.overrideMaterial = previousOverrideMaterial;
+        }
+    }
+
+    renderSelectionCutthrough() {
+        // The old temporary x-ray overlay has been replaced by persistent boolean cuts.
+    }
+
+    renderSelectionEditorOverlay() {
+        const selectedObject = this.transformControl.object;
+        if (!selectedObject) return;
+
+        const selectedHelper = this.itemHelpers.get(extractItemId(selectedObject)) || null;
+        if (!this.transformControl.visible && !selectedHelper?.visible) return;
+
+        const hiddenSceneObjects = [];
+        this.sceneObjects.forEach((object) => {
+            if (object?.visible) {
+                hiddenSceneObjects.push(object);
+                object.visible = false;
+            }
+        });
+
+        const hiddenEditorObjects = [];
+        this.editorObjects.forEach((object) => {
+            const keepVisible = object === this.transformControl || object === selectedHelper;
+            if (object?.visible && !keepVisible) {
+                hiddenEditorObjects.push(object);
+                object.visible = false;
+            }
+        });
+
+        const previousBackground = this.scene.background;
+        const previousAutoClear = this.renderer.autoClear;
+        this.scene.background = null;
+        this.renderer.autoClear = false;
+        this.renderer.clearDepth();
+        this.renderer.render(this.scene, this.camera);
+        this.scene.background = previousBackground;
+        this.renderer.autoClear = previousAutoClear;
+
+        hiddenEditorObjects.forEach((object) => {
+            object.visible = true;
+        });
+        hiddenSceneObjects.forEach((object) => {
+            object.visible = true;
+        });
+    }
+
     isBackgroundRenderActive() {
         return !!this._backgroundRenderJob?.active;
     }
@@ -1302,7 +1743,7 @@ export class ThreeDEngine {
             this.endFlyLook(false);
         }
         this.controls.enabled = this._cameraMode === 'orbit' && !this._editLocked && !this.transformControl.dragging;
-        this.transformControl.enabled = !this._editLocked;
+        this.transformControl.enabled = !this._editLocked && !this.transformControl.object?.userData?.locked;
     }
 
     async startBackgroundRender({
@@ -1320,9 +1761,9 @@ export class ThreeDEngine {
         const outputWidth = Math.max(16, Math.round(width));
         const outputHeight = Math.max(16, Math.round(height));
         const requestedSamples = Math.max(1, Math.round(samples));
-        const hiddenCanvas = createHiddenCanvas(outputWidth, outputHeight);
+        const renderCanvas = createRenderCanvas(outputWidth, outputHeight);
         const renderer = new THREE.WebGLRenderer({
-            canvas: hiddenCanvas,
+            canvas: renderCanvas,
             antialias: true,
             alpha: false,
             preserveDrawingBuffer: true
@@ -1337,6 +1778,8 @@ export class ThreeDEngine {
         tracer.tiles.set(2, 2);
         tracer.renderDelay = 0;
         tracer.minSamples = 0;
+        configurePathTracerQuality(tracer, normalized.render);
+        const denoisePass = createDenoisePass();
 
         const renderCamera = this.camera.clone();
         renderCamera.aspect = outputWidth / Math.max(1, outputHeight);
@@ -1352,12 +1795,19 @@ export class ThreeDEngine {
             aborted: false,
             renderer,
             tracer,
-            hiddenCanvas,
+            renderCanvas,
             fileName: String(fileName || '3d-render.png'),
             lastNotifiedAt: 0,
             lastNotifiedSamples: -1
         };
         this._backgroundRenderJob = job;
+        this.onBackgroundRenderViewport?.({
+            active: true,
+            canvas: renderCanvas,
+            outputWidth,
+            outputHeight,
+            requestedSamples
+        });
         this.setEditingLocked(true);
 
         const notifyUpdate = (payload, force = false) => {
@@ -1428,7 +1878,14 @@ export class ThreeDEngine {
                 currentSamples: Math.floor(tracer.samples),
                 message: 'Encoding PNG...'
             }, true);
-            const blob = await new Promise((resolve) => hiddenCanvas.toBlob(resolve, 'image/png'));
+            if (normalized.render.denoiseEnabled && tracer.samples > 0) {
+                notifyUpdate({
+                    currentSamples: Math.floor(tracer.samples),
+                    message: 'Denoising final image...'
+                }, true);
+                renderDenoisedTexture(renderer, denoisePass, tracer.target.texture, normalized.render);
+            }
+            const blob = await new Promise((resolve) => renderCanvas.toBlob(resolve, 'image/png'));
             if (!blob) {
                 throw new Error('The render finished, but the browser could not encode the PNG.');
             }
@@ -1449,9 +1906,17 @@ export class ThreeDEngine {
                 blob
             };
         } finally {
+            this.onBackgroundRenderViewport?.({
+                active: false,
+                canvas: renderCanvas,
+                outputWidth,
+                outputHeight,
+                requestedSamples
+            });
+            disposeDenoisePass(denoisePass);
             disposePathTracerSafely(tracer);
             renderer.dispose();
-            hiddenCanvas.remove();
+            renderCanvas.remove();
             this._backgroundRenderJob = null;
             this.setEditingLocked(false);
         }
@@ -1466,6 +1931,12 @@ export class ThreeDEngine {
     animate() {
         if (this.destroyed) return;
         requestAnimationFrame(this.animate);
+
+        if (this.isBackgroundRenderActive()) {
+            this.onSamplesUpdated?.(0);
+            return;
+        }
+
         const deltaTime = this.clock.getDelta();
         if (this._cameraMode === 'orbit') {
             this.controls.update();
@@ -1493,13 +1964,22 @@ export class ThreeDEngine {
             if (this.pathTracer.samples > 0) {
                 this.emitPathTraceLoading(false);
             }
+            if (this.activeDocument.render.denoiseEnabled && this.pathTracer.samples > 0) {
+                renderDenoisedTexture(this.renderer, this.viewportDenoisePass, this.pathTracer.target.texture, this.activeDocument.render);
+            }
             this.renderEditorOverlay();
             this.onSamplesUpdated?.(Math.round(this.pathTracer.samples));
         } else {
             if (this._pathTraceLoadingActive) {
                 this.emitPathTraceLoading(false);
             }
-            this.renderer.render(this.scene, this.camera);
+            if (this.renderMode === 'mesh') {
+                this.renderMeshScene();
+                this.renderEditorOverlay();
+            } else {
+                this.renderer.render(this.scene, this.camera);
+                this.renderSelectionEditorOverlay();
+            }
             this.onSamplesUpdated?.(0);
         }
     }
@@ -1517,7 +1997,9 @@ export class ThreeDEngine {
         this.transformControl.dispose();
         this.controls.dispose();
         this.resizeObserver.disconnect();
+        disposeDenoisePass(this.viewportDenoisePass);
         disposePathTracerSafely(this.pathTracer);
+        this.meshViewMaterial.dispose();
         this.sceneObjects.forEach((_object, itemId) => this.removeSceneItem(itemId));
         this.container.removeChild(this.renderer.domElement);
         this.renderer.dispose();

@@ -279,15 +279,49 @@ function createUniqueThreeDItemName(baseName, items = []) {
     return `${desired} ${suffix}`;
 }
 
-function createDuplicateThreeDItemName(baseName, items = []) {
-    const desired = `${String(baseName || 'Item').trim() || 'Item'} Copy`;
-    const existingNames = new Set((items || []).map((item) => String(item?.name || '').trim().toLowerCase()).filter(Boolean));
-    if (!existingNames.has(desired.toLowerCase())) return desired;
-    let suffix = 2;
-    while (existingNames.has(`${desired} ${suffix}`.toLowerCase())) {
-        suffix += 1;
+function escapeRegExp(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripThreeDDuplicateSuffix(name) {
+    const trimmed = String(name || 'Item').trim() || 'Item';
+    return trimmed
+        .replace(/\s+copy(?:\s+\d+)?$/i, '')
+        .replace(/\s*\(\d+\)\s*$/i, '')
+        .trim() || 'Item';
+}
+
+function getThreeDDuplicateFamilyIndex(name, stem) {
+    const trimmed = String(name || '').trim();
+    const normalizedStem = String(stem || '').trim();
+    if (!trimmed || !normalizedStem) return null;
+    if (trimmed.toLowerCase() === normalizedStem.toLowerCase()) return 1;
+
+    const escapedStem = escapeRegExp(normalizedStem);
+    const numberedMatch = trimmed.match(new RegExp(`^${escapedStem}\\s*\\((\\d+)\\)$`, 'i'));
+    if (numberedMatch) {
+        return Math.max(1, Number(numberedMatch[1]) || 1);
     }
-    return `${desired} ${suffix}`;
+
+    const legacyCopyMatch = trimmed.match(new RegExp(`^${escapedStem}\\s+copy(?:\\s+(\\d+))?$`, 'i'));
+    if (legacyCopyMatch) {
+        return legacyCopyMatch[1]
+            ? Math.max(2, (Number(legacyCopyMatch[1]) || 1) + 1)
+            : 2;
+    }
+
+    return null;
+}
+
+function createDuplicateThreeDItemName(baseName, items = []) {
+    const stem = stripThreeDDuplicateSuffix(baseName);
+    const familyIndices = (items || [])
+        .map((item) => getThreeDDuplicateFamilyIndex(item?.name, stem))
+        .filter((value) => Number.isFinite(value));
+    const nextIndex = familyIndices.length
+        ? Math.max(...familyIndices) + 1
+        : 2;
+    return `${stem} (${nextIndex})`;
 }
 
 function createThreeDPrimitiveItem(primitiveType = 'cube') {
@@ -311,6 +345,10 @@ function createThreeDPrimitiveItem(primitiveType = 'cube') {
         },
         material: createDefaultThreeDMaterial()
     };
+}
+
+function isThreeDBooleanCompatibleItem(item) {
+    return item?.kind === 'model' || item?.kind === 'primitive';
 }
 
 function buildLibraryPayload(documentState) {
@@ -975,22 +1013,36 @@ window.addEventListener('DOMContentLoaded', async () => {
         return inferProjectTypeFromPayload(entry.payload, entry.projectType || null);
     }
 
+    function isLikelyImageFile(file) {
+        const mimeType = String(file?.type || '').toLowerCase();
+        if (mimeType.startsWith('image/')) return true;
+        return /\.(png|apng|jpe?g|webp|gif|bmp|tiff?|avif|ico|svg)$/i.test(String(file?.name || ''));
+    }
+
     async function createStitchInputsFromFiles(files) {
         const inputs = [];
+        const failures = [];
         for (const file of files || []) {
-            if (!file?.type?.startsWith('image/')) continue;
-            const imageData = await fileToDataUrl(file);
-            const image = await loadImageFromDataUrl(imageData);
-            inputs.push({
-                id: createStitchInputId(),
-                name: file.name,
-                type: file.type,
-                imageData,
-                width: image.naturalWidth || image.width || 1,
-                height: image.naturalHeight || image.height || 1
-            });
+            if (!isLikelyImageFile(file)) continue;
+            try {
+                const imageData = await fileToDataUrl(file);
+                const image = await loadImageFromDataUrl(imageData);
+                inputs.push({
+                    id: createStitchInputId(),
+                    name: file.name,
+                    type: file.type,
+                    imageData,
+                    width: image.naturalWidth || image.width || 1,
+                    height: image.naturalHeight || image.height || 1
+                });
+            } catch (error) {
+                failures.push({
+                    name: String(file?.name || 'Unnamed image'),
+                    reason: error?.message || 'Could not read this image.'
+                });
+            }
         }
-        return inputs;
+        return { inputs, failures };
     }
 
     async function buildStitchPreviewMap(documentState) {
@@ -1474,15 +1526,29 @@ window.addEventListener('DOMContentLoaded', async () => {
             view?.openStitchPicker?.();
         },
         async openStitchImages(files) {
-            const nextInputs = await createStitchInputsFromFiles(files);
+            const { inputs: nextInputs, failures } = await createStitchInputsFromFiles(files);
             if (!nextInputs.length) {
-                setNotice('Choose one or more images to add to the Stitch workspace.', 'warning');
+                if (failures.length) {
+                    setNotice(
+                        `None of the selected files could be added to Stitch. ${failures.length} image${failures.length === 1 ? '' : 's'} failed to load.`,
+                        'error',
+                        7000
+                    );
+                } else {
+                    setNotice('Choose one or more images to add to the Stitch workspace.', 'warning');
+                }
                 return;
             }
             stitchAnalysisToken += 1;
             updateStitchDocument((document) => appendStitchInputs(document, nextInputs), { renderStitch: true });
             commitActiveSection('stitch');
-            setNotice(`Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch.`, 'success');
+            setNotice(
+                failures.length
+                    ? `Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch. Skipped ${failures.length} file${failures.length === 1 ? '' : 's'} that could not be read.`
+                    : `Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch.`,
+                failures.length ? 'warning' : 'success',
+                failures.length ? 7000 : 4200
+            );
         },
         async runStitchAnalysis() {
             const snapshot = normalizeStitchDocument(store.getState().stitchDocument);
@@ -1636,6 +1702,17 @@ window.addEventListener('DOMContentLoaded', async () => {
                     alternativesOpen: !!open
                 }
             }), { renderStitch: true });
+        },
+        setStitchSidebarView(sidebarView) {
+            const nextView = String(sidebarView || '').toLowerCase();
+            if (!nextView) return;
+            updateStitchDocument((document) => ({
+                ...document,
+                workspace: {
+                    ...document.workspace,
+                    sidebarView: nextView
+                }
+            }), { renderStitch: false, skipViewRender: true });
         },
         chooseStitchCandidate(candidateId) {
             if (!candidateId) return;
@@ -2552,6 +2629,71 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
             }));
         },
+        toggleThreeDItemVisibility(itemId) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('changing 3D item visibility')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: document.scene.items.map((item) => item.id === itemId
+                        ? {
+                            ...item,
+                            visible: item.visible === false
+                        }
+                        : item)
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+        },
+        toggleThreeDItemLock(itemId) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('changing 3D item locks')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: document.scene.items.map((item) => item.id === itemId
+                        ? {
+                            ...item,
+                            locked: !item.locked
+                        }
+                        : item)
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+        },
+        updateThreeDWorkspace(patch = {}) {
+            updateThreeDDocument((document) => ({
+                ...document,
+                workspace: {
+                    ...document.workspace,
+                    ...(patch.taskView ? { taskView: patch.taskView } : {}),
+                    ...(patch.panelTab ? { panelTab: patch.panelTab } : {}),
+                    taskTabs: {
+                        ...document.workspace?.taskTabs,
+                        layout: {
+                            ...document.workspace?.taskTabs?.layout,
+                            ...(patch.taskTabs?.layout || {})
+                        },
+                        model: {
+                            ...document.workspace?.taskTabs?.model,
+                            ...(patch.taskTabs?.model || {})
+                        },
+                        render: {
+                            ...document.workspace?.taskTabs?.render,
+                            ...(patch.taskTabs?.render || {})
+                        }
+                    }
+                }
+            }), { render: false });
+        },
         updateThreeDSceneSettings(patch = {}) {
             if (!ensureThreeDSceneUnlocked('changing 3D scene settings')) return;
             updateThreeDDocument((document) => ({
@@ -2755,6 +2897,64 @@ window.addEventListener('DOMContentLoaded', async () => {
                 position: [0, 0, 0],
                 rotation: [0, 0, 0],
                 scale: [1, 1, 1]
+            });
+        },
+        applyThreeDBooleanSlice(itemId, cutSnapshot = null) {
+            if (!itemId || !cutSnapshot?.geometry) return;
+            if (!ensureThreeDSceneUnlocked('applying a boolean slice')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const target = normalized.scene.items.find((item) => item.id === itemId);
+                if (!isThreeDBooleanCompatibleItem(target)) return normalized;
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: normalized.scene.items.map((item) => item.id === itemId
+                            ? {
+                                ...item,
+                                booleanCuts: [
+                                    ...(Array.isArray(item.booleanCuts) ? item.booleanCuts : []),
+                                    {
+                                        ...cutSnapshot,
+                                        mode: 'subtract'
+                                    }
+                                ]
+                            }
+                            : item)
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+        },
+        resetThreeDItemBooleanSlices(itemId) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('resetting boolean slices')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const target = normalized.scene.items.find((item) => item.id === itemId);
+                if (!isThreeDBooleanCompatibleItem(target) || !(target.booleanCuts || []).length) {
+                    return normalized;
+                }
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: normalized.scene.items.map((item) => item.id === itemId
+                            ? {
+                                ...item,
+                                booleanCuts: []
+                            }
+                            : item)
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
             });
         },
         duplicateThreeDItem(itemId) {

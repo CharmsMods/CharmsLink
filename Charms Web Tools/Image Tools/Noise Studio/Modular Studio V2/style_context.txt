@@ -1,0 +1,535 @@
+# Modular Studio V2 - Current UI Style Handoff Guide
+
+This document describes the current workstation-style UI direction used in the newer parts of the app.
+
+It is meant to be handed to a future designer, developer, or AI together with the codebase so they do not need the style direction re-explained from scratch.
+
+
+
+## 1. Scope
+
+This style guide currently applies most strongly to:
+
+- `3D`
+- `Stitch`
+
+These two workspaces are the clearest examples of the current direction.
+
+The `Editor` and `Library` sections may still contain older UI patterns in some places. When refactoring them, the target is to move them toward this newer style language unless there is a tool-specific reason not to.
+
+## 2. Core Style Summary
+
+The current style direction is:
+
+- viewport-first
+- dense
+- black-and-white
+- minimal
+- professional
+- task-focused instead of feature-dumped
+
+The most important principle is:
+
+- do not show everything all the time
+
+The UI should prioritize the active canvas or viewport first, and everything else should support that main visual workspace.
+
+In practical terms, that means:
+
+- one main viewport or stage should dominate the layout
+- tools and settings should usually live in a single scrollable dock
+- advanced settings should be hidden behind tabs, foldouts, or overlays
+- tiny HUD chips should float over the viewport instead of consuming dedicated layout rows
+- export and secondary workflows should open as overlays instead of permanently taking stage space
+
+## 3. Visual Personality
+
+The intended feeling is:
+
+- not playful
+- not glossy
+- not skeuomorphic
+- not soft consumer-app UI
+- more like a compact creative workstation
+
+It should feel closer to:
+
+- a stripped-down DCC or editor tool
+- a focused workstation
+- a technical art tool
+
+It should not feel like:
+
+- a marketing website
+- a card-heavy dashboard
+- a colorful SaaS settings page
+- a glassmorphism interface
+
+## 4. Color System
+
+The palette is intentionally narrow.
+
+Primary colors:
+
+- pure black: `#000000`
+- pure white: `#ffffff`
+- warm grey accent: `#b8b2a3`
+- near-black panel alt: `#050505`
+
+Common transparency values:
+
+- soft border: `rgba(184,178,163,0.28)`
+- active fill: `rgba(184,178,163,0.14)`
+- subtle chip or note fill: `rgba(184,178,163,0.08)`
+- stronger warning/error border in this monochrome system: `rgba(184,178,163,0.72)`
+
+How these colors should be used:
+
+- `#000000` for main surfaces, stage backgrounds, dialog bodies, buttons, and inputs
+- `#050505` for slightly separated panels like dock tab bars, foldout surfaces, and secondary panel backgrounds
+- `#ffffff` for primary text
+- `#b8b2a3` for muted text, outlines, labels, badges, and restrained emphasis
+
+Important rule:
+
+- the warm grey should only have a very slight touch of gold
+
+It is not meant to read as bronze, beige, orange, or luxury gold. It should just soften the UI very slightly so the whole interface is not harsh blue-grey.
+
+Do not introduce:
+
+- bright blues
+- purples
+- saturated greens
+- colorful semantic UI unless there is a very strong functional reason
+
+If something needs emphasis, prefer:
+
+- border strength
+- brightness contrast
+- muted warm-grey fills
+
+instead of introducing a new color.
+
+## 5. Typography
+
+Typography is intentionally small.
+
+Base sizes:
+
+- main UI text: `11px`
+- panel subtitle / muted secondary text: `10px`
+- compact headers: `12px`
+- tiny badges / micro labels: `9px`
+
+Typography rules:
+
+- small text is good here
+- keep labels short and direct
+- do not use oversized headings inside tools
+- most UI should read like compact control software, not editorial content
+
+Good:
+
+- `Inputs`
+- `Analysis`
+- `Selection`
+- `Results`
+- `Render PNG`
+- `Bounces`
+- `Reset`
+
+Bad:
+
+- long marketing-style labels
+- oversized section titles
+- verbose helper copy visible all the time
+
+Helper text should exist, but it should be:
+
+- short
+- contextual
+- collapsible when possible
+
+## 6. Density and Spacing
+
+The UI should be compact.
+
+Current spacing rhythm:
+
+- micro gap: `4px`
+- small gap: `6px`
+- standard gap: `8px`
+
+Typical sizing:
+
+- control height: `20px` to `22px`
+- dock padding: `8px`
+- topbar padding: `6px 8px`
+- dock tab padding: `0 7px`
+- chip padding: `0 6px`
+
+Border treatment:
+
+- usually `1px`
+- restrained
+- square-to-slightly-rounded
+
+Corner radii:
+
+- most controls: `3px` to `4px`
+- avoid large rounded pill-heavy styling unless the element is a tiny HUD chip
+
+Do not spend space on:
+
+- oversized margins
+- decorative empty gutters
+- large framed cards when a thin bordered section is enough
+
+## 7. Layout Pattern
+
+The preferred advanced-workspace layout is:
+
+1. one left dock
+2. one large center viewport or stage
+3. optional overlay dialog for secondary workflows
+
+This is the current preferred shell:
+
+- left side: scrollable dock with tabs
+- center: viewport/stage with a thin top bar
+- corners of viewport: tiny chips for status and metrics
+
+Not preferred anymore:
+
+- permanent left and right sidebars at once
+- giant settings bars above the viewport
+- long static pages of controls above the canvas
+
+Why:
+
+- they reduce usable viewport space
+- they make settings feel overwhelming
+- they expose too many controls at once
+
+## 8. Dock Pattern
+
+The dock should be:
+
+- on the left
+- scrollable
+- tabbed
+- the main place for settings and lists
+
+Tabs should switch the dock body content instead of opening multiple full side panels simultaneously.
+
+Current good examples:
+
+- `3D`: one dock with `Outliner`, `Add`, `Object`, `Material`, `Scene`, `Render`, `Views`
+- `Stitch`: one dock with `Inputs`, `Analysis`, `Selection`, `Results`
+
+Dock design rules:
+
+- tabs live at the top
+- the active panel body scrolls
+- only one panel body is visible at a time
+- header inside each panel should be compact
+- secondary descriptions are allowed, but small and muted
+
+## 9. Viewport and Stage Rules
+
+The viewport or stage is the most important element.
+
+Rules:
+
+- it should get most of the screen
+- it should not be pushed down by export forms or large setting stacks
+- it should remain visible while editing
+- transient status should float over it, not below it
+
+The stage top bar should be thin and minimal.
+
+It may contain:
+
+- a small workspace title
+- a few primary actions
+- framing or export shortcuts
+
+It should not contain:
+
+- every setting in the tool
+- long forms
+- large notices
+
+## 10. HUD and Status Chips
+
+Information overlays should be very small.
+
+They are meant for:
+
+- sample count
+- render mode
+- source count
+- confidence
+- current active panel label
+- small workflow state hints
+
+They should sit:
+
+- in the corners of the viewport
+
+They should not:
+
+- become a second full toolbar
+- take over vertical space
+- use large fonts
+
+The status chip can be slightly stronger than the metric chips, but it should still stay compact.
+
+## 11. Settings Visibility Rules
+
+This is one of the most important behavioral rules:
+
+- if the user is not using something, it does not need to be displayed
+
+That means:
+
+- primary actions may stay visible
+- secondary tools should live behind tabs
+- advanced settings should live inside foldouts
+- galleries and export flows should open as overlays
+
+The UI should reveal detail progressively instead of showing the whole product surface area at once.
+
+Examples:
+
+- path tracing settings under a `Path Trace Quality` foldout
+- candidate gallery as a modal overlay
+- selection-specific controls only when something is selected
+- export settings in a dialog instead of a permanent top panel
+
+## 12. Modal and Overlay Rules
+
+Overlays are preferred for heavy secondary tasks.
+
+Use overlays for:
+
+- export dialogs
+- galleries
+- candidate pickers
+- workflows that should temporarily take focus
+
+Overlay design:
+
+- near-black background
+- thin border
+- compact internal spacing
+- no giant card corners
+- no strong blur-heavy glass effect as the defining style
+
+Overlays should feel like temporary workstation panels, not pop-marketing cards.
+
+## 13. Foldout Rules
+
+Foldouts are the main tool for keeping advanced settings out of the way.
+
+Foldouts should:
+
+- default open only when the group is commonly needed
+- default closed for advanced or infrequently-used settings
+- have concise labels
+- avoid nested accordion complexity unless necessary
+
+Good foldout labels:
+
+- `Camera`
+- `Navigation`
+- `Path Trace Quality`
+- `Tone & Exposure`
+- `Advanced`
+
+## 14. List and Item Card Rules
+
+Lists such as:
+
+- object lists
+- image input lists
+- candidate lists
+- outliner entries
+
+should use compact bordered rows/cards.
+
+They should:
+
+- be thinly outlined
+- use small internal padding
+- support tiny badges
+- highlight selection with the warm-grey active fill
+
+They should not:
+
+- look like oversized cards
+- waste space with large thumbnails unless the list truly needs them
+
+## 15. Interaction Style
+
+The interaction style should be:
+
+- direct
+- tool-like
+- calm
+
+Visual state changes should be subtle.
+
+Use:
+
+- border change
+- light fill change
+- text color change
+
+Avoid:
+
+- dramatic animations
+- bouncy motion
+- large transitions
+- flashy hover behavior
+
+## 16. Responsive Behavior
+
+When space gets tighter:
+
+- keep the viewport readable first
+- allow the dock to shrink
+- keep the dock scrollable
+- stack viewport and dock only when necessary
+
+The compact workstation layout should still feel intentional on smaller screens.
+
+Preferred small-screen fallback:
+
+- stage first
+- dock second
+- overlays still work full-screen if needed
+
+## 17. Anti-Patterns
+
+Do not do these:
+
+- giant settings sections above the viewport
+- showing all advanced settings by default
+- using both left and right permanent sidebars unless there is a very strong reason
+- card-heavy colorful layouts
+- soft glassmorphism as a default style
+- oversized typography
+- oversized buttons
+- huge rounded boxes that waste usable space
+- status bars that consume a full row when a chip would work
+- letting nonessential controls push important tools below the fold
+
+## 18. Current Code Examples
+
+Current implementations that best represent this style:
+
+- `src/3d/ui.js`
+- `src/stitch/ui.js`
+
+### Example A: Color Variables
+
+```css
+--workspace-bg: #000000;
+--workspace-panel: #000000;
+--workspace-panel-alt: #050505;
+--workspace-border: #b8b2a3;
+--workspace-border-soft: rgba(184,178,163,0.28);
+--workspace-accent: rgba(184,178,163,0.14);
+--workspace-text: #ffffff;
+--workspace-muted: #b8b2a3;
+```
+
+### Example B: Preferred Shell Structure
+
+```html
+<div class="workspace-shell">
+  <aside class="workspace-dock">
+    <div class="workspace-dock-tabs">...</div>
+    <div class="workspace-dock-panels">
+      <section class="workspace-dock-panel is-active">...</section>
+    </div>
+  </aside>
+
+  <section class="workspace-stage-card">
+    <div class="workspace-stage-topbar">...</div>
+    <div class="workspace-stage-wrap">
+      <canvas class="workspace-canvas"></canvas>
+      <div class="workspace-overlay-top-right">...</div>
+      <div class="workspace-overlay-bottom-left">...</div>
+    </div>
+  </section>
+</div>
+```
+
+### Example C: Preferred Compact Control Styling
+
+```css
+.workspace-button,
+.workspace-input,
+.workspace-select {
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--workspace-border);
+  border-radius: 4px;
+  background: #000000;
+  color: #ffffff;
+  font-size: 11px;
+}
+```
+
+### Example D: Tiny HUD Chip
+
+```css
+.workspace-overlay-chip {
+  min-height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--workspace-border-soft);
+  background: rgba(0,0,0,0.92);
+  color: #ffffff;
+  font-size: 10px;
+}
+```
+
+## 19. How To Apply This Style To A New Tool
+
+When adapting another workspace to this style:
+
+1. identify the single most important canvas, preview, or viewport
+2. move most controls into one left dock
+3. decide the dock tabs based on the real task groupings
+4. keep only a few essential actions in the stage top bar
+5. move metrics to tiny viewport chips
+6. move advanced settings into foldouts
+7. move export or gallery flows into overlays
+8. reduce text and control sizes before adding more layout complexity
+
+Important:
+
+- do not copy the exact labels from 3D or Stitch unless they fit the tool
+- do copy the layout philosophy, density, palette, and progressive disclosure behavior
+
+## 20. Quick Checklist
+
+Before calling a new UI change done, confirm:
+
+- the viewport/stage clearly dominates the layout
+- only one dock panel is visible at a time
+- the dock body scrolls
+- advanced settings are not always open
+- text is small enough
+- controls are compact enough
+- the palette stays black, white, and warm grey
+- informational chips are tiny and over the viewport
+- export settings do not permanently reduce viewport space
+- the result feels like a tool, not a dashboard
+
+## 21. One-Sentence Handoff Summary
+
+The current Modular Studio workstation style is a dense black-and-white viewport-first UI with one scrollable left dock, tiny viewport HUD chips, restrained warm-grey accents, compact controls, and aggressive progressive disclosure through tabs, foldouts, and overlays.

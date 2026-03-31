@@ -17,6 +17,7 @@ const BLEND_MODES = ['auto', 'alpha', 'feather', 'seam'];
 const FEATURE_DETECTORS = ['auto', 'orb', 'akaze', 'sift'];
 const PHOTO_BACKENDS = ['opencv-wasm'];
 const ANALYSIS_BACKENDS = ['screenshot-js', 'opencv-wasm'];
+const STITCH_SIDEBAR_VIEWS = new Set(['inputs', 'analysis', 'selection', 'candidates']);
 const LEGACY_DEFAULTS = Object.freeze({
     analysisMaxDimension: 320,
     maxFeatures: 120,
@@ -229,7 +230,10 @@ export function normalizeStitchDocument(document = {}) {
         mode: 'stitch',
         workspace: {
             ...fallback.workspace,
-            ...(document.workspace || {})
+            ...(document.workspace || {}),
+            sidebarView: STITCH_SIDEBAR_VIEWS.has(String(document.workspace?.sidebarView || '').toLowerCase())
+                ? String(document.workspace.sidebarView).toLowerCase()
+                : fallback.workspace.sidebarView
         },
         inputs,
         settings: normalizeSettings(document.settings),

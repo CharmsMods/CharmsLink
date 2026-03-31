@@ -3,8 +3,14 @@ const ITEM_KINDS = new Set(['model', 'image-plane', 'light', 'primitive']);
 const LIGHT_TYPES = new Set(['directional', 'point', 'spot']);
 const PRIMITIVE_TYPES = new Set(['cube', 'sphere', 'cone', 'cylinder']);
 const TONE_MAPPINGS = new Set(['aces', 'neutral', 'none']);
+const RENDER_MODES = new Set(['raster', 'pathtrace', 'mesh']);
 const MATERIAL_PRESETS = new Set(['original', 'matte', 'metal', 'glass', 'emissive']);
+const BOOLEAN_CUT_MODES = new Set(['subtract']);
 const RENDER_JOB_STATUSES = new Set(['idle', 'running', 'complete', 'aborted', 'error']);
+const WORKSPACE_TASK_VIEWS = new Set(['layout', 'model', 'render']);
+const WORKSPACE_LEFT_TABS = new Set(['outliner', 'add', 'views']);
+const WORKSPACE_RIGHT_TABS = new Set(['object', 'material', 'scene', 'render']);
+const WORKSPACE_PANEL_TABS = new Set(['outliner', 'add', 'object', 'material', 'scene', 'render', 'views']);
 
 function clampNumber(value, fallback = 0, min = -Infinity, max = Infinity) {
     const numeric = Number(value);
@@ -104,6 +110,38 @@ function normalizeTextureAsset(texture = {}) {
     };
 }
 
+function cloneJsonValue(value, fallback = null) {
+    if (value == null) return fallback;
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return fallback;
+    }
+}
+
+function isBooleanCutGeometry(value) {
+    return !!value
+        && typeof value === 'object'
+        && typeof value.data === 'object'
+        && typeof value.data?.attributes === 'object'
+        && typeof value.data?.attributes?.position === 'object';
+}
+
+function normalizeBooleanCut(cut = {}, index = 0) {
+    if (!cut || typeof cut !== 'object' || !isBooleanCutGeometry(cut.geometry)) return null;
+    const geometry = cloneJsonValue(cut.geometry, null);
+    if (!geometry) return null;
+    return {
+        id: String(cut.id || createId('cut')),
+        mode: BOOLEAN_CUT_MODES.has(String(cut.mode || '').toLowerCase())
+            ? String(cut.mode).toLowerCase()
+            : 'subtract',
+        sourceName: String(cut.sourceName || `Cut ${index + 1}`),
+        createdAt: Math.round(clampNumber(cut.createdAt, 0, 0)),
+        geometry
+    };
+}
+
 function createDefaultMaterial(kind = 'model') {
     return {
         preset: kind === 'model' ? 'original' : 'matte',
@@ -195,6 +233,13 @@ function normalizeSceneItem(item, index = 0) {
         : kind === 'primitive'
             ? normalizePrimitiveAsset(item?.asset, normalized.name)
             : normalizeModelAsset(item?.asset, normalized.name);
+    normalized.booleanCuts = kind === 'model' || kind === 'primitive'
+        ? (Array.isArray(item?.booleanCuts)
+            ? item.booleanCuts
+                .map((cut, cutIndex) => normalizeBooleanCut(cut, cutIndex))
+                .filter(Boolean)
+            : [])
+        : [];
     return normalized;
 }
 
@@ -243,6 +288,52 @@ function normalizeRenderJob(job = {}) {
     };
 }
 
+function createDefaultThreeDWorkspace() {
+    return {
+        taskView: 'layout',
+        panelTab: 'outliner',
+        taskTabs: {
+            layout: { leftTab: 'outliner', rightTab: 'scene' },
+            model: { leftTab: 'add', rightTab: 'object' },
+            render: { leftTab: 'views', rightTab: 'render' }
+        }
+    };
+}
+
+function normalizeWorkspaceTabPair(source = {}, fallback = {}) {
+    return {
+        leftTab: WORKSPACE_LEFT_TABS.has(String(source?.leftTab || '').toLowerCase())
+            ? String(source.leftTab).toLowerCase()
+            : fallback.leftTab,
+        rightTab: WORKSPACE_RIGHT_TABS.has(String(source?.rightTab || '').toLowerCase())
+            ? String(source.rightTab).toLowerCase()
+            : fallback.rightTab
+    };
+}
+
+function normalizeThreeDWorkspace(workspace = {}) {
+    const defaults = createDefaultThreeDWorkspace();
+    const taskView = WORKSPACE_TASK_VIEWS.has(String(workspace?.taskView || '').toLowerCase())
+        ? String(workspace.taskView).toLowerCase()
+        : defaults.taskView;
+    const fallbackPanelTab = taskView === 'model'
+        ? 'object'
+        : taskView === 'render'
+            ? 'render'
+            : 'outliner';
+    return {
+        taskView,
+        panelTab: WORKSPACE_PANEL_TABS.has(String(workspace?.panelTab || '').toLowerCase())
+            ? String(workspace.panelTab).toLowerCase()
+            : fallbackPanelTab,
+        taskTabs: {
+            layout: normalizeWorkspaceTabPair(workspace?.taskTabs?.layout, defaults.taskTabs.layout),
+            model: normalizeWorkspaceTabPair(workspace?.taskTabs?.model, defaults.taskTabs.model),
+            render: normalizeWorkspaceTabPair(workspace?.taskTabs?.render, defaults.taskTabs.render)
+        }
+    };
+}
+
 export function isThreeDDocumentPayload(payload) {
     return !!payload && (
         payload.kind === '3d-document'
@@ -264,6 +355,7 @@ export function createEmptyThreeDDocument() {
         version: 'mns/v2',
         kind: '3d-document',
         mode: '3d',
+        workspace: createDefaultThreeDWorkspace(),
         scene: {
             items: [],
             backgroundColor: '#202020',
@@ -293,7 +385,14 @@ export function createEmptyThreeDDocument() {
             toneMapping: 'aces',
             outputWidth: 1920,
             outputHeight: 1080,
-            lastJobSamples: 256
+            lastJobSamples: 256,
+            bounces: 10,
+            transmissiveBounces: 10,
+            filterGlossyFactor: 0,
+            denoiseEnabled: false,
+            denoiseSigma: 5,
+            denoiseThreshold: 0.03,
+            denoiseKSigma: 1
         },
         renderJob: createDefaultRenderJob(),
         preview: {
@@ -336,6 +435,7 @@ export function normalizeThreeDDocument(document) {
         version: 'mns/v2',
         kind: '3d-document',
         mode: '3d',
+        workspace: normalizeThreeDWorkspace(source?.workspace),
         scene: {
             items,
             backgroundColor: normalizeHexColor(source?.scene?.backgroundColor, base.scene.backgroundColor),
@@ -352,14 +452,23 @@ export function normalizeThreeDDocument(document) {
                 : []
         },
         render: {
-            mode: source?.render?.mode === 'pathtrace' ? 'pathtrace' : 'raster',
+            mode: RENDER_MODES.has(String(source?.render?.mode || '').toLowerCase())
+                ? String(source.render.mode).toLowerCase()
+                : 'raster',
             samplesTarget: Math.round(clampNumber(source?.render?.samplesTarget, base.render.samplesTarget, 1, 4096)),
             currentSamples: Math.round(clampNumber(source?.render?.currentSamples, 0, 0, 1000000)),
             exposure: clampNumber(source?.render?.exposure, base.render.exposure, 0.05, 10),
             toneMapping,
             outputWidth: Math.round(clampNumber(source?.render?.outputWidth, base.render.outputWidth, 16, 32768)),
             outputHeight: Math.round(clampNumber(source?.render?.outputHeight, base.render.outputHeight, 16, 32768)),
-            lastJobSamples: Math.round(clampNumber(source?.render?.lastJobSamples, base.render.lastJobSamples, 1, 1000000))
+            lastJobSamples: Math.round(clampNumber(source?.render?.lastJobSamples, base.render.lastJobSamples, 1, 1000000)),
+            bounces: Math.round(clampNumber(source?.render?.bounces, base.render.bounces, 1, 64)),
+            transmissiveBounces: Math.round(clampNumber(source?.render?.transmissiveBounces, base.render.transmissiveBounces, 0, 64)),
+            filterGlossyFactor: clampNumber(source?.render?.filterGlossyFactor, base.render.filterGlossyFactor, 0, 2),
+            denoiseEnabled: !!source?.render?.denoiseEnabled,
+            denoiseSigma: clampNumber(source?.render?.denoiseSigma, base.render.denoiseSigma, 0.1, 20),
+            denoiseThreshold: clampNumber(source?.render?.denoiseThreshold, base.render.denoiseThreshold, 0.0001, 1),
+            denoiseKSigma: clampNumber(source?.render?.denoiseKSigma, base.render.denoiseKSigma, 0.1, 5)
         },
         renderJob: normalizeRenderJob(source?.renderJob),
         preview: {
@@ -377,6 +486,15 @@ export function serializeThreeDDocument(document) {
         version: normalized.version,
         kind: normalized.kind,
         mode: normalized.mode,
+        workspace: {
+            taskView: normalized.workspace.taskView,
+            panelTab: normalized.workspace.panelTab,
+            taskTabs: {
+                layout: { ...normalized.workspace.taskTabs.layout },
+                model: { ...normalized.workspace.taskTabs.model },
+                render: { ...normalized.workspace.taskTabs.render }
+            }
+        },
         scene: {
             ...normalized.scene,
             items: normalized.scene.items.map((item) => ({
@@ -392,6 +510,13 @@ export function serializeThreeDDocument(document) {
                     ? { light: { ...item.light } }
                     : {
                         asset: { ...item.asset },
+                        booleanCuts: (item.booleanCuts || []).map((cut) => ({
+                            id: cut.id,
+                            mode: cut.mode,
+                            sourceName: cut.sourceName,
+                            createdAt: cut.createdAt,
+                            geometry: cloneJsonValue(cut.geometry, null)
+                        })),
                         material: {
                             ...item.material,
                             texture: item.material?.texture
@@ -432,7 +557,14 @@ export function serializeThreeDDocument(document) {
             toneMapping: normalized.render.toneMapping,
             outputWidth: normalized.render.outputWidth,
             outputHeight: normalized.render.outputHeight,
-            lastJobSamples: normalized.render.lastJobSamples
+            lastJobSamples: normalized.render.lastJobSamples,
+            bounces: normalized.render.bounces,
+            transmissiveBounces: normalized.render.transmissiveBounces,
+            filterGlossyFactor: normalized.render.filterGlossyFactor,
+            denoiseEnabled: normalized.render.denoiseEnabled,
+            denoiseSigma: normalized.render.denoiseSigma,
+            denoiseThreshold: normalized.render.denoiseThreshold,
+            denoiseKSigma: normalized.render.denoiseKSigma
         },
         preview: { ...normalized.preview }
     };

@@ -959,6 +959,14 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                             <span class="library-param-val">${escapeHtml(formatParamValue(renderSettings.exposure || 1))}</span>
                         </div>
                         <div class="library-param-row">
+                            <span class="library-param-key">Path Bounces</span>
+                            <span class="library-param-val">${escapeHtml(formatParamValue(`${renderSettings.bounces || 10} / ${renderSettings.transmissiveBounces || 0} trans`))}</span>
+                        </div>
+                        <div class="library-param-row">
+                            <span class="library-param-key">Denoise</span>
+                            <span class="library-param-val">${escapeHtml(formatParamValue(renderSettings.denoiseEnabled ? 'enabled' : 'off'))}</span>
+                        </div>
+                        <div class="library-param-row">
                             <span class="library-param-key">Camera FOV</span>
                             <span class="library-param-val">${escapeHtml(formatParamValue(viewSettings.fov || 50))}</span>
                         </div>

@@ -71,6 +71,7 @@ Current section responsibilities:
 - `library.html`
 - `style.css`
 - `ai_context.txt`
+- `style_context.txt`
 
 ### `src/main.js`
 
@@ -144,21 +145,26 @@ Current section responsibilities:
 
 - `ui.js`
   - Stitch workspace UI.
-  - Input list, analysis controls, canvas stage, alternatives strip, candidate gallery, selection controls.
+  - Viewport-first Stitch shell with one scrollable left dock, compact viewport HUD chips, candidate gallery overlay, and black/white/warm-grey workstation styling.
+  - The left dock now switches between `inputs`, `analysis`, `selection`, and `candidates` panels through persisted tab state instead of showing separate sidebars all at once.
 
 ### `src/3d/`
 
 - `document.js`
   - 3D document shape, normalization, scene-item ids, camera preset ids, serialization helpers, and Library summary helpers.
-  - Supports saved 3D models, image planes, primitive meshes, scene lights, per-item material settings, texture transforms, snap settings, preview metadata, and ephemeral render-job state.
+  - Supports saved 3D models, image planes, primitive meshes, scene lights, per-item material settings, texture transforms, persistent boolean-cut snapshots for solid items, snap settings, preview metadata, and ephemeral render-job state.
 
 - `engine.js`
   - Primary three.js / path-tracing engine.
-  - Owns model/image hydration from embedded data URLs, primitive mesh creation, scene sync, transform controls, camera sync, preview capture, path-tracing rebuilds, material application, snapping, and background PNG render jobs.
+  - Owns model/image hydration from embedded data URLs, primitive mesh creation, scene sync, transform controls, camera sync, preview capture, path-tracing rebuilds, material application, persistent boolean subtraction, snapping, and background PNG render jobs.
+  - Now also owns persistent path-tracer quality settings such as bounce counts, glossy firefly filtering, and the optional built-in beauty-pass denoise step used by the viewport and PNG renders.
+  - Final PNG renders now take over the visible viewport with their own render canvas so the app is not drawing both the editor viewport and the final render scene at the same time.
   - Editor-only helpers and gizmos are excluded from the traced BVH, then drawn back as an overlay in path-trace mode.
 - `ui.js`
-  - 3D workspace with edit/fullscreen layouts plus a denser control scale than the earlier oversized overlay version.
-  - Owns the 3D import/save controls, primitive creation buttons, snapping controls, hierarchy, rename/duplicate inspector actions, material/texture controls, camera preset UI, render modal, and render-job status/abort flow.
+  - 3D workspace with an `edit` / `fullscreen` UI mode pair, built around one scrollable left dock plus a viewport-first HUD instead of the earlier split-side-panel overlay.
+  - The current 3D shell uses a near-monochrome palette: pure black surfaces, white text, and a light warm grey accent with only a slight gold tint.
+  - Owns the 3D import/save controls, primitive creation buttons, snapping controls, hierarchy, rename/duplicate inspector actions, material/texture controls, boolean slice/reset controls, camera preset UI, render modal, and render-job status/abort flow.
+  - Renderer controls now include `Raster`, `Path Trace`, and `Mesh` view modes, path-tracing bounce counts, glossy firefly filtering, optional denoise tuning, and keyboard mode switching on `1` / `2` / `3`.
 
 ### `src/io/projectAdapters.js`
 
@@ -298,6 +304,8 @@ Important Stitch workspace UI flags:
 
 - `workspace.galleryOpen`
 - `workspace.alternativesOpen`
+- `workspace.sidebarView`
+  - `'inputs' | 'analysis' | 'selection' | 'candidates'`
 
 Important Stitch analysis fields:
 
@@ -340,6 +348,13 @@ Important fields:
 - `render.currentSamples`
 - `render.exposure`
 - `render.toneMapping`
+- `render.bounces`
+- `render.transmissiveBounces`
+- `render.filterGlossyFactor`
+- `render.denoiseEnabled`
+- `render.denoiseSigma`
+- `render.denoiseThreshold`
+- `render.denoiseKSigma`
 - `render.outputWidth`
 - `render.outputHeight`
 - `render.lastJobSamples`
@@ -387,15 +402,20 @@ Important runtime-only 3D behavior:
 - Camera navigation supports both `orbit` and `fly` modes.
 - Fly mode uses viewport focus plus right-drag look and `W A S D Q E` movement.
 - Orbit mode supports `F` to frame the currently selected object.
-- Viewport render mode shortcuts now include keyboard `1` = raster and `2` = path trace.
+- Viewport render mode shortcuts now include keyboard `1` = raster, `2` = path trace, and `3` = mesh.
 - Plane-handle scaling can lock the two active axes together via `view.linkPlaneScale`.
 - Transform snapping supports invisible-grid translation snapping plus rotation snapping via `view.snapTranslationStep` and `view.snapRotationDegrees`.
 - Path tracing now has a warmup/loading overlay so the first compile/switch does not look like a frozen viewport.
+- Path-tracing quality settings now persist in the 3D document, including bounce counts, glossy firefly filtering, and optional denoise parameters.
 - Background PNG renders now open through a single in-app modal for samples + width + height, and show explicit preparation / compile / encode messages before sampling starts.
+- Background PNG renders can now optionally run a final built-in beauty-pass denoise step before the PNG is encoded.
 - Editor-only viewport objects are marked non-shadow-casting so gizmos/helpers do not contaminate raster lighting.
+- Solid model / primitive items can now store persistent boolean subtraction snapshots captured from other objects, and `Reset Cuts` restores the original uncut target.
+- Duplicating 3D items now normalizes copy families into `Name (2)`, `Name (3)`, etc., so repeated duplication does not keep stacking extra `Copy` words.
+- Live viewport path-trace samples now survive switching away from the `3D` app section and back, as long as the 3D document did not change while it was hidden.
 - The 3D workspace now has two local UI layouts:
-  - `edit`: windowed viewport plus scrollable side panels
-  - `fullscreen`: minimal viewport HUD with most UI hidden
+  - `edit`: a viewport-first layout with one scrollable left dock and compact viewport-corner HUD controls
+  - `fullscreen`: minimal viewport HUD with the dock hidden
 
 ### `state.ui`
 
@@ -613,6 +633,12 @@ Toolbar actions:
 - export stitched PNG
 - save to Library
 - reset view
+
+Workspace layout:
+
+- one scrollable left dock with tabbed panels for `Inputs`, `Analysis`, `Selection`, and `Results`
+- viewport-first stage with only a thin header and tiny overlay chips for render size, source count, active panel, and candidate confidence
+- candidate gallery stays as a modal overlay instead of taking permanent space in the main layout
 
 Per-canvas/manual tools in v1:
 
@@ -832,6 +858,13 @@ Used for 3D scene projects:
     "currentSamples": 0,
     "exposure": 1,
     "toneMapping": "aces",
+    "bounces": 10,
+    "transmissiveBounces": 10,
+    "filterGlossyFactor": 0,
+    "denoiseEnabled": false,
+    "denoiseSigma": 5,
+    "denoiseThreshold": 0.03,
+    "denoiseKSigma": 1,
     "outputWidth": 1920,
     "outputHeight": 1080,
     "lastJobSamples": 256
@@ -848,6 +881,7 @@ Used for 3D scene projects:
 Important 3D save/load rule:
 
 - 3D scenes now persist embedded model data, embedded image planes, primitive items, per-item materials, texture transforms, camera presets, light target assignments, snap settings, and preview metadata directly in the payload.
+- Path-tracing quality settings now persist directly in the 3D payload as part of `render`, including bounce counts and optional denoise controls.
 - `renderJob` is intentionally excluded from serialized payloads.
 
 ### Library-export metadata fields

@@ -32,16 +32,31 @@ function isMaterialItem(item) {
     return item?.kind === 'model' || item?.kind === 'primitive';
 }
 
+function isSliceCompatibleItem(item) {
+    return item?.kind === 'model' || item?.kind === 'primitive';
+}
+
 function formatRenderSize(job) {
     if (!job?.outputWidth || !job?.outputHeight) return '0 x 0';
     return `${job.outputWidth} x ${job.outputHeight}`;
 }
 
 function describeItemKind(item) {
-    if (item.kind === 'light') return item.light?.lightType || 'light';
-    if (item.kind === 'image-plane') return 'image plane';
-    if (item.kind === 'primitive') return item.asset?.primitiveType || 'primitive';
-    return item.asset?.format || 'model';
+    const baseLabel = item.kind === 'light'
+        ? item.light?.lightType || 'light'
+        : item.kind === 'image-plane'
+            ? 'image plane'
+            : item.kind === 'primitive'
+                ? item.asset?.primitiveType || 'primitive'
+                : item.asset?.format || 'model';
+    const cutCount = Number(item?.booleanCuts?.length || 0);
+    return cutCount > 0 ? `${baseLabel}, ${cutCount} cut${cutCount === 1 ? '' : 's'}` : baseLabel;
+}
+
+function formatRenderModeLabel(mode) {
+    if (mode === 'pathtrace') return 'Path Trace';
+    if (mode === 'mesh') return 'Mesh';
+    return 'Raster';
 }
 
 function buildEngineSyncKey(documentState) {
@@ -66,10 +81,84 @@ function buildEngineSyncKey(documentState) {
                 mode: documentState.render.mode,
                 samplesTarget: documentState.render.samplesTarget,
                 exposure: documentState.render.exposure,
-                toneMapping: documentState.render.toneMapping
+                toneMapping: documentState.render.toneMapping,
+                bounces: documentState.render.bounces,
+                transmissiveBounces: documentState.render.transmissiveBounces,
+                filterGlossyFactor: documentState.render.filterGlossyFactor,
+                denoiseEnabled: documentState.render.denoiseEnabled,
+                denoiseSigma: documentState.render.denoiseSigma,
+                denoiseThreshold: documentState.render.denoiseThreshold,
+                denoiseKSigma: documentState.render.denoiseKSigma
             }
             : null
     });
+}
+
+const PANEL_TABS = [
+    { id: 'outliner', label: 'Outliner' },
+    { id: 'add', label: 'Add' },
+    { id: 'object', label: 'Object' },
+    { id: 'material', label: 'Material' },
+    { id: 'scene', label: 'Scene' },
+    { id: 'render', label: 'Render' },
+    { id: 'views', label: 'Views' }
+];
+
+const PANEL_TAB_META = {
+    outliner: { title: 'Outliner', subtitle: 'Scene items, visibility, and locking' },
+    add: { title: 'Add', subtitle: 'Import models, image planes, lights, and primitives' },
+    object: { title: 'Object', subtitle: 'Selection, transforms, and slicing tools' },
+    material: { title: 'Material', subtitle: 'Surface, texture, and shading controls' },
+    scene: { title: 'Scene', subtitle: 'Background, camera, and navigation options' },
+    render: { title: 'Render', subtitle: 'Viewport mode, quality, and export' },
+    views: { title: 'Views', subtitle: 'Camera presets and framing shortcuts' }
+};
+
+const DEFAULT_WORKSPACE = {
+    taskView: 'layout',
+    panelTab: 'outliner',
+    taskTabs: {
+        layout: { leftTab: 'outliner', rightTab: 'scene' },
+        model: { leftTab: 'add', rightTab: 'object' },
+        render: { leftTab: 'views', rightTab: 'render' }
+    }
+};
+
+function getWorkspaceState(documentState) {
+    const workspace = documentState?.workspace || DEFAULT_WORKSPACE;
+    const taskView = workspace.taskView || DEFAULT_WORKSPACE.taskView;
+    const fallbackPanelTab = taskView === 'model'
+        ? 'object'
+        : taskView === 'render'
+            ? 'render'
+            : 'outliner';
+    return {
+        taskView,
+        panelTab: workspace.panelTab || fallbackPanelTab
+    };
+}
+
+function describeWorkspacePanel(side, tabId) {
+    return PANEL_TABS.find((entry) => entry.id === tabId)?.label || tabId;
+}
+
+function inferTaskViewFromPanel(panelTab) {
+    if (panelTab === 'render') return 'render';
+    if (panelTab === 'add' || panelTab === 'object' || panelTab === 'material') return 'model';
+    return 'layout';
+}
+
+function describeHierarchyBadge(item) {
+    if (item?.kind === 'light') return item.light?.lightType === 'point' ? 'Point' : item.light?.lightType === 'spot' ? 'Spot' : 'Sun';
+    if (item?.kind === 'image-plane') return 'Image';
+    if (item?.kind === 'primitive') return item.asset?.primitiveType === 'cylinder'
+        ? 'Cyl'
+        : item.asset?.primitiveType === 'sphere'
+            ? 'Sphere'
+            : item.asset?.primitiveType === 'cone'
+                ? 'Cone'
+                : 'Cube';
+    return item?.asset?.format === 'gltf' ? 'GLTF' : 'GLB';
 }
 
 export function createThreeDWorkspace(actions, store) {
@@ -79,7 +168,7 @@ export function createThreeDWorkspace(actions, store) {
     root.style.height = '100%';
     root.style.position = 'relative';
     root.style.overflow = 'hidden';
-    root.style.background = '#111111';
+    root.style.background = '#000000';
 
     root.innerHTML = `
         <div class="threed-canvas-container" style="position:absolute; inset:0;"></div>
@@ -132,6 +221,7 @@ export function createThreeDWorkspace(actions, store) {
                             <select class="custom-select" data-threed-role="render-mode">
                                 <option value="raster">Raster</option>
                                 <option value="pathtrace">Path Trace</option>
+                                <option value="mesh">Mesh</option>
                             </select>
                         </label>
                         <label style="display:flex; flex-direction:column; gap:6px;">
@@ -142,6 +232,41 @@ export function createThreeDWorkspace(actions, store) {
                             <span>Viewport Samples</span>
                             <strong data-threed-role="sample-count">0</strong>
                         </div>
+                        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
+                            <label style="display:flex; flex-direction:column; gap:6px;">
+                                <span>Bounces</span>
+                                <input type="number" min="1" max="64" step="1" class="control-number" data-threed-role="path-bounces">
+                            </label>
+                            <label style="display:flex; flex-direction:column; gap:6px;">
+                                <span>Trans Bounces</span>
+                                <input type="number" min="0" max="64" step="1" class="control-number" data-threed-role="path-transmissive-bounces">
+                            </label>
+                        </div>
+                        <label style="display:flex; flex-direction:column; gap:6px;">
+                            <span>Glossy Firefly Filter</span>
+                            <input type="range" min="0" max="1" step="0.01" data-threed-role="path-filter-glossy-factor">
+                        </label>
+                        <label class="check-row">
+                            <input type="checkbox" data-threed-role="path-denoise-enabled">
+                            <span>Denoise Path Trace</span>
+                        </label>
+                        <div data-threed-role="path-denoise-fields" style="display:none; flex-direction:column; gap:10px;">
+                            <label style="display:flex; flex-direction:column; gap:6px;">
+                                <span>Denoise Sigma</span>
+                                <input type="range" min="0.5" max="12" step="0.1" data-threed-role="path-denoise-sigma">
+                            </label>
+                            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
+                                <label style="display:flex; flex-direction:column; gap:6px;">
+                                    <span>Threshold</span>
+                                    <input type="number" min="0.0001" max="1" step="0.001" class="control-number" data-threed-role="path-denoise-threshold">
+                                </label>
+                                <label style="display:flex; flex-direction:column; gap:6px;">
+                                    <span>Radius Scale</span>
+                                    <input type="number" min="0.1" max="5" step="0.1" class="control-number" data-threed-role="path-denoise-ksigma">
+                                </label>
+                            </div>
+                        </div>
+                        <div style="font-size:11px; line-height:1.45; opacity:0.72;">Higher bounce counts help glass and deep reflections. The glossy filter reduces fireflies, while denoising smooths grain but can soften detail because this renderer only has the beauty image available here.</div>
                         <label style="display:flex; flex-direction:column; gap:6px;">
                             <span>Exposure</span>
                             <input type="range" min="0.05" max="4" step="0.05" data-threed-role="exposure-range">
@@ -250,6 +375,21 @@ export function createThreeDWorkspace(actions, store) {
                             <button type="button" class="toolbar-button" data-threed-action="duplicate-item" style="flex:1;">Duplicate</button>
                             <button type="button" class="toolbar-button" data-threed-action="reset-transform" style="flex:1;">Reset</button>
                             <button type="button" class="toolbar-button" data-threed-action="delete-item" style="flex:1;">Delete</button>
+                        </div>
+                        <div data-threed-role="slice-fields" style="display:none; flex-direction:column; gap:10px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
+                            <div style="display:flex; justify-content:space-between; gap:12px;">
+                                <span>Stored Cuts</span>
+                                <strong data-threed-role="slice-count">0</strong>
+                            </div>
+                            <label style="display:flex; flex-direction:column; gap:6px;">
+                                <span>Cutter Object</span>
+                                <select class="custom-select" data-threed-role="slice-cutter"></select>
+                            </label>
+                            <div class="info-banner" style="margin:0;">Position another model or primitive where you want the subtraction, then click Slice. The cutter is captured as a snapshot, so you can move or delete it later. Reset Cuts restores the original uncut object.</div>
+                            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
+                                <button type="button" class="secondary-button" data-threed-action="apply-slice">Slice</button>
+                                <button type="button" class="toolbar-button" data-threed-action="reset-slices">Reset Cuts</button>
+                            </div>
                         </div>
                         <div data-threed-role="light-fields" style="display:none; flex-direction:column; gap:10px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
                             <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
@@ -360,7 +500,7 @@ export function createThreeDWorkspace(actions, store) {
                     <button type="button" class="toolbar-button" data-threed-action="render-dialog-cancel">Close</button>
                 </div>
                 <div class="threed-render-dialog-body">
-                    <div class="info-banner" data-threed-role="render-dialog-note">Choose the final sample count and export resolution for this background render.</div>
+                    <div class="info-banner" data-threed-role="render-dialog-note">Choose the final sample count and export resolution for this render. The viewport will switch to the final render pass while the PNG is being generated.</div>
                     <label style="display:flex; flex-direction:column; gap:6px;">
                         <span>Samples</span>
                         <input type="number" min="1" max="1000000" step="1" class="control-number" data-threed-role="render-dialog-samples">
@@ -402,6 +542,14 @@ export function createThreeDWorkspace(actions, store) {
         showAxes: root.querySelector('[data-threed-role="show-axes"]'),
         renderMode: root.querySelector('[data-threed-role="render-mode"]'),
         samplesTarget: root.querySelector('[data-threed-role="samples-target"]'),
+        pathBounces: root.querySelector('[data-threed-role="path-bounces"]'),
+        pathTransmissiveBounces: root.querySelector('[data-threed-role="path-transmissive-bounces"]'),
+        pathFilterGlossyFactor: root.querySelector('[data-threed-role="path-filter-glossy-factor"]'),
+        pathDenoiseEnabled: root.querySelector('[data-threed-role="path-denoise-enabled"]'),
+        pathDenoiseFields: root.querySelector('[data-threed-role="path-denoise-fields"]'),
+        pathDenoiseSigma: root.querySelector('[data-threed-role="path-denoise-sigma"]'),
+        pathDenoiseThreshold: root.querySelector('[data-threed-role="path-denoise-threshold"]'),
+        pathDenoiseKSigma: root.querySelector('[data-threed-role="path-denoise-ksigma"]'),
         exposureRange: root.querySelector('[data-threed-role="exposure-range"]'),
         toneMapping: root.querySelector('[data-threed-role="tone-mapping"]'),
         cameraFov: root.querySelector('[data-threed-role="camera-fov"]'),
@@ -413,6 +561,9 @@ export function createThreeDWorkspace(actions, store) {
         renderJobSamples: root.querySelector('[data-threed-role="render-job-samples"]'),
         renderJobSize: root.querySelector('[data-threed-role="render-job-size"]'),
         itemName: root.querySelector('[data-threed-role="item-name"]'),
+        sliceFields: root.querySelector('[data-threed-role="slice-fields"]'),
+        sliceCount: root.querySelector('[data-threed-role="slice-count"]'),
+        sliceCutter: root.querySelector('[data-threed-role="slice-cutter"]'),
         lightFields: root.querySelector('[data-threed-role="light-fields"]'),
         lightColor: root.querySelector('[data-threed-role="light-color"]'),
         lightIntensity: root.querySelector('[data-threed-role="light-intensity"]'),
@@ -445,156 +596,356 @@ export function createThreeDWorkspace(actions, store) {
         renderDialogHeight: root.querySelector('[data-threed-role="render-dialog-height"]')
     };
 
-    function buildLayoutChrome() {
+    function buildCompactLayoutChrome() {
         const overlayShell = root.querySelector('.threed-overlay-shell');
         const sidebars = overlayShell ? Array.from(overlayShell.querySelectorAll('aside')) : [];
         const leftSidebar = sidebars[0] || null;
         const rightSidebar = sidebars[1] || null;
         if (!overlayShell || !leftSidebar || !rightSidebar) return;
 
+        const sceneBody = leftSidebar.children[0]?.children[1];
+        const cameraBody = leftSidebar.children[2]?.children[1];
+        const inspectorBody = rightSidebar.children[1]?.children[1];
+        const backgroundField = refs.backgroundColor?.closest('label');
+        const showGridRow = refs.showGrid?.closest('label');
+        const showAxesRow = refs.showAxes?.closest('label');
+        const renderModeField = refs.renderMode?.closest('label');
+        const samplesTargetField = refs.samplesTarget?.closest('label');
+        const sampleCountRow = refs.sampleCount?.parentElement;
+        const pathBounceGrid = refs.pathBounces?.closest('label')?.parentElement;
+        const glossyField = refs.pathFilterGlossyFactor?.closest('label');
+        const denoiseToggle = refs.pathDenoiseEnabled?.closest('label');
+        const denoiseInfo = refs.pathDenoiseFields?.nextElementSibling;
+        const exposureField = refs.exposureRange?.closest('label');
+        const toneMappingField = refs.toneMapping?.closest('label');
+        const cameraFovField = refs.cameraFov?.closest('label');
+        const cameraModeField = refs.cameraMode?.closest('label');
+        const linkPlaneScaleRow = refs.linkPlaneScale?.closest('label');
+        const snapGrid = refs.snapTranslationStep?.closest('label')?.parentElement;
+        const flyInfo = snapGrid?.nextElementSibling || null;
+        const renderJobStatusRow = refs.renderJobStatus?.parentElement;
+        const renderJobSamplesRow = refs.renderJobSamples?.parentElement;
+        const renderJobSizeRow = refs.renderJobSize?.parentElement;
+
+        const compactNode = (node) => {
+            if (!node) return null;
+            node.style.padding = '0';
+            node.style.margin = '0';
+            node.style.display = 'flex';
+            node.style.flexDirection = 'column';
+            node.style.gap = '8px';
+            node.classList.add('threed-stack');
+            return node;
+        };
+
+        const createPanel = (id) => {
+            const meta = PANEL_TAB_META[id] || { title: describeWorkspacePanel(null, id), subtitle: '' };
+            const section = document.createElement('section');
+            section.className = 'threed-dock-panel';
+            section.dataset.threedPanel = id;
+            section.innerHTML = `
+                <div class="threed-dock-panel-head">
+                    <strong>${escapeHtml(meta.title)}</strong>
+                    <span>${escapeHtml(meta.subtitle)}</span>
+                </div>
+                <div class="threed-dock-panel-body"></div>
+            `;
+            return { panel: section, body: section.querySelector('.threed-dock-panel-body') };
+        };
+
+        const createFoldout = (label, open = false) => {
+            const element = document.createElement('details');
+            element.className = 'threed-foldout';
+            element.open = open;
+            element.innerHTML = `<summary>${escapeHtml(label)}</summary><div class="threed-foldout-body"></div>`;
+            return { element, body: element.querySelector('.threed-foldout-body') };
+        };
+
         const style = document.createElement('style');
         style.textContent = `
-            .threed-shell { width:100%; height:100%; display:flex; color:#f4f4f4; font-size:11px; line-height:1.35; }
-            .threed-shell button, .threed-shell input, .threed-shell select { font-size:11px !important; }
-            .threed-shell .panel-section { border-radius:12px !important; }
-            .threed-shell .panel-heading { padding:10px 12px !important; font-size:11px; }
-            .threed-shell .panel-section > div:not(.panel-heading) { padding:12px !important; gap:8px !important; }
-            .threed-shell .control-number, .threed-shell .custom-select, .threed-shell input[type="text"], .threed-shell input[type="number"] { min-height:28px; padding:4px 8px !important; }
-            .threed-shell .primary-button, .threed-shell .secondary-button, .threed-shell .toolbar-button { min-height:28px; padding:5px 8px !important; }
-            .threed-stage { flex:1; min-width:0; min-height:0; display:grid; grid-template-columns:minmax(240px,280px) minmax(0,1fr) minmax(260px,320px); gap:12px; padding:12px; }
-            .threed-sidebar { min-height:0; overflow:auto; display:flex; flex-direction:column; gap:10px; padding-right:2px; pointer-events:auto; }
+            .threed-shell { --threed-bg:#000000; --threed-panel:#000000; --threed-panel-alt:#050505; --threed-border:#b8b2a3; --threed-border-soft:rgba(184,178,163,0.28); --threed-accent:rgba(184,178,163,0.14); --threed-text:#ffffff; --threed-muted:#b8b2a3; width:100%; height:100%; min-width:0; min-height:0; display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); gap:8px; padding:8px; background:var(--threed-bg); color:var(--threed-text); font-size:11px; line-height:1.24; overflow:hidden; }
+            .threed-shell button, .threed-shell input, .threed-shell select, .threed-render-dialog button, .threed-render-dialog input, .threed-render-dialog select { font-size:11px !important; }
+            .threed-shell .control-number, .threed-shell .custom-select, .threed-shell input[type="text"], .threed-shell input[type="number"], .threed-render-dialog .control-number { min-height:22px; padding:2px 6px !important; border-radius:4px; background:#000000; color:var(--threed-text); border:1px solid var(--threed-border); }
+            .threed-shell .primary-button, .threed-shell .secondary-button, .threed-shell .toolbar-button, .threed-render-dialog .primary-button, .threed-render-dialog .toolbar-button { min-height:22px; padding:2px 7px !important; border-radius:4px; background:#000000; color:var(--threed-text); border:1px solid var(--threed-border); }
+            .threed-shell [style*="font-size:11px"] { font-size:10px !important; }
+            .threed-shell [style*="font-size:9px"] { font-size:9px !important; }
+            .threed-shell .info-banner, .threed-render-dialog .info-banner { margin:0; padding:7px 8px !important; border-radius:4px; font-size:10px !important; line-height:1.35; background:rgba(184,178,163,0.08); border:1px solid var(--threed-border-soft); color:var(--threed-text); }
+            .threed-dock, .threed-viewport-card { min-width:0; min-height:0; border:1px solid var(--threed-border); background:var(--threed-panel); overflow:hidden; }
+            .threed-dock { display:flex; flex-direction:column; }
+            .threed-dock-tabs { display:flex; flex-wrap:wrap; gap:4px; padding:6px; border-bottom:1px solid var(--threed-border); background:var(--threed-panel-alt); }
+            .threed-dock-tab { min-height:20px; padding:0 7px; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--threed-muted); cursor:pointer; }
+            .threed-dock-tab.is-active, .threed-dock-tab:hover { color:var(--threed-text); background:var(--threed-accent); border-color:var(--threed-border); }
+            .threed-dock-panels { flex:1; min-height:0; }
+            .threed-dock-panel { display:none; height:100%; min-height:0; flex-direction:column; }
+            .threed-dock-panel.is-active { display:flex; }
+            .threed-dock-panel-head { padding:8px 9px 7px; border-bottom:1px solid var(--threed-border); background:var(--threed-panel-alt); }
+            .threed-dock-panel-head span { display:block; margin-top:2px; color:var(--threed-muted); font-size:10px; }
+            .threed-dock-panel-body { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; padding:8px; display:flex; flex-direction:column; gap:8px; }
+            .threed-stack, .threed-stack > div, .threed-stack > label { min-width:0; }
+            .threed-stack { display:flex; flex-direction:column; gap:8px; }
+            .threed-button-row { display:grid; gap:6px; }
+            .threed-button-row-2 { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+            .threed-button-row-3 { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+            .threed-button-row-4 { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+            .threed-foldout { border:1px solid var(--threed-border); background:var(--threed-panel-alt); }
+            .threed-foldout summary { list-style:none; cursor:pointer; user-select:none; padding:7px 8px; color:var(--threed-text); font-weight:600; }
+            .threed-foldout summary::-webkit-details-marker { display:none; }
+            .threed-foldout[open] summary { border-bottom:1px solid var(--threed-border); }
+            .threed-foldout-body { padding:8px; display:flex; flex-direction:column; gap:8px; }
             .threed-viewport-panel { min-width:0; min-height:0; display:flex; }
-            .threed-viewport-card { position:relative; flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; background:linear-gradient(180deg, rgba(21,24,31,0.96), rgba(10,11,15,0.98)); border:1px solid rgba(255,255,255,0.08); border-radius:14px; overflow:hidden; box-shadow:0 18px 60px rgba(0,0,0,0.32); }
-            .threed-viewport-toolbar { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 11px; background:rgba(12,14,20,0.88); border-bottom:1px solid rgba(255,255,255,0.08); }
-            .threed-toolbar-cluster { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-            .threed-chip { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border-radius:999px; border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.05); }
-            .threed-viewport-stage { position:relative; flex:1; min-height:0; background:#111111; }
-            .threed-compact-hud { position:absolute; top:12px; left:12px; z-index:7; display:none; flex-wrap:wrap; gap:6px; pointer-events:auto; }
-            .threed-pathtrace-loading { position:absolute; inset:0; z-index:6; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(8,10,14,0.62); pointer-events:none; }
+            .threed-viewport-card { position:relative; display:flex; flex:1; background:var(--threed-panel); }
+            .threed-viewport-stage { position:relative; flex:1; min-width:0; min-height:0; background:#000000; }
+            .threed-canvas-container.is-hidden { visibility:hidden; opacity:0; }
+            .threed-render-preview-host { position:absolute; inset:0; z-index:5; display:none; align-items:center; justify-content:center; padding:10px; background:#000000; pointer-events:none; }
+            .threed-render-preview-host.is-active { display:flex; }
+            .threed-render-preview-host canvas { width:auto !important; height:auto !important; max-width:100%; max-height:100%; object-fit:contain; }
+            .threed-overlay-corner { position:absolute; z-index:8; display:flex; gap:4px; max-width:calc(100% - 12px); pointer-events:none; }
+            .threed-overlay-corner > * { pointer-events:auto; }
+            .threed-overlay-top-left { top:6px; left:6px; flex-wrap:wrap; align-items:flex-start; }
+            .threed-overlay-top-right { top:6px; right:6px; flex-wrap:wrap; justify-content:flex-end; align-items:flex-start; }
+            .threed-overlay-bottom-left { left:6px; bottom:6px; max-width:min(58%, calc(100% - 12px)); }
+            .threed-overlay-bottom-right { right:6px; bottom:6px; flex-direction:column; align-items:flex-end; gap:4px; max-width:min(58%, calc(100% - 12px)); }
+            .threed-mini-bar { display:inline-flex; align-items:center; gap:3px; padding:3px; border:1px solid var(--threed-border-soft); background:rgba(0,0,0,0.92); }
+            .threed-mini-bar .toolbar-button, .threed-mini-bar .secondary-button { min-height:20px; padding:0 6px !important; border-radius:3px; }
+            .threed-overlay-chip { display:inline-flex; align-items:center; gap:4px; min-height:20px; padding:0 6px; border:1px solid var(--threed-border-soft); background:rgba(0,0,0,0.92); color:var(--threed-text); font-size:10px; white-space:nowrap; }
+            .threed-overlay-chip.is-muted { color:var(--threed-muted); }
+            .threed-status-pill { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+            .threed-pathtrace-loading { position:absolute; inset:0; z-index:6; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(8,10,14,0.62); pointer-events:none; }
             .threed-pathtrace-loading.is-active { display:flex; }
-            .threed-loading-card { min-width:min(320px,100%); display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:14px; border:1px solid rgba(255,255,255,0.12); background:rgba(12,14,20,0.92); box-shadow:0 18px 50px rgba(0,0,0,0.35); }
-            .threed-spinner { width:16px; height:16px; flex:0 0 auto; border-radius:50%; border:2px solid rgba(255,255,255,0.22); border-top-color:#f4f4f4; animation:threed-spin 0.8s linear infinite; }
-            .threed-status-pill { position:absolute; left:12px; bottom:12px; z-index:7; max-width:min(560px, calc(100% - 24px)); padding:8px 12px; border-radius:999px; border:1px solid rgba(255,255,255,0.08); background:rgba(15,15,18,0.88); pointer-events:auto; }
-            .threed-render-dialog { position:absolute; inset:0; z-index:12; display:none; align-items:center; justify-content:center; padding:24px; background:rgba(5,7,10,0.62); }
+            .threed-loading-card { min-width:min(280px,100%); display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--threed-border); background:rgba(0,0,0,0.94); color:var(--threed-text); }
+            .threed-spinner { width:15px; height:15px; flex:0 0 auto; border-radius:50%; border:2px solid rgba(184,178,163,0.2); border-top-color:var(--threed-border); animation:threed-spin 0.8s linear infinite; }
+            .threed-outliner { display:flex; flex-direction:column; gap:6px; }
+            .threed-outliner-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; width:100%; padding:6px 7px; border:1px solid var(--threed-border); background:#000000; color:inherit; cursor:pointer; text-align:left; }
+            .threed-outliner-item.is-active { background:var(--threed-accent); border-color:var(--threed-border); }
+            .threed-outliner-main, .threed-outliner-copy, .threed-outliner-tools { display:flex; gap:6px; }
+            .threed-outliner-main { min-width:0; align-items:center; border:none; background:none; padding:0; color:inherit; text-align:left; }
+            .threed-outliner-copy { flex-direction:column; min-width:0; gap:2px; }
+            .threed-outliner-copy strong, .threed-outliner-copy span, .threed-overlay-bottom-right .threed-overlay-chip { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+            .threed-outliner-copy span { color:var(--threed-muted); font-size:11px; }
+            .threed-kind-badge { display:inline-flex; align-items:center; justify-content:center; min-width:36px; min-height:18px; padding:0 5px; border:1px solid var(--threed-border-soft); background:rgba(184,178,163,0.08); color:var(--threed-muted); font-size:9px; letter-spacing:0.04em; text-transform:uppercase; }
+            .threed-icon-button { min-width:20px; min-height:20px; padding:0; border:1px solid var(--threed-border-soft); background:var(--threed-panel-alt); color:var(--threed-muted); cursor:pointer; }
+            .threed-icon-button.is-active, .threed-shell .toolbar-button.is-active, .threed-shell .secondary-button.is-active { color:var(--threed-text); background:var(--threed-accent); border-color:var(--threed-border); }
+            .threed-shell [style*="color:#ff8a80"], .threed-shell [style*="color:#ffd180"], .threed-shell [style*="color:#80d8ff"] { color:var(--threed-muted) !important; }
+            .threed-render-dialog { position:absolute; inset:0; z-index:40; display:none; align-items:flex-start; justify-content:center; padding:12px; background:rgba(0,0,0,0.78); backdrop-filter:blur(4px); }
             .threed-render-dialog.is-open { display:flex; }
-            .threed-render-dialog-card { width:min(440px, calc(100vw - 40px)); display:flex; flex-direction:column; gap:0; border-radius:16px; border:1px solid rgba(255,255,255,0.1); background:rgba(12,14,20,0.98); box-shadow:0 24px 70px rgba(0,0,0,0.42); overflow:hidden; pointer-events:auto; }
-            .threed-render-dialog-header, .threed-render-dialog-footer { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; background:rgba(255,255,255,0.03); }
-            .threed-render-dialog-body { display:flex; flex-direction:column; gap:10px; padding:14px; }
-            .threed-render-dialog-footer { justify-content:flex-end; }
-            .threed-shell[data-ui-mode="fullscreen"] .threed-stage { grid-template-columns:minmax(0,1fr); padding:0; }
-            .threed-shell[data-ui-mode="fullscreen"] .threed-sidebar, .threed-shell[data-ui-mode="fullscreen"] .threed-viewport-toolbar { display:none; }
-            .threed-shell[data-ui-mode="fullscreen"] .threed-compact-hud { display:flex; }
-            .threed-shell[data-ui-mode="fullscreen"] .threed-viewport-card { border:none; border-radius:0; box-shadow:none; }
-            .threed-shell[data-ui-mode="fullscreen"] .threed-status-pill { left:20px; bottom:20px; }
+            .threed-render-dialog-card { width:min(360px, calc(100vw - 24px)); border:1px solid var(--threed-border); background:#000000; box-shadow:0 18px 48px rgba(0,0,0,0.34); pointer-events:auto; color:var(--threed-text); }
+            .threed-render-dialog-header, .threed-render-dialog-footer { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px; border-bottom:1px solid var(--threed-border); }
+            .threed-render-dialog-footer { border-top:1px solid var(--threed-border); border-bottom:none; justify-content:flex-end; }
+            .threed-render-dialog-body { padding:8px; display:flex; flex-direction:column; gap:8px; }
+            .threed-shell[data-ui-mode="fullscreen"] { grid-template-columns:minmax(0, 1fr); padding:0; }
+            .threed-shell[data-ui-mode="fullscreen"] .threed-dock { display:none; }
+            .threed-shell[data-ui-mode="fullscreen"] .threed-viewport-card { border:none; }
             @keyframes threed-spin { to { transform: rotate(360deg); } }
-            @media (max-width: 1320px) {
-                .threed-stage { grid-template-columns:minmax(220px,260px) minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; }
-                .threed-sidebar.threed-right { grid-column:1 / span 2; max-height:300px; }
-            }
-            @media (max-width: 1040px) {
-                .threed-stage { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,48vh) auto auto; }
-                .threed-sidebar { max-height:none; }
-                .threed-viewport-panel { min-height:320px; }
-            }
+            @media (max-width: 920px) { .threed-shell { grid-template-columns:minmax(190px, 230px) minmax(0, 1fr); gap:6px; padding:6px; } }
+            @media (max-width: 680px) { .threed-shell { grid-template-columns:minmax(170px, 42vw) minmax(0, 1fr); } }
         `;
         root.prepend(style);
 
-        leftSidebar.removeAttribute('style');
-        rightSidebar.removeAttribute('style');
-        leftSidebar.className = 'threed-sidebar threed-left';
-        rightSidebar.className = 'threed-sidebar threed-right';
-        refs.status.removeAttribute('style');
-        refs.status.className = 'threed-status-pill';
+        refs.hierarchy.classList.add('threed-outliner');
+        refs.hierarchy.style.maxHeight = 'none';
+        refs.hierarchy.style.padding = '0';
+        refs.hierarchy.style.overflow = 'visible';
+        refs.cameraPresets.style.padding = '0';
+        refs.cameraPresets.style.display = 'flex';
+        refs.cameraPresets.style.flexDirection = 'column';
+        refs.cameraPresets.style.gap = '6px';
 
-        leftSidebar.insertAdjacentHTML('afterbegin', `
-            <section class="panel-section" style="background:rgba(15,15,18,0.84); backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,0.1); border-radius:14px; overflow:hidden;">
-                <div class="panel-heading" style="padding:14px 16px; margin:0; border-bottom:1px solid rgba(255,255,255,0.08);">Workspace</div>
-                <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
-                    <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
-                        <button type="button" class="primary-button" data-threed-action="ui-mode" data-ui-mode="edit">Editing Mode</button>
-                        <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="fullscreen">Fullscreen</button>
-                    </div>
-                    <div class="info-banner" style="margin:0;">Editing mode keeps controls in scrollable side panels. Fullscreen hides most UI so the viewport can take over.</div>
-                </div>
-            </section>
-        `);
+        compactNode(sceneBody);
+        compactNode(cameraBody);
+        compactNode(inspectorBody);
+
+        const outlinerPanel = createPanel('outliner');
+        const addPanel = createPanel('add');
+        const objectPanel = createPanel('object');
+        const materialPanel = createPanel('material');
+        const scenePanel = createPanel('scene');
+        const renderPanel = createPanel('render');
+        const viewsPanel = createPanel('views');
+
+        outlinerPanel.body.appendChild(refs.hierarchy);
+
+        if (sceneBody) {
+            addPanel.body.appendChild(sceneBody);
+        }
+        const addLightsBlock = sceneBody?.querySelector('[data-threed-action="add-light"]')?.closest('div') || null;
+        if (addLightsBlock) {
+            const foldout = createFoldout('Lights');
+            foldout.body.appendChild(addLightsBlock);
+            addPanel.body.appendChild(foldout.element);
+        }
+        const addPrimitivesBlock = sceneBody?.querySelector('[data-threed-action="add-primitive"]')?.closest('div')?.parentElement || null;
+        if (addPrimitivesBlock && addPrimitivesBlock !== addLightsBlock) {
+            const foldout = createFoldout('Primitives');
+            foldout.body.appendChild(addPrimitivesBlock);
+            addPanel.body.appendChild(foldout.element);
+        }
+
+        if (inspectorBody) {
+            objectPanel.body.appendChild(inspectorBody);
+        }
+        if (refs.materialFields) {
+            compactNode(refs.materialFields);
+            materialPanel.body.appendChild(refs.materialFields);
+        }
+
+        const sceneCameraFoldout = createFoldout('Camera');
+        const sceneNavigationFoldout = createFoldout('Navigation');
+        [backgroundField, showGridRow, showAxesRow].filter(Boolean).forEach((node) => scenePanel.body.appendChild(node));
+        [cameraFovField, cameraModeField].filter(Boolean).forEach((node) => sceneCameraFoldout.body.appendChild(node));
+        [linkPlaneScaleRow, snapGrid, flyInfo].filter(Boolean).forEach((node) => sceneNavigationFoldout.body.appendChild(node));
+        if (sceneCameraFoldout.body.childElementCount) {
+            scenePanel.body.appendChild(sceneCameraFoldout.element);
+        }
+        if (sceneNavigationFoldout.body.childElementCount) {
+            scenePanel.body.appendChild(sceneNavigationFoldout.element);
+        }
+
+        const renderBasics = document.createElement('div');
+        renderBasics.className = 'threed-stack';
+        [renderModeField, samplesTargetField, sampleCountRow].filter(Boolean).forEach((node) => renderBasics.appendChild(node));
+        const renderActions = document.createElement('div');
+        renderActions.className = 'threed-button-row threed-button-row-2';
+        renderActions.innerHTML = `
+            <button type="button" class="primary-button" data-threed-action="render-scene">Render PNG</button>
+            <button type="button" class="toolbar-button" data-threed-action="abort-render">Abort</button>
+        `;
+        renderBasics.appendChild(renderActions);
+        [renderJobStatusRow, renderJobSamplesRow, renderJobSizeRow].filter(Boolean).forEach((node) => renderBasics.appendChild(node));
+        renderPanel.body.appendChild(renderBasics);
+
+        const renderQualityFoldout = createFoldout('Path Trace Quality');
+        [pathBounceGrid, glossyField, denoiseToggle, refs.pathDenoiseFields, denoiseInfo].filter(Boolean).forEach((node) => renderQualityFoldout.body.appendChild(node));
+        if (renderQualityFoldout.body.childElementCount) {
+            renderPanel.body.appendChild(renderQualityFoldout.element);
+        }
+        const renderToneFoldout = createFoldout('Tone & Exposure');
+        [exposureField, toneMappingField].filter(Boolean).forEach((node) => renderToneFoldout.body.appendChild(node));
+        if (renderToneFoldout.body.childElementCount) {
+            renderPanel.body.appendChild(renderToneFoldout.element);
+        }
+
+        const viewActions = document.createElement('div');
+        viewActions.className = 'threed-button-row threed-button-row-2';
+        viewActions.innerHTML = `
+            <button type="button" class="toolbar-button" data-threed-action="save-camera-preset">Save Current View</button>
+            <button type="button" class="toolbar-button" data-threed-action="frame-item">Frame Selected</button>
+            <button type="button" class="toolbar-button" data-threed-action="reset-camera">Reset View</button>
+            <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="fullscreen">Fullscreen</button>
+        `;
+        viewsPanel.body.appendChild(viewActions);
+        const viewsHint = document.createElement('div');
+        viewsHint.className = 'info-banner';
+        viewsHint.innerHTML = 'Use <code>1</code>, <code>2</code>, and <code>3</code> for raster, path trace, and mesh. Press <code>F</code> in orbit mode to frame the selected object.';
+        viewsPanel.body.appendChild(viewsHint);
+        if (cameraBody) {
+            cameraBody.remove();
+        }
+        viewsPanel.body.appendChild(refs.cameraPresets);
+
+        refs.status.removeAttribute('style');
+        refs.status.className = 'threed-status-pill threed-overlay-chip';
+        const statusHints = document.createElement('div');
+        statusHints.className = 'threed-overlay-chip is-muted';
+        statusHints.dataset.threedRole = 'status-hints';
+        const statusStats = document.createElement('div');
+        statusStats.className = 'threed-overlay-chip is-muted';
+        statusStats.dataset.threedRole = 'status-stats';
 
         const shell = document.createElement('div');
         shell.className = 'threed-shell';
         shell.dataset.threedRole = 'shell';
         shell.dataset.uiMode = 'edit';
-
-        const stage = document.createElement('div');
-        stage.className = 'threed-stage';
+        shell.innerHTML = `
+            <aside class="threed-dock">
+                <div class="threed-dock-tabs">${PANEL_TABS.map((tab) => `<button type="button" class="threed-dock-tab" data-threed-action="workspace-panel-tab" data-workspace-panel-tab="${tab.id}">${tab.label}</button>`).join('')}</div>
+                <div class="threed-dock-panels"></div>
+            </aside>
+        `;
+        const dockPanels = shell.querySelector('.threed-dock-panels');
+        [
+            outlinerPanel,
+            addPanel,
+            objectPanel,
+            materialPanel,
+            scenePanel,
+            renderPanel,
+            viewsPanel
+        ].forEach(({ panel }) => dockPanels.appendChild(panel));
 
         const viewportPanel = document.createElement('section');
         viewportPanel.className = 'threed-viewport-panel';
-
-        const viewportCard = document.createElement('div');
-        viewportCard.className = 'threed-viewport-card';
-
-        const viewportToolbar = document.createElement('div');
-        viewportToolbar.className = 'threed-viewport-toolbar';
-        viewportToolbar.innerHTML = `
-            <div class="threed-toolbar-cluster">
-                <strong>3D Viewport</strong>
-                <span class="threed-chip">Press <code>F</code> to frame the selected object in orbit mode.</span>
+        viewportPanel.innerHTML = `<div class="threed-viewport-card"><div class="threed-viewport-stage"></div></div>`;
+        const viewportStage = viewportPanel.querySelector('.threed-viewport-stage');
+        const renderPreviewHost = document.createElement('div');
+        renderPreviewHost.className = 'threed-render-preview-host';
+        renderPreviewHost.dataset.threedRole = 'render-preview-host';
+        const viewportTopLeft = document.createElement('div');
+        viewportTopLeft.className = 'threed-overlay-corner threed-overlay-top-left';
+        viewportTopLeft.innerHTML = `
+            <div class="threed-mini-bar">
+                <button type="button" class="toolbar-button" data-threed-action="set-render-mode" data-render-mode="raster">Raster</button>
+                <button type="button" class="toolbar-button" data-threed-action="set-render-mode" data-render-mode="pathtrace">Path Trace</button>
+                <button type="button" class="toolbar-button" data-threed-action="set-render-mode" data-render-mode="mesh">Mesh</button>
             </div>
-            <div class="threed-toolbar-cluster">
-                <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="fullscreen">Fullscreen</button>
+            <div class="threed-mini-bar">
+                <button type="button" class="toolbar-button" data-threed-action="transform-mode" data-transform-mode="translate">Move</button>
+                <button type="button" class="toolbar-button" data-threed-action="transform-mode" data-transform-mode="rotate">Rotate</button>
+                <button type="button" class="toolbar-button" data-threed-action="transform-mode" data-transform-mode="scale">Scale</button>
+            </div>
+        `;
+        const viewportTopRight = document.createElement('div');
+        viewportTopRight.className = 'threed-overlay-corner threed-overlay-top-right';
+        viewportTopRight.innerHTML = `
+            <div class="threed-mini-bar">
                 <button type="button" class="toolbar-button" data-threed-action="frame-item">Frame</button>
-                <button type="button" class="toolbar-button" data-threed-action="reset-camera">Reset View</button>
+                <button type="button" class="toolbar-button" data-threed-action="reset-camera">Reset</button>
+                <button type="button" class="toolbar-button" data-threed-action="render-scene">Render PNG</button>
+                <button type="button" class="toolbar-button" data-threed-action="abort-render">Abort</button>
+                <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="edit">Panels</button>
+                <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="fullscreen">Fullscreen</button>
+                <button type="button" class="toolbar-button" data-threed-action="save-library">Save</button>
             </div>
+            <span class="threed-overlay-chip">Mode <strong data-threed-role="compact-render-mode-label">Raster</strong></span>
+            <span class="threed-overlay-chip">Spp <strong data-threed-role="header-sample-count">0</strong></span>
         `;
-
-        const viewportStage = document.createElement('div');
-        viewportStage.className = 'threed-viewport-stage';
-
-        const compactHud = document.createElement('div');
-        compactHud.className = 'threed-compact-hud';
-        compactHud.innerHTML = `
-            <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="edit">Editing UI</button>
-            <button type="button" class="toolbar-button" data-threed-action="render-scene">Render PNG</button>
-            <button type="button" class="toolbar-button" data-threed-action="abort-render">Abort</button>
-            <span class="threed-chip"><span data-threed-role="compact-render-mode-label">Raster</span></span>
-            <span class="threed-chip">Samples <strong data-threed-role="compact-sample-count">0</strong></span>
-        `;
-
+        const viewportBottomLeft = document.createElement('div');
+        viewportBottomLeft.className = 'threed-overlay-corner threed-overlay-bottom-left';
+        const viewportBottomRight = document.createElement('div');
+        viewportBottomRight.className = 'threed-overlay-corner threed-overlay-bottom-right';
         const pathTraceLoading = document.createElement('div');
         pathTraceLoading.className = 'threed-pathtrace-loading';
         pathTraceLoading.dataset.threedRole = 'pathtrace-loading';
-        pathTraceLoading.innerHTML = `
-            <div class="threed-loading-card">
-                <div class="threed-spinner" aria-hidden="true"></div>
-                <div style="display:flex; flex-direction:column; gap:4px;">
-                    <strong>Preparing Path Tracer</strong>
-                    <span data-threed-role="pathtrace-loading-text">Preparing path tracer...</span>
-                </div>
-            </div>
-        `;
+        pathTraceLoading.innerHTML = `<div class="threed-loading-card"><div class="threed-spinner" aria-hidden="true"></div><div style="display:flex; flex-direction:column; gap:4px;"><strong>Preparing Path Tracer</strong><span data-threed-role="pathtrace-loading-text">Preparing path tracer...</span></div></div>`;
 
         refs.canvasContainer.style.position = 'absolute';
         refs.canvasContainer.style.inset = '0';
-
+        viewportBottomLeft.appendChild(refs.status);
+        viewportBottomRight.appendChild(statusHints);
+        viewportBottomRight.appendChild(statusStats);
         viewportStage.appendChild(refs.canvasContainer);
-        viewportStage.appendChild(compactHud);
+        viewportStage.appendChild(renderPreviewHost);
+        viewportStage.appendChild(viewportTopLeft);
+        viewportStage.appendChild(viewportTopRight);
+        viewportStage.appendChild(viewportBottomLeft);
+        viewportStage.appendChild(viewportBottomRight);
         viewportStage.appendChild(pathTraceLoading);
-        viewportStage.appendChild(refs.status);
-        viewportCard.appendChild(viewportToolbar);
-        viewportCard.appendChild(viewportStage);
-        viewportPanel.appendChild(viewportCard);
 
-        stage.appendChild(leftSidebar);
-        stage.appendChild(viewportPanel);
-        stage.appendChild(rightSidebar);
-        shell.appendChild(stage);
+        shell.appendChild(viewportPanel);
         root.appendChild(shell);
         overlayShell.remove();
     }
 
+    function buildLayoutChrome() {
+        buildCompactLayoutChrome();
+    }
+
     buildLayoutChrome();
     refs.shell = root.querySelector('[data-threed-role="shell"]');
-    refs.compactSampleCount = root.querySelector('[data-threed-role="compact-sample-count"]');
+    refs.statusHints = root.querySelector('[data-threed-role="status-hints"]');
+    refs.statusStats = root.querySelector('[data-threed-role="status-stats"]');
+    refs.headerSampleCount = root.querySelector('[data-threed-role="header-sample-count"]');
+    refs.renderPreviewHost = root.querySelector('[data-threed-role="render-preview-host"]');
+    refs.compactSampleCount = root.querySelector('[data-threed-role="compact-sample-count"]') || refs.headerSampleCount;
     refs.compactRenderModeLabel = root.querySelector('[data-threed-role="compact-render-mode-label"]');
     refs.pathTraceLoading = root.querySelector('[data-threed-role="pathtrace-loading"]');
     refs.pathTraceLoadingText = root.querySelector('[data-threed-role="pathtrace-loading-text"]');
@@ -608,6 +959,8 @@ export function createThreeDWorkspace(actions, store) {
     let lastEngineSyncKey = '';
     let uiMode = 'edit';
     let renderDialogOpen = false;
+    let renderPreviewCanvas = null;
+    let sliceCutterId = '';
 
     const transformInputs = {
         position: [0, 1, 2].map((index) => root.querySelector(`[data-threed-role="position-${index}"]`)),
@@ -618,13 +971,12 @@ export function createThreeDWorkspace(actions, store) {
     function setStatus(text, tone = 'info') {
         statusTone = tone;
         refs.status.textContent = text || '';
-        refs.status.style.background = tone === 'error'
-            ? 'rgba(110, 27, 27, 0.92)'
-            : tone === 'success'
-                ? 'rgba(22, 77, 47, 0.92)'
-                : tone === 'warning'
-                    ? 'rgba(102, 77, 20, 0.92)'
-                    : 'rgba(15,15,18,0.88)';
+        refs.status.dataset.tone = tone;
+        refs.status.style.background = 'rgba(0,0,0,0.92)';
+        refs.status.style.color = '#ffffff';
+        refs.status.style.borderColor = tone === 'info'
+            ? 'rgba(184,178,163,0.28)'
+            : 'rgba(184,178,163,0.72)';
     }
 
     function setInputValue(input, value) {
@@ -652,29 +1004,66 @@ export function createThreeDWorkspace(actions, store) {
         }
     }
 
+    function setRenderViewportPreview(payload = {}) {
+        const nextActive = !!payload?.active;
+        refs.renderPreviewHost?.classList.toggle('is-active', nextActive);
+        refs.canvasContainer?.classList.toggle('is-hidden', nextActive);
+
+        if (nextActive && payload?.canvas && refs.renderPreviewHost) {
+            renderPreviewCanvas = payload.canvas;
+            if (payload.canvas.parentNode !== refs.renderPreviewHost) {
+                refs.renderPreviewHost.appendChild(payload.canvas);
+            }
+            return;
+        }
+
+        if (renderPreviewCanvas?.parentNode === refs.renderPreviewHost) {
+            renderPreviewCanvas.remove();
+        }
+        renderPreviewCanvas = null;
+    }
+
+    function setRenderMode(mode) {
+        const nextMode = mode === 'pathtrace' || mode === 'mesh' ? mode : 'raster';
+        if (nextMode === 'pathtrace') {
+            setPathTraceLoading(true, 'Preparing path tracer...');
+        } else if (!store.getState().threeDDocument?.renderJob?.active) {
+            setPathTraceLoading(false);
+        }
+        actions.updateThreeDRenderSettings({ mode: nextMode });
+    }
+
     function setRenderDialogNote(text, tone = 'info') {
         if (!refs.renderDialogNote) return;
         refs.renderDialogNote.textContent = text || '';
-        refs.renderDialogNote.style.background = tone === 'error'
-            ? 'rgba(110, 27, 27, 0.28)'
-            : tone === 'warning'
-                ? 'rgba(102, 77, 20, 0.28)'
-                : 'rgba(255,255,255,0.06)';
+        refs.renderDialogNote.style.background = tone === 'info'
+            ? 'rgba(184,178,163,0.08)'
+            : 'rgba(184,178,163,0.14)';
+        refs.renderDialogNote.style.borderColor = tone === 'info'
+            ? 'rgba(184,178,163,0.28)'
+            : 'rgba(184,178,163,0.72)';
+        refs.renderDialogNote.style.color = '#ffffff';
     }
 
     function openRenderDialog() {
         const state = store.getState();
         if (state.threeDDocument?.renderJob?.active) {
-            setStatus('A background render is already running.', 'warning');
+            setStatus('A render is already running.', 'warning');
             return;
         }
         const defaultSamples = state.threeDDocument?.render?.lastJobSamples || state.threeDDocument?.render?.samplesTarget || 256;
         const defaultWidth = state.threeDDocument?.render?.outputWidth || 1920;
         const defaultHeight = state.threeDDocument?.render?.outputHeight || 1080;
+        const denoiseEnabled = !!state.threeDDocument?.render?.denoiseEnabled;
         setInputValue(refs.renderDialogSamples, defaultSamples);
         setInputValue(refs.renderDialogWidth, defaultWidth);
         setInputValue(refs.renderDialogHeight, defaultHeight);
-        setRenderDialogNote('Choose the final sample count and export resolution for this background render.', 'info');
+        setRenderDialogNote(
+            denoiseEnabled
+                ? 'Choose the final sample count and export resolution for this render. The viewport will switch to the final render pass, and the current denoise settings will also be applied before export.'
+                : 'Choose the final sample count and export resolution for this render. The viewport will switch to the final render pass while the PNG is being generated.',
+            'info'
+        );
         renderDialogOpen = true;
         refs.renderDialog?.classList.add('is-open');
         refs.renderDialog?.setAttribute('aria-hidden', 'false');
@@ -717,6 +1106,16 @@ export function createThreeDWorkspace(actions, store) {
         });
     }
 
+    function renderWorkspaceChrome(documentState) {
+        const workspace = getWorkspaceState(documentState);
+        root.querySelectorAll('[data-threed-action="workspace-panel-tab"]').forEach((node) => {
+            node.classList.toggle('is-active', node.dataset.workspacePanelTab === workspace.panelTab);
+        });
+        root.querySelectorAll('[data-threed-panel]').forEach((node) => {
+            node.classList.toggle('is-active', node.dataset.threedPanel === workspace.panelTab);
+        });
+    }
+
     function renderHierarchy(state) {
         const items = state.threeDDocument?.scene?.items || [];
         if (!items.length) {
@@ -724,18 +1123,19 @@ export function createThreeDWorkspace(actions, store) {
             return;
         }
         refs.hierarchy.innerHTML = items.map((item) => `
-            <button
-                type="button"
-                data-threed-action="select-item"
-                data-item-id="${item.id}"
-                style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px; border-radius:10px; border:1px solid ${state.threeDDocument.selection.itemId === item.id ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.08)'}; background:${state.threeDDocument.selection.itemId === item.id ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.04)'}; color:inherit; cursor:pointer; text-align:left;"
-            >
-                <span style="display:flex; flex-direction:column; gap:2px;">
-                    <strong style="font-size:11px;">${escapeHtml(item.name)}</strong>
-                    <span style="font-size:9px; opacity:0.72;">${escapeHtml(describeItemKind(item))}</span>
+            <div class="threed-outliner-item ${state.threeDDocument.selection.itemId === item.id ? 'is-active' : ''}">
+                <button type="button" class="threed-outliner-main" data-threed-action="select-item" data-item-id="${item.id}">
+                    <span class="threed-kind-badge">${escapeHtml(describeHierarchyBadge(item))}</span>
+                    <span class="threed-outliner-copy">
+                        <strong>${escapeHtml(item.name)}</strong>
+                        <span>${escapeHtml(describeItemKind(item))}</span>
+                    </span>
+                </button>
+                <span class="threed-outliner-tools">
+                    <button type="button" class="threed-icon-button ${item.visible !== false ? 'is-active' : ''}" data-threed-action="toggle-item-visibility" data-item-id="${item.id}" title="${item.visible !== false ? 'Hide item' : 'Show item'}">${item.visible !== false ? 'Vis' : 'Hide'}</button>
+                    <button type="button" class="threed-icon-button ${item.locked ? 'is-active' : ''}" data-threed-action="toggle-item-lock" data-item-id="${item.id}" title="${item.locked ? 'Unlock item' : 'Lock item'}">${item.locked ? 'Lock' : 'Free'}</button>
                 </span>
-                <span style="font-size:9px; opacity:0.72;">${item.visible === false ? 'Hidden' : 'Visible'}</span>
-            </button>
+            </div>
         `).join('');
     }
 
@@ -746,7 +1146,7 @@ export function createThreeDWorkspace(actions, store) {
             return;
         }
         refs.cameraPresets.innerHTML = presets.map((preset) => `
-            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border-radius:10px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 9px; border-radius:10px; background:rgba(184,178,163,0.08); border:1px solid rgba(184,178,163,0.28);">
                 <span style="display:flex; flex-direction:column; gap:2px;">
                     <strong style="font-size:11px;">${escapeHtml(preset.name)}</strong>
                     <span style="font-size:9px; opacity:0.72;">FOV ${formatNumber(preset.fov, 1)}</span>
@@ -774,6 +1174,39 @@ export function createThreeDWorkspace(actions, store) {
         refs.lightTarget.value = selected.light?.targetItemId || '';
     }
 
+    function getSliceCutterCandidates(state, selected) {
+        return (state.threeDDocument?.scene?.items || [])
+            .filter((item) => isSliceCompatibleItem(item) && item.id !== selected?.id);
+    }
+
+    function renderSliceOptions(state, selected) {
+        if (!isSliceCompatibleItem(selected)) {
+            refs.sliceCount.textContent = '0';
+            refs.sliceCutter.innerHTML = '<option value="">Select a solid object</option>';
+            refs.sliceCutter.value = '';
+            sliceCutterId = '';
+            return;
+        }
+
+        const candidates = getSliceCutterCandidates(state, selected);
+        refs.sliceCount.textContent = String(selected?.booleanCuts?.length || 0);
+        if (!candidates.length) {
+            refs.sliceCutter.innerHTML = '<option value="">Add another model or primitive first</option>';
+            refs.sliceCutter.value = '';
+            sliceCutterId = '';
+            return;
+        }
+
+        if (!candidates.some((item) => item.id === sliceCutterId)) {
+            sliceCutterId = candidates[0].id;
+        }
+
+        refs.sliceCutter.innerHTML = candidates.map((item) => `
+            <option value="${item.id}">${escapeHtml(item.name)}</option>
+        `).join('');
+        refs.sliceCutter.value = sliceCutterId;
+    }
+
     function applyTransformInput(group, axisIndex, rawValue) {
         const state = store.getState();
         const selected = getSelectedItem(state);
@@ -788,7 +1221,7 @@ export function createThreeDWorkspace(actions, store) {
     async function beginBackgroundRender() {
         const state = store.getState();
         if (state.threeDDocument?.renderJob?.active) {
-            setStatus('A background render is already running.', 'warning');
+            setStatus('A render is already running.', 'warning');
             return;
         }
 
@@ -838,10 +1271,10 @@ export function createThreeDWorkspace(actions, store) {
             outputHeight,
             startedAt: Date.now(),
             fileName: suggestedName,
-            message: 'Preparing background render...'
+            message: 'Preparing render...'
         });
-        setPathTraceLoading(true, 'Preparing background render...');
-        setStatus(`Rendering ${requestedSamples} samples at ${outputWidth} x ${outputHeight}. The render will keep running while you work in other tabs.`, 'info');
+        setPathTraceLoading(true, 'Preparing render...');
+        setStatus(`Rendering ${requestedSamples} samples at ${outputWidth} x ${outputHeight}. The final render now takes over the viewport until export completes.`, 'info');
         await waitForUiPaint();
 
         engine.startBackgroundRender({
@@ -864,7 +1297,7 @@ export function createThreeDWorkspace(actions, store) {
                 message: error?.message || 'The render failed.'
             });
             setPathTraceLoading(false);
-            setStatus(error?.message || 'The background render failed.', 'error');
+            setStatus(error?.message || 'The render failed.', 'error');
         });
     }
 
@@ -875,6 +1308,14 @@ export function createThreeDWorkspace(actions, store) {
         if (action === 'ui-mode') {
             uiMode = actionNode.dataset.uiMode === 'fullscreen' ? 'fullscreen' : 'edit';
             applyUiMode();
+        } else if (action === 'workspace-panel-tab') {
+            const panelTab = actionNode.dataset.workspacePanelTab || 'outliner';
+            actions.updateThreeDWorkspace?.({
+                panelTab,
+                taskView: inferTaskViewFromPanel(panelTab)
+            });
+        } else if (action === 'set-render-mode') {
+            setRenderMode(actionNode.dataset.renderMode || 'raster');
         } else if (action === 'load-models') {
             refs.modelInput.click();
         } else if (action === 'load-images') {
@@ -890,6 +1331,10 @@ export function createThreeDWorkspace(actions, store) {
         } else if (action === 'select-item') {
             previewTransform = null;
             actions.setThreeDSelection(actionNode.dataset.itemId || null);
+        } else if (action === 'toggle-item-visibility') {
+            actions.toggleThreeDItemVisibility?.(actionNode.dataset.itemId || null);
+        } else if (action === 'toggle-item-lock') {
+            actions.toggleThreeDItemLock?.(actionNode.dataset.itemId || null);
         } else if (action === 'transform-mode') {
             engine?.setTransformMode(actionNode.dataset.transformMode || 'translate');
         } else if (action === 'frame-item') {
@@ -903,6 +1348,33 @@ export function createThreeDWorkspace(actions, store) {
         } else if (action === 'delete-item') {
             const selected = getSelectedItem(store.getState());
             if (selected) actions.deleteThreeDItem(selected.id);
+        } else if (action === 'apply-slice') {
+            const state = store.getState();
+            const selected = getSelectedItem(state);
+            const cutterId = refs.sliceCutter?.value || sliceCutterId || '';
+            const cutter = (state.threeDDocument?.scene?.items || []).find((item) => item.id === cutterId) || null;
+            if (!isSliceCompatibleItem(selected)) return;
+            if (!cutterId || !isSliceCompatibleItem(cutter)) {
+                setStatus('Add another model or primitive to use as a cutter first.', 'warning');
+                return;
+            }
+            setStatus(`Slicing ${selected.name} with ${cutter.name}...`, 'info');
+            (async () => {
+                const liveEngine = hydrateEngine();
+                await liveEngine.queueSync(store.getState().threeDDocument);
+                const snapshot = await liveEngine.captureBooleanCutSnapshot(selected.id, cutterId);
+                actions.applyThreeDBooleanSlice?.(selected.id, snapshot);
+                setStatus(`Sliced ${selected.name} with ${snapshot.sourceName}. Reset Cuts restores the original shape.`, 'success');
+            })().catch((error) => {
+                console.error(error);
+                setStatus(error?.message || 'Could not apply that slice.', 'error');
+            });
+        } else if (action === 'reset-slices') {
+            const selected = getSelectedItem(store.getState());
+            if (isSliceCompatibleItem(selected) && (selected.booleanCuts?.length || 0) > 0) {
+                actions.resetThreeDItemBooleanSlices?.(selected.id);
+                setStatus(`Reset all stored cuts on ${selected.name}.`, 'success');
+            }
         } else if (action === 'reset-camera') {
             actions.resetThreeDCamera?.();
         } else if (action === 'save-camera-preset') {
@@ -924,11 +1396,11 @@ export function createThreeDWorkspace(actions, store) {
             beginBackgroundRender().catch((error) => {
                 console.error(error);
                 setPathTraceLoading(false);
-                setStatus(error?.message || 'Could not start the background render.', 'error');
+                setStatus(error?.message || 'Could not start the render.', 'error');
             });
         } else if (action === 'abort-render') {
             if (engine?.abortBackgroundRender()) {
-                setStatus('Abort requested. The background render will stop after the current sample finishes.', 'warning');
+                setStatus('Abort requested. The render will stop after the current sample finishes.', 'warning');
             }
         } else if (action === 'upload-texture') {
             const selected = getSelectedItem(store.getState());
@@ -997,15 +1469,34 @@ export function createThreeDWorkspace(actions, store) {
         actions.updateThreeDSceneSettings({ backgroundColor: event.target.value });
     });
     refs.renderMode.addEventListener('change', (event) => {
-        if (event.target.value === 'pathtrace') {
-            setPathTraceLoading(true, 'Preparing path tracer...');
-        } else {
-            setPathTraceLoading(false);
-        }
-        actions.updateThreeDRenderSettings({ mode: event.target.value });
+        setRenderMode(event.target.value);
     });
     refs.samplesTarget.addEventListener('change', (event) => {
         actions.updateThreeDRenderSettings({ samplesTarget: Math.round(clamp(Number(event.target.value) || 256, 1, 4096)) });
+    });
+    refs.pathBounces.addEventListener('change', (event) => {
+        actions.updateThreeDRenderSettings({ bounces: Math.round(clamp(Number(event.target.value) || 10, 1, 64)) });
+    });
+    refs.pathTransmissiveBounces.addEventListener('change', (event) => {
+        const nextValue = String(event.target.value || '').trim() === ''
+            ? 10
+            : Number(event.target.value);
+        actions.updateThreeDRenderSettings({ transmissiveBounces: Math.round(clamp(nextValue, 0, 64)) });
+    });
+    refs.pathFilterGlossyFactor.addEventListener('input', (event) => {
+        actions.updateThreeDRenderSettings({ filterGlossyFactor: clamp(Number(event.target.value) || 0, 0, 1) });
+    });
+    refs.pathDenoiseEnabled.addEventListener('change', (event) => {
+        actions.updateThreeDRenderSettings({ denoiseEnabled: !!event.target.checked });
+    });
+    refs.pathDenoiseSigma.addEventListener('input', (event) => {
+        actions.updateThreeDRenderSettings({ denoiseSigma: clamp(Number(event.target.value) || 5, 0.5, 12) });
+    });
+    refs.pathDenoiseThreshold.addEventListener('change', (event) => {
+        actions.updateThreeDRenderSettings({ denoiseThreshold: clamp(Number(event.target.value) || 0.03, 0.0001, 1) });
+    });
+    refs.pathDenoiseKSigma.addEventListener('change', (event) => {
+        actions.updateThreeDRenderSettings({ denoiseKSigma: clamp(Number(event.target.value) || 1, 0.1, 5) });
     });
     refs.exposureRange.addEventListener('input', (event) => {
         actions.updateThreeDRenderSettings({ exposure: clamp(Number(event.target.value) || 1, 0.05, 10) });
@@ -1055,6 +1546,9 @@ export function createThreeDWorkspace(actions, store) {
         if (selected?.kind === 'light') {
             actions.updateThreeDLight(selected.id, { targetItemId: event.target.value || null });
         }
+    });
+    refs.sliceCutter.addEventListener('change', (event) => {
+        sliceCutterId = event.target.value || '';
     });
 
     refs.materialPreset.addEventListener('change', (event) => {
@@ -1193,7 +1687,7 @@ export function createThreeDWorkspace(actions, store) {
                 beginBackgroundRender().catch((error) => {
                     console.error(error);
                     setPathTraceLoading(false);
-                    setStatus(error?.message || 'Could not start the background render.', 'error');
+                    setStatus(error?.message || 'Could not start the render.', 'error');
                 });
             }
             return;
@@ -1206,12 +1700,13 @@ export function createThreeDWorkspace(actions, store) {
         if (tagName === 'input' || tagName === 'select' || tagName === 'textarea' || event.target?.isContentEditable) return;
         if (key === '1') {
             event.preventDefault();
-            setPathTraceLoading(false);
-            actions.updateThreeDRenderSettings({ mode: 'raster' });
+            setRenderMode('raster');
         } else if (key === '2') {
             event.preventDefault();
-            setPathTraceLoading(true, 'Preparing path tracer...');
-            actions.updateThreeDRenderSettings({ mode: 'pathtrace' });
+            setRenderMode('pathtrace');
+        } else if (key === '3') {
+            event.preventDefault();
+            setRenderMode('mesh');
         }
     });
 
@@ -1237,6 +1732,9 @@ export function createThreeDWorkspace(actions, store) {
             if (samples === sampleCount) return;
             sampleCount = samples;
             refs.sampleCount.textContent = String(samples);
+            if (refs.headerSampleCount) {
+                refs.headerSampleCount.textContent = String(samples);
+            }
             if (refs.compactSampleCount) {
                 refs.compactSampleCount.textContent = String(samples);
             }
@@ -1247,15 +1745,18 @@ export function createThreeDWorkspace(actions, store) {
         engine.onPathTraceLoading = (payload) => {
             setPathTraceLoading(payload?.active, payload?.message);
         };
+        engine.onBackgroundRenderViewport = (payload) => {
+            setRenderViewportPreview(payload);
+        };
         engine.onBackgroundRenderUpdate = (payload) => {
             renderRenderJobUi(payload);
             if (payload?.active && (payload.currentSamples || 0) < 1) {
-                setPathTraceLoading(true, payload.message || 'Preparing background render...');
+                setPathTraceLoading(true, payload.message || 'Preparing render...');
             } else {
                 setPathTraceLoading(false);
             }
             if (statusTone !== 'error' && payload?.active) {
-                const prefix = payload?.message ? `${payload.message} ` : 'Background render running: ';
+                const prefix = payload?.message ? `${payload.message} ` : 'Final render running: ';
                 setStatus(`${prefix}${payload.currentSamples || 0} / ${payload.requestedSamples || 0} samples at ${formatRenderSize(payload)}.`, 'info');
             }
             actions.setThreeDRenderJob(
@@ -1276,8 +1777,17 @@ export function createThreeDWorkspace(actions, store) {
             active = true;
             hydrateEngine();
             refs.sampleCount.textContent = String(sampleCount);
+            if (refs.headerSampleCount) {
+                refs.headerSampleCount.textContent = String(sampleCount);
+            }
             engine.onResize();
-            engine.queueSync(store.getState().threeDDocument).catch((error) => {
+            const documentState = store.getState().threeDDocument;
+            const nextSyncKey = buildEngineSyncKey(documentState);
+            if (nextSyncKey === lastEngineSyncKey) {
+                return;
+            }
+            lastEngineSyncKey = nextSyncKey;
+            engine.queueSync(documentState).catch((error) => {
                 console.error(error);
                 setStatus(error?.message || 'Could not sync the 3D scene.', 'error');
             });
@@ -1295,6 +1805,14 @@ export function createThreeDWorkspace(actions, store) {
             refs.showAxes.checked = !!document.scene.showAxes;
             refs.renderMode.value = document.render.mode || 'raster';
             setInputValue(refs.samplesTarget, document.render.samplesTarget || 256);
+            setInputValue(refs.pathBounces, document.render.bounces ?? 10);
+            setInputValue(refs.pathTransmissiveBounces, document.render.transmissiveBounces ?? 10);
+            setInputValue(refs.pathFilterGlossyFactor, document.render.filterGlossyFactor ?? 0);
+            refs.pathDenoiseEnabled.checked = !!document.render.denoiseEnabled;
+            refs.pathDenoiseFields.style.display = document.render.denoiseEnabled ? 'flex' : 'none';
+            setInputValue(refs.pathDenoiseSigma, document.render.denoiseSigma ?? 5);
+            setInputValue(refs.pathDenoiseThreshold, document.render.denoiseThreshold ?? 0.03);
+            setInputValue(refs.pathDenoiseKSigma, document.render.denoiseKSigma ?? 1);
             setInputValue(refs.exposureRange, document.render.exposure || 1);
             refs.toneMapping.value = document.render.toneMapping || 'aces';
             setInputValue(refs.cameraFov, document.view.fov || 50);
@@ -1303,16 +1821,28 @@ export function createThreeDWorkspace(actions, store) {
             setInputValue(refs.snapTranslationStep, document.view.snapTranslationStep ?? 0);
             setInputValue(refs.snapRotationDegrees, document.view.snapRotationDegrees ?? 0);
             if (refs.compactRenderModeLabel) {
-                refs.compactRenderModeLabel.textContent = document.render.mode === 'pathtrace' ? 'Path Trace' : 'Raster';
+                refs.compactRenderModeLabel.textContent = formatRenderModeLabel(document.render.mode);
             }
             if (refs.compactSampleCount) {
                 refs.compactSampleCount.textContent = String(sampleCount);
             }
+            if (refs.headerSampleCount) {
+                refs.headerSampleCount.textContent = String(sampleCount);
+            }
             renderRenderJobUi(document.renderJob);
+            renderWorkspaceChrome(document);
+            root.querySelectorAll('[data-threed-action="set-render-mode"]').forEach((node) => {
+                node.classList.toggle('is-active', node.dataset.renderMode === document.render.mode);
+            });
+            const activeTransformMode = engine?.getTransformMode?.() || 'translate';
+            root.querySelectorAll('[data-threed-action="transform-mode"]').forEach((node) => {
+                node.classList.toggle('is-active', node.dataset.transformMode === activeTransformMode);
+            });
 
             const selected = getSelectedItem(state);
             const selectedMaterial = getSelectedMaterial(state);
             const renderLocked = !!document.renderJob?.active;
+            const selectionLocked = !!selected?.locked;
             const lightSupportsTarget = selected?.kind === 'light' && ['directional', 'spot'].includes(selected.light?.lightType);
             if (renderLocked && renderDialogOpen) {
                 closeRenderDialog();
@@ -1329,6 +1859,13 @@ export function createThreeDWorkspace(actions, store) {
             } else {
                 refs.lightTargetFields.style.display = 'none';
             }
+
+            const selectedCanSlice = isSliceCompatibleItem(selected);
+            const sliceCandidates = selectedCanSlice ? getSliceCutterCandidates(state, selected) : [];
+            const hasSliceCandidates = sliceCandidates.length > 0;
+            const hasStoredCuts = (selected?.booleanCuts?.length || 0) > 0;
+            refs.sliceFields.style.display = selectedCanSlice ? 'flex' : 'none';
+            renderSliceOptions(state, selected);
 
             const showMaterialFields = isMaterialItem(selected);
             refs.materialFields.style.display = showMaterialFields ? 'flex' : 'none';
@@ -1358,6 +1895,15 @@ export function createThreeDWorkspace(actions, store) {
             renderCameraPresets(state);
             syncTransformFields(state);
 
+            if (refs.statusHints) {
+                refs.statusHints.textContent = document.view.cameraMode === 'fly'
+                    ? '1/2/3 | RMB look | W A S D Q E | Shift'
+                    : '1/2/3 | F frame | Orbit drag | Wheel';
+            }
+            if (refs.statusStats) {
+                refs.statusStats.textContent = `${document.scene.items.length} items | ${selected ? `${selected.name}${selectionLocked ? ' (locked)' : ''}` : 'No selection'} | ${formatRenderModeLabel(document.render.mode)} | ${sampleCount} spp`;
+            }
+
             const selectedIsLight = selected?.kind === 'light';
             const selectedIsMaterial = isMaterialItem(selected);
             const hasSelection = !!selected;
@@ -1366,69 +1912,88 @@ export function createThreeDWorkspace(actions, store) {
                 node.disabled = renderLocked;
             });
             root.querySelectorAll('[data-threed-action="transform-mode"]').forEach((node) => {
-                node.disabled = renderLocked || !hasSelection;
+                node.disabled = renderLocked || !hasSelection || selectionLocked;
             });
-            ['frame-item', 'duplicate-item', 'reset-transform', 'delete-item'].forEach((actionName) => {
+            ['frame-item'].forEach((actionName) => {
                 root.querySelectorAll(`[data-threed-action="${actionName}"]`).forEach((node) => {
                     node.disabled = renderLocked || !hasSelection;
                 });
             });
+            ['duplicate-item', 'reset-transform', 'delete-item'].forEach((actionName) => {
+                root.querySelectorAll(`[data-threed-action="${actionName}"]`).forEach((node) => {
+                    node.disabled = renderLocked || !hasSelection || selectionLocked;
+                });
+            });
+            root.querySelectorAll('[data-threed-action="apply-slice"]').forEach((node) => {
+                node.disabled = renderLocked || selectionLocked || !selectedCanSlice || !hasSliceCandidates;
+            });
+            root.querySelectorAll('[data-threed-action="reset-slices"]').forEach((node) => {
+                node.disabled = renderLocked || selectionLocked || !selectedCanSlice || !hasStoredCuts;
+            });
             ['upload-texture', 'clear-texture'].forEach((actionName) => {
                 root.querySelectorAll(`[data-threed-action="${actionName}"]`).forEach((node) => {
-                    node.disabled = renderLocked || !selectedIsMaterial;
+                    node.disabled = renderLocked || selectionLocked || !selectedIsMaterial;
                 });
             });
             root.querySelectorAll('[data-threed-action="abort-render"]').forEach((node) => {
                 node.disabled = !renderLocked;
             });
 
-            refs.lightColor.disabled = renderLocked || !selectedIsLight;
-            refs.lightIntensity.disabled = renderLocked || !selectedIsLight;
-            refs.lightTarget.disabled = renderLocked || !lightSupportsTarget;
-            refs.itemName.disabled = renderLocked || !hasSelection;
+            refs.lightColor.disabled = renderLocked || selectionLocked || !selectedIsLight;
+            refs.lightIntensity.disabled = renderLocked || selectionLocked || !selectedIsLight;
+            refs.lightTarget.disabled = renderLocked || selectionLocked || !lightSupportsTarget;
+            refs.sliceCutter.disabled = renderLocked || selectionLocked || !selectedCanSlice || !hasSliceCandidates;
+            refs.itemName.disabled = renderLocked || selectionLocked || !hasSelection;
             [...transformInputs.position, ...transformInputs.rotation, ...transformInputs.scale].forEach((input) => {
-                input.disabled = renderLocked || !hasSelection;
+                input.disabled = renderLocked || selectionLocked || !hasSelection;
             });
-            refs.materialPreset.disabled = renderLocked || !selectedIsMaterial;
-            refs.materialColor.disabled = renderLocked || !selectedIsMaterial;
-            refs.materialRoughness.disabled = renderLocked || !selectedIsMaterial;
-            refs.materialMetalness.disabled = renderLocked || !selectedIsMaterial;
-            refs.materialOpacity.disabled = renderLocked || !selectedIsMaterial;
-            refs.materialEmissiveColor.disabled = renderLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'emissive';
-            refs.materialEmissiveIntensity.disabled = renderLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'emissive';
-            refs.materialAttenuationColor.disabled = renderLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
-            refs.materialIor.disabled = renderLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
-            refs.materialTransmission.disabled = renderLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
-            refs.materialThickness.disabled = renderLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
-            refs.materialAttenuationDistance.disabled = renderLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
-            refs.textureRepeatX.disabled = renderLocked || !selectedIsMaterial || !selectedMaterial?.texture;
-            refs.textureRepeatY.disabled = renderLocked || !selectedIsMaterial || !selectedMaterial?.texture;
-            refs.textureRotation.disabled = renderLocked || !selectedIsMaterial || !selectedMaterial?.texture;
+            refs.materialPreset.disabled = renderLocked || selectionLocked || !selectedIsMaterial;
+            refs.materialColor.disabled = renderLocked || selectionLocked || !selectedIsMaterial;
+            refs.materialRoughness.disabled = renderLocked || selectionLocked || !selectedIsMaterial;
+            refs.materialMetalness.disabled = renderLocked || selectionLocked || !selectedIsMaterial;
+            refs.materialOpacity.disabled = renderLocked || selectionLocked || !selectedIsMaterial;
+            refs.materialEmissiveColor.disabled = renderLocked || selectionLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'emissive';
+            refs.materialEmissiveIntensity.disabled = renderLocked || selectionLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'emissive';
+            refs.materialAttenuationColor.disabled = renderLocked || selectionLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
+            refs.materialIor.disabled = renderLocked || selectionLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
+            refs.materialTransmission.disabled = renderLocked || selectionLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
+            refs.materialThickness.disabled = renderLocked || selectionLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
+            refs.materialAttenuationDistance.disabled = renderLocked || selectionLocked || !selectedIsMaterial || selectedMaterial?.preset !== 'glass';
+            refs.textureRepeatX.disabled = renderLocked || selectionLocked || !selectedIsMaterial || !selectedMaterial?.texture;
+            refs.textureRepeatY.disabled = renderLocked || selectionLocked || !selectedIsMaterial || !selectedMaterial?.texture;
+            refs.textureRotation.disabled = renderLocked || selectionLocked || !selectedIsMaterial || !selectedMaterial?.texture;
 
             if (statusTone !== 'error') {
                 if (document.renderJob?.active) {
                     const renderMessage = document.renderJob.message
                         ? `${document.renderJob.message} ${document.renderJob.currentSamples || 0} / ${document.renderJob.requestedSamples || 0} samples at ${formatRenderSize(document.renderJob)}.`
-                        : `Background render running: ${document.renderJob.currentSamples || 0} / ${document.renderJob.requestedSamples || 0} samples at ${formatRenderSize(document.renderJob)}.`;
+                        : `Final render running: ${document.renderJob.currentSamples || 0} / ${document.renderJob.requestedSamples || 0} samples at ${formatRenderSize(document.renderJob)}.`;
                     setStatus(renderMessage, 'info');
                 } else if (document.renderJob?.status === 'complete') {
-                    setStatus(document.renderJob.message || 'Background render complete. PNG exported.', 'success');
+                    setStatus(document.renderJob.message || 'Render complete. PNG exported.', 'success');
                 } else if (document.renderJob?.status === 'aborted') {
-                    setStatus(document.renderJob.message || 'Background render aborted.', 'warning');
+                    setStatus(document.renderJob.message || 'Render aborted.', 'warning');
                 } else if (document.view.cameraMode === 'fly') {
                     setStatus('Fly camera active. Click the viewport, then use right-drag to look and W A S D Q E to move.', 'info');
                 } else if (!document.scene.items.length) {
                     setStatus('Load models or add image planes to start building a 3D scene.');
                 } else if (document.render.mode === 'pathtrace') {
-                    setStatus('Path tracing is active. Editor helpers are excluded from the traced scene.');
+                    setStatus(
+                        document.render.denoiseEnabled
+                            ? 'Path tracing is active. Denoising is enabled, so noise should settle faster but very fine detail can soften a bit.'
+                            : 'Path tracing is active. Editor helpers are excluded from the traced scene.',
+                        'info'
+                    );
+                } else if (document.render.mode === 'mesh') {
+                    setStatus('Mesh view is active. Scene geometry is shown as wireframe while the editor controls stay available.', 'info');
                 } else {
                     setStatus(`${document.scene.items.length} scene item${document.scene.items.length === 1 ? '' : 's'} ready.`, 'info');
                 }
             }
 
             if (document.renderJob?.active && (document.renderJob.currentSamples || 0) < 1) {
-                setPathTraceLoading(true, document.renderJob.message || 'Preparing background render...');
-            } else if (document.render.mode !== 'pathtrace') {
+                setPathTraceLoading(true, document.renderJob.message || 'Preparing render...');
+            } else if (document.render.mode !== 'pathtrace' && !document.renderJob?.active) {
                 setPathTraceLoading(false);
             }
 

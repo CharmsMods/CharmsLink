@@ -1,6 +1,15 @@
 import { getActivePlacements, getPlacementByInput, getSelectedStitchInput, normalizeStitchDocument } from './document.js';
 import { STITCH_ANALYSIS_GROUPS, STITCH_SELECTION_ACTION_HELP, STITCH_SELECTION_FIELDS } from './meta.js';
 
+const PANEL_TABS = [
+    { id: 'inputs', label: 'Inputs', description: 'Load and manage source images.' },
+    { id: 'analysis', label: 'Analysis', description: 'Run the matcher and tune settings.' },
+    { id: 'selection', label: 'Selection', description: 'Adjust the selected image.' },
+    { id: 'candidates', label: 'Results', description: 'Choose candidates and export.' }
+];
+
+const OPEN_ANALYSIS_GROUPS = new Set(['detection', 'warp']);
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replace(/&/g, '&amp;')
@@ -38,13 +47,7 @@ function formatModelType(value) {
 function tooltipMarkup(id, help) {
     return `
         <span class="stitch-tooltip-wrap" data-stitch-tooltip-wrap="${id}">
-            <button
-                type="button"
-                class="stitch-help-button"
-                data-stitch-tooltip-button="${id}"
-                aria-label="Open help"
-                aria-expanded="false"
-            >?</button>
+            <button type="button" class="stitch-help-button" data-stitch-tooltip-button="${id}" aria-label="Open help" aria-expanded="false">?</button>
             <div class="stitch-tooltip-popover" data-stitch-tooltip="${id}" role="tooltip">${escapeHtml(help)}</div>
         </span>
     `;
@@ -58,18 +61,18 @@ function renderSettingField(document, field) {
             ${tooltipMarkup(`setting:${field.key}`, field.help)}
         </span>
     `;
+
     if (field.type === 'select') {
         return `
             <label class="stitch-setting">
                 ${labelRow}
                 <select data-stitch-setting="${field.key}">
-                    ${field.options.map((option) => `
-                        <option value="${option.value}" ${String(value) === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>
-                    `).join('')}
+                    ${field.options.map((option) => `<option value="${option.value}" ${String(value) === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
                 </select>
             </label>
         `;
     }
+
     if (field.type === 'checkbox') {
         return `
             <label class="stitch-setting-checkbox">
@@ -83,6 +86,7 @@ function renderSettingField(document, field) {
             </label>
         `;
     }
+
     return `
         <label class="stitch-setting">
             ${labelRow}
@@ -91,60 +95,110 @@ function renderSettingField(document, field) {
     `;
 }
 
+function getPanelLabel(tabId) {
+    return PANEL_TABS.find((entry) => entry.id === tabId)?.label || tabId;
+}
+
+function buildMetricChip(label, value, muted = true) {
+    return `<span class="stitch-overlay-chip ${muted ? 'is-muted' : ''}"><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></span>`;
+}
+
+function getStageStatus(document) {
+    const analysis = document.analysis || {};
+    const activeCandidate = document.candidates.find((candidate) => candidate.id === document.activeCandidateId) || null;
+    const selected = getSelectedStitchInput(document);
+
+    if (analysis.status === 'running') return { text: analysis.warning || 'Running stitch analysis and scoring ranked candidates.', tone: 'info' };
+    if (analysis.error) return { text: analysis.error, tone: 'error' };
+    if (analysis.warning) return { text: analysis.warning, tone: 'warning' };
+    if (!document.inputs.length) return { text: 'Load images into Stitch to start building a composite.', tone: 'info' };
+    if (document.inputs.length < 2) return { text: 'Add at least one more image before running stitch analysis.', tone: 'info' };
+    if (selected) return { text: `Editing ${selected.name}. Drag directly in the viewport to nudge it into place.`, tone: 'info' };
+    if (activeCandidate) return { text: `${activeCandidate.name} is active. Refine it manually or switch to a different ranked result.`, tone: 'info' };
+    return { text: 'Run the analysis to generate ranked stitch candidates.', tone: 'info' };
+}
+
 export function createStitchWorkspace(root, { actions, stitchEngine }) {
     root.innerHTML = `
+        <style data-stitch-compact-style>
+            .stitch-shell{--stitch-border:#b8b2a3;--stitch-border-soft:rgba(184,178,163,.28);--stitch-accent:rgba(184,178,163,.14);--stitch-muted:#b8b2a3;position:relative;width:100%;height:100%;min-width:0;min-height:0;display:grid;grid-template-columns:minmax(232px,292px) minmax(0,1fr);gap:8px;padding:8px;background:#000;color:#fff;font-size:11px;line-height:1.24;overflow:hidden}
+            .stitch-shell button,.stitch-shell input,.stitch-shell select,.stitch-gallery-overlay button{font-size:11px!important}
+            .stitch-shell .mini-button,.stitch-shell .toolbar-button,.stitch-shell input[type="number"],.stitch-shell select,.stitch-gallery-overlay .toolbar-button{min-height:22px;padding:2px 7px!important;border-radius:4px;border:1px solid var(--stitch-border);background:#000;color:#fff;box-shadow:none}
+            .stitch-shell .mini-button.is-danger{border-color:rgba(184,178,163,.72)}
+            .stitch-dock,.stitch-stage-card,.stitch-gallery-panel{min-width:0;min-height:0;border:1px solid var(--stitch-border);background:#000;overflow:hidden}
+            .stitch-dock{display:flex;flex-direction:column}
+            .stitch-dock-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px;border-bottom:1px solid var(--stitch-border);background:#050505}
+            .stitch-dock-tab{min-height:20px;padding:0 7px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--stitch-muted);cursor:pointer}
+            .stitch-dock-tab.is-active,.stitch-dock-tab:hover{background:var(--stitch-accent);border-color:var(--stitch-border);color:#fff}
+            .stitch-dock-panels{flex:1;min-height:0}.stitch-dock-panel{display:none;height:100%;min-height:0;flex-direction:column}.stitch-dock-panel.is-active{display:flex}
+            .stitch-dock-panel-head{padding:8px 9px 7px;border-bottom:1px solid var(--stitch-border);background:#050505}.stitch-dock-panel-head span{display:block;margin-top:2px;color:var(--stitch-muted);font-size:10px}
+            .stitch-dock-panel-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px;display:flex;flex-direction:column;gap:8px}
+            .stitch-stage-card{display:flex;flex-direction:column}
+            .stitch-stage-topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--stitch-border);background:#050505}
+            .stitch-stage-title{min-width:0}.stitch-stage-title .eyebrow{margin:0 0 2px;color:var(--stitch-muted);font-size:10px;letter-spacing:.04em;text-transform:uppercase}.stitch-stage-title h2{margin:0;font-size:12px;line-height:1.2;overflow-wrap:anywhere}
+            .stitch-mini-bar{display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid var(--stitch-border-soft);background:rgba(0,0,0,.92)}.stitch-mini-bar .mini-button{min-height:20px;padding:0 6px!important;border-radius:3px}
+            .stitch-stage-wrap{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden;background:#000}.stitch-canvas{display:block;width:100%;height:100%;background:#000}
+            .stitch-stage-overlay{position:absolute;display:flex;gap:4px;z-index:3;pointer-events:none;max-width:min(64%,calc(100% - 12px))}.stitch-overlay-top-right{top:6px;right:6px;flex-wrap:wrap;justify-content:flex-end}.stitch-overlay-bottom-left{left:6px;bottom:6px}
+            .stitch-overlay-chip,.stitch-status-chip{display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0 6px;border:1px solid var(--stitch-border-soft);background:rgba(0,0,0,.92);color:#fff;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stitch-overlay-chip.is-muted{color:var(--stitch-muted)}.stitch-status-chip[data-tone="warning"],.stitch-status-chip[data-tone="error"]{border-color:rgba(184,178,163,.72)}
+            .stitch-empty-state{position:absolute;inset:12px;display:none;align-items:center;justify-content:center;flex-direction:column;gap:6px;text-align:center;pointer-events:none;color:var(--stitch-muted);border:1px dashed var(--stitch-border-soft);background:rgba(0,0,0,.74)}.stitch-empty-state.is-visible{display:flex}
+            .stitch-stack,.stitch-input-list,.stitch-candidate-list,.stitch-settings-stack{display:flex;flex-direction:column;gap:8px;min-width:0}.stitch-button-row{display:grid;gap:6px}.stitch-button-row-2{grid-template-columns:repeat(2,minmax(0,1fr))}.stitch-button-row-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+            .stitch-info-banner,.stitch-analysis-note{padding:7px 8px;border:1px solid var(--stitch-border-soft);background:rgba(184,178,163,.08);color:#fff;font-size:10px;line-height:1.4}.stitch-analysis-note.is-warning,.stitch-analysis-note.is-error{border-color:rgba(184,178,163,.72)}.stitch-mini-empty{padding:4px 0;color:var(--stitch-muted);font-size:10px;line-height:1.4}
+            .stitch-summary-card,.stitch-input-item,.stitch-candidate-card,.stitch-foldout,.stitch-gallery-card{border:1px solid var(--stitch-border);background:#050505;min-width:0}.stitch-summary-card{padding:8px;display:flex;flex-direction:column;gap:6px}
+            .stitch-summary-row,.stitch-analysis-line{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:10px;color:var(--stitch-muted)}.stitch-summary-row strong,.stitch-analysis-line strong{color:#fff}
+            .stitch-input-item.is-selected,.stitch-candidate-card.is-active,.stitch-gallery-card.is-active{background:var(--stitch-accent);border-color:var(--stitch-border)}
+            .stitch-input-main,.stitch-candidate-main{width:100%;border:none;background:none;color:inherit;text-align:left;padding:7px;display:flex;flex-direction:column;gap:4px;cursor:pointer}
+            .stitch-input-copy,.stitch-candidate-copy,.stitch-gallery-meta{display:flex;flex-direction:column;gap:2px;min-width:0}.stitch-input-copy strong,.stitch-candidate-copy strong,.stitch-gallery-meta strong{font-size:11px;overflow-wrap:anywhere}
+            .stitch-input-copy span,.stitch-candidate-copy span,.stitch-gallery-meta span{color:var(--stitch-muted);font-size:10px}
+            .stitch-item-badges{display:flex;flex-wrap:wrap;gap:4px}.stitch-kind-badge{display:inline-flex;align-items:center;justify-content:center;min-height:18px;padding:0 5px;border:1px solid var(--stitch-border-soft);background:rgba(184,178,163,.08);color:var(--stitch-muted);font-size:9px;letter-spacing:.04em;text-transform:uppercase}
+            .stitch-input-actions,.stitch-candidate-actions,.stitch-gallery-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:6px;padding:0 7px 7px}
+            .stitch-foldout summary{list-style:none;cursor:pointer;user-select:none;padding:7px 8px;color:#fff;font-weight:600}.stitch-foldout summary::-webkit-details-marker{display:none}.stitch-foldout-body{padding:0 8px 8px;display:flex;flex-direction:column;gap:8px}
+            .stitch-setting-grid{display:grid;grid-template-columns:1fr;gap:8px}.stitch-setting{display:flex;flex-direction:column;gap:6px;font-size:10px;color:var(--stitch-muted);min-width:0}
+            .stitch-setting-label{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;min-width:0;color:inherit}.stitch-setting-label>span:first-child{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}.stitch-setting-label-checkbox{margin-bottom:3px}
+            .stitch-setting input,.stitch-setting select{width:100%}.stitch-setting-checkbox{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;padding:7px 8px;border:1px solid var(--stitch-border);background:#000}.stitch-setting-checkbox strong{display:block;font-size:10px;color:#fff}
+            .stitch-help-button{width:16px;height:16px;border-radius:999px;border:1px solid var(--stitch-border-soft);background:#000;color:var(--stitch-muted);font:700 10px/1 monospace;display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}.stitch-tooltip-wrap{position:relative;display:inline-flex;align-items:center}
+            .stitch-tooltip-wrap.is-open .stitch-help-button,.stitch-help-button:hover{color:#fff;border-color:var(--stitch-border)}
+            .stitch-tooltip-popover{position:fixed;top:0;left:0;width:min(260px,60vw);padding:9px 10px;border:1px solid var(--stitch-border);background:#000;color:#fff;font-size:10px;line-height:1.45;z-index:40;display:none;white-space:normal}.stitch-tooltip-wrap.is-open .stitch-tooltip-popover{display:block}
+            .stitch-selection-help-row{display:flex;flex-direction:column;gap:6px}.stitch-selection-help-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--stitch-muted);font-size:10px}
+            .stitch-gallery-overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:12px;background:rgba(0,0,0,.78);z-index:30}.stitch-gallery-overlay.is-open{display:flex}
+            .stitch-gallery-panel{width:min(1060px,100%);height:min(86vh,760px);display:flex;flex-direction:column;gap:8px;padding:10px}.stitch-gallery-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.stitch-gallery-header .eyebrow{margin:0 0 2px;color:var(--stitch-muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em}.stitch-gallery-header h3{margin:0;font-size:12px}
+            .stitch-gallery-grid{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.stitch-gallery-preview{aspect-ratio:4/3;background:#000;border-bottom:1px solid var(--stitch-border);display:flex;align-items:center;justify-content:center}.stitch-gallery-preview img{display:block;width:100%;height:100%;object-fit:contain}.stitch-gallery-placeholder{color:var(--stitch-muted);font-size:10px}
+            @media (max-width:980px){.stitch-shell{grid-template-columns:1fr;grid-template-rows:minmax(240px,42vh) minmax(0,1fr)}.stitch-gallery-overlay{padding:8px}.stitch-gallery-panel{width:100%;height:100%}}
+        </style>
         <div class="stitch-shell">
-            <div class="stitch-main">
-                <aside class="stitch-sidebar stitch-sidebar-left">
-                    <div class="stitch-sidebar-section stitch-sidebar-section-inputs">
-                        <div class="stitch-section-header">
-                            <strong>Inputs</strong>
-                            <button type="button" class="mini-button" data-stitch-action="add-images">Add Images</button>
-                        </div>
-                        <div class="stitch-input-list" data-stitch-role="input-list"></div>
+            <aside class="stitch-dock">
+                <div class="stitch-dock-tabs">${PANEL_TABS.map((tab) => `<button type="button" class="stitch-dock-tab" data-stitch-action="workspace-tab" data-sidebar-view="${tab.id}">${tab.label}</button>`).join('')}</div>
+                <div class="stitch-dock-panels">
+                    ${PANEL_TABS.map((tab) => `
+                        <section class="stitch-dock-panel" data-stitch-panel="${tab.id}">
+                            <div class="stitch-dock-panel-head"><strong>${tab.label}</strong><span>${tab.description}</span></div>
+                            <div class="stitch-dock-panel-body" data-stitch-role="${tab.id}-panel"></div>
+                        </section>
+                    `).join('')}
+                </div>
+            </aside>
+            <section class="stitch-stage-card">
+                <div class="stitch-stage-topbar">
+                    <div class="stitch-stage-title">
+                        <div class="eyebrow">Stitch Preview</div>
+                        <h2 data-stitch-role="title">Stitch Workspace</h2>
                     </div>
-                    <div class="stitch-sidebar-section stitch-sidebar-section-analysis">
-                        <div class="stitch-section-header">
-                            <strong>Analysis</strong>
-                            <button type="button" class="mini-button" data-stitch-action="open-gallery">Gallery</button>
-                        </div>
-                        <div class="stitch-analysis-card" data-stitch-role="analysis-card"></div>
+                    <div class="stitch-mini-bar">
+                        <button type="button" class="mini-button" data-stitch-action="fit-view">Frame</button>
+                        <button type="button" class="mini-button" data-stitch-action="open-gallery">Gallery</button>
+                        <button type="button" class="mini-button" data-stitch-action="export-project">Export</button>
                     </div>
-                </aside>
-                <section class="stitch-center">
-                    <div class="stitch-stage-header">
-                        <div class="stitch-stage-title">
-                            <div class="eyebrow">Stitch Preview</div>
-                            <h2 data-stitch-role="title">Stitch Workspace</h2>
-                        </div>
-                        <div class="stitch-stage-metrics" data-stitch-role="metrics"></div>
-                    </div>
-                    <div class="stitch-stage-wrap">
-                        <canvas class="stitch-canvas" data-stitch-role="canvas"></canvas>
-                        <div class="stitch-empty-state" data-stitch-role="empty-state">
-                            <strong>Add two or more images</strong>
-                            <span>Run the Stitch analysis to generate candidate layouts, then refine the result by hand.</span>
-                        </div>
-                    </div>
-                    <div class="stitch-alternatives" data-stitch-role="alternatives"></div>
-                </section>
-                <aside class="stitch-sidebar stitch-sidebar-right">
-                    <div class="stitch-sidebar-section stitch-sidebar-section-selection">
-                        <div class="stitch-section-header">
-                            <strong>Selection</strong>
-                            <button type="button" class="mini-button" data-stitch-action="reset-selected">Reset Image</button>
-                        </div>
-                        <div class="stitch-selection-card" data-stitch-role="selection-card"></div>
-                    </div>
-                </aside>
-            </div>
+                </div>
+                <div class="stitch-stage-wrap">
+                    <canvas class="stitch-canvas" data-stitch-role="canvas"></canvas>
+                    <div class="stitch-stage-overlay stitch-overlay-top-right" data-stitch-role="metrics"></div>
+                    <div class="stitch-stage-overlay stitch-overlay-bottom-left"><div class="stitch-status-chip" data-stitch-role="status" data-tone="info">Stitch workspace ready.</div></div>
+                    <div class="stitch-empty-state" data-stitch-role="empty-state"><strong>Add two or more images</strong><span>Run analysis to generate candidate layouts, then refine the result directly in the viewport.</span></div>
+                </div>
+            </section>
             <div class="stitch-gallery-overlay" data-stitch-role="gallery-overlay">
                 <div class="stitch-gallery-panel">
                     <div class="stitch-gallery-header">
-                        <div>
-                            <div class="eyebrow">Candidate Gallery</div>
-                            <h3>Possible Stitch Layouts</h3>
-                        </div>
+                        <div><div class="eyebrow">Candidate Gallery</div><h3>Possible Stitch Layouts</h3></div>
                         <button type="button" class="toolbar-button" data-stitch-action="close-gallery">Close</button>
                     </div>
                     <div class="stitch-gallery-grid" data-stitch-role="gallery-grid"></div>
@@ -158,11 +212,12 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         canvas: root.querySelector('[data-stitch-role="canvas"]'),
         title: root.querySelector('[data-stitch-role="title"]'),
         metrics: root.querySelector('[data-stitch-role="metrics"]'),
+        status: root.querySelector('[data-stitch-role="status"]'),
         empty: root.querySelector('[data-stitch-role="empty-state"]'),
-        inputList: root.querySelector('[data-stitch-role="input-list"]'),
-        analysisCard: root.querySelector('[data-stitch-role="analysis-card"]'),
-        selectionCard: root.querySelector('[data-stitch-role="selection-card"]'),
-        alternatives: root.querySelector('[data-stitch-role="alternatives"]'),
+        inputsPanel: root.querySelector('[data-stitch-role="inputs-panel"]'),
+        analysisPanel: root.querySelector('[data-stitch-role="analysis-panel"]'),
+        selectionPanel: root.querySelector('[data-stitch-role="selection-panel"]'),
+        candidatesPanel: root.querySelector('[data-stitch-role="candidates-panel"]'),
         galleryOverlay: root.querySelector('[data-stitch-role="gallery-overlay"]'),
         galleryGrid: root.querySelector('[data-stitch-role="gallery-grid"]'),
         fileInput: root.querySelector('[data-stitch-role="file-input"]')
@@ -183,51 +238,29 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
             const id = node.dataset.stitchTooltipWrap;
             const isOpen = id === openTooltipId;
             node.classList.toggle('is-open', isOpen);
-            
+
             const button = node.querySelector('[data-stitch-tooltip-button]');
             const popover = node.querySelector('[data-stitch-tooltip]');
-            
             if (button) button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
-            
+
             if (isOpen && button && popover) {
-                // Ensure popover is visible for measurement
                 popover.style.display = 'block';
                 popover.style.visibility = 'hidden';
                 popover.style.pointerEvents = 'none';
-
                 const triggerRect = button.getBoundingClientRect();
                 const popoverRect = popover.getBoundingClientRect();
-                const viewportWidth = window.innerWidth;
-                const viewportHeight = window.innerHeight;
-
-                // Default: below, right-aligned to trigger
                 let top = triggerRect.bottom + 8;
                 let left = triggerRect.right - popoverRect.width;
-
-                // Horizontal bounds check
-                if (left < 10) {
-                    left = triggerRect.left; // Try left-aligned
-                }
-                if (left + popoverRect.width > viewportWidth - 10) {
-                    left = viewportWidth - popoverRect.width - 10;
-                }
+                if (left < 10) left = triggerRect.left;
+                if (left + popoverRect.width > window.innerWidth - 10) left = window.innerWidth - popoverRect.width - 10;
+                if (top + popoverRect.height > window.innerHeight - 10) top = triggerRect.top - popoverRect.height - 8;
                 if (left < 10) left = 10;
-
-                // Vertical bounds check
-                if (top + popoverRect.height > viewportHeight - 10) {
-                    // Flip to top if it would go off bottom
-                    top = triggerRect.top - popoverRect.height - 8;
-                }
-                
-                // Final safety clamp for vertical
                 if (top < 10) top = 10;
-
                 popover.style.top = `${top}px`;
                 popover.style.left = `${left}px`;
                 popover.style.visibility = 'visible';
                 popover.style.pointerEvents = 'auto';
-            } else if (!isOpen && popover) {
-                // Reset styles when closed
+            } else if (popover) {
                 popover.style.top = '';
                 popover.style.left = '';
                 popover.style.display = '';
@@ -242,58 +275,96 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         applyTooltipState();
     }
 
+    function renderDockState(document) {
+        const activeTab = document.workspace?.sidebarView || 'inputs';
+        root.querySelectorAll('[data-sidebar-view]').forEach((button) => {
+            button.classList.toggle('is-active', button.dataset.sidebarView === activeTab);
+        });
+        root.querySelectorAll('[data-stitch-panel]').forEach((panel) => {
+            panel.classList.toggle('is-active', panel.dataset.stitchPanel === activeTab);
+        });
+    }
+
     function renderInputs(document) {
         const orderedInputs = [...document.inputs].sort((a, b) => {
             const placementA = getPlacementByInput(document, a.id);
             const placementB = getPlacementByInput(document, b.id);
             return (placementA?.z || 0) - (placementB?.z || 0);
         });
-        refs.inputList.innerHTML = orderedInputs.length
-            ? orderedInputs.map((input) => {
-                const placement = getPlacementByInput(document, input.id);
-                const selected = document.selection.inputId === input.id;
-                return `
-                    <div class="stitch-input-item ${selected ? 'is-selected' : ''}">
-                        <button type="button" class="stitch-input-main" data-stitch-action="select-input" data-input-id="${input.id}">
-                            <strong>${escapeHtml(input.name)}</strong>
-                            <span>${escapeHtml(formatDimensions(input.width, input.height))}</span>
-                        </button>
-                        <div class="stitch-input-actions">
-                            <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}">${placement?.visible === false ? 'Show' : 'Hide'}</button>
-                            <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}">${placement?.locked ? 'Unlock' : 'Lock'}</button>
-                            <button type="button" class="mini-button" data-stitch-action="move-up" data-input-id="${input.id}">Up</button>
-                            <button type="button" class="mini-button" data-stitch-action="move-down" data-input-id="${input.id}">Down</button>
-                            <button type="button" class="mini-button is-danger" data-stitch-action="remove-input" data-input-id="${input.id}">Remove</button>
-                        </div>
+
+        refs.inputsPanel.innerHTML = `
+            <div class="stitch-stack">
+                <div class="stitch-button-row stitch-button-row-2">
+                    <button type="button" class="mini-button" data-stitch-action="add-images">Add Images</button>
+                    <button type="button" class="mini-button" data-stitch-action="new-project">New Stitch</button>
+                </div>
+                <div class="stitch-info-banner">Use this panel to load, reorder, hide, and lock the image stack while the viewport stays focused on the composite.</div>
+                ${orderedInputs.length ? `
+                    <div class="stitch-input-list">
+                        ${orderedInputs.map((input) => {
+                            const placement = getPlacementByInput(document, input.id);
+                            const selected = document.selection.inputId === input.id;
+                            const badges = [
+                                placement?.visible === false ? 'Hidden' : 'Visible',
+                                placement?.locked ? 'Locked' : 'Free'
+                            ];
+                            return `
+                                <article class="stitch-input-item ${selected ? 'is-selected' : ''}">
+                                    <button type="button" class="stitch-input-main" data-stitch-action="select-input" data-input-id="${input.id}">
+                                        <span class="stitch-input-copy">
+                                            <strong>${escapeHtml(input.name)}</strong>
+                                            <span>${escapeHtml(formatDimensions(input.width, input.height))}</span>
+                                        </span>
+                                        <span class="stitch-item-badges">
+                                            ${badges.map((badge) => `<span class="stitch-kind-badge">${escapeHtml(badge)}</span>`).join('')}
+                                        </span>
+                                    </button>
+                                    <div class="stitch-input-actions">
+                                        <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}">${placement?.visible === false ? 'Show' : 'Hide'}</button>
+                                        <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}">${placement?.locked ? 'Unlock' : 'Lock'}</button>
+                                        <button type="button" class="mini-button" data-stitch-action="move-up" data-input-id="${input.id}">Up</button>
+                                        <button type="button" class="mini-button" data-stitch-action="move-down" data-input-id="${input.id}">Down</button>
+                                        <button type="button" class="mini-button is-danger" data-stitch-action="remove-input" data-input-id="${input.id}">Remove</button>
+                                    </div>
+                                </article>
+                            `;
+                        }).join('')}
                     </div>
-                `;
-            }).join('')
-            : '<div class="stitch-mini-empty">No images loaded yet.</div>';
+                ` : '<div class="stitch-mini-empty">No images loaded yet. Start by adding a set of overlapping images.</div>'}
+            </div>
+        `;
     }
 
     function renderAnalysis(document) {
         const analysis = document.analysis || {};
         const topCandidate = (document.candidates || [])[0] || null;
-        refs.analysisCard.innerHTML = `
-            <div class="stitch-analysis-line"><strong>Status</strong><span>${escapeHtml(analysis.status || 'idle')}</span></div>
-            <div class="stitch-analysis-line"><strong>Inputs</strong><span>${document.inputs.length}</span></div>
-            <div class="stitch-analysis-line"><strong>Candidates</strong><span>${document.candidates.length}</span></div>
-            ${topCandidate ? `<div class="stitch-analysis-line"><strong>Top Result</strong><span>${escapeHtml(formatModelType(topCandidate.modelType))} | ${formatPercent(topCandidate.confidence || 0)}</span></div>` : ''}
-            ${analysis.warning ? `<div class="stitch-analysis-note is-warning">${escapeHtml(analysis.warning)}</div>` : ''}
-            ${analysis.error ? `<div class="stitch-analysis-note is-error">${escapeHtml(analysis.error)}</div>` : ''}
-            ${STITCH_ANALYSIS_GROUPS.map((group) => `
-                <section class="stitch-settings-group">
-                    <div class="stitch-settings-group-header">
-                        <strong>${escapeHtml(group.title)}</strong>
-                    </div>
-                    <div class="stitch-setting-grid ${group.fields.some((field) => field.type === 'checkbox') ? 'has-checkbox' : ''}">
-                        ${group.fields.map((field) => renderSettingField(document, field)).join('')}
-                    </div>
-                </section>
-            `).join('')}
-            <div class="button-cluster stitch-analysis-actions">
-                <button type="button" class="toolbar-button" data-stitch-action="run-analysis" ${document.inputs.length < 2 ? 'disabled' : ''}>${analysis.status === 'running' ? 'Analyzing...' : 'Run Analysis'}</button>
-                <button type="button" class="toolbar-button" data-stitch-action="reset-candidate" ${document.activeCandidateId ? '' : 'disabled'}>Reset Candidate</button>
+
+        refs.analysisPanel.innerHTML = `
+            <div class="stitch-stack">
+                <div class="stitch-button-row stitch-button-row-2">
+                    <button type="button" class="toolbar-button" data-stitch-action="run-analysis" ${document.inputs.length < 2 ? 'disabled' : ''}>${analysis.status === 'running' ? 'Analyzing...' : 'Run Analysis'}</button>
+                    <button type="button" class="mini-button" data-stitch-action="reset-candidate" ${document.activeCandidateId ? '' : 'disabled'}>Reset Candidate</button>
+                </div>
+                <div class="stitch-summary-card">
+                    <div class="stitch-summary-row"><strong>Status</strong><span>${escapeHtml(analysis.status || 'idle')}</span></div>
+                    <div class="stitch-summary-row"><strong>Inputs</strong><span>${document.inputs.length}</span></div>
+                    <div class="stitch-summary-row"><strong>Candidates</strong><span>${document.candidates.length}</span></div>
+                    ${topCandidate ? `<div class="stitch-summary-row"><strong>Top Result</strong><span>${escapeHtml(formatModelType(topCandidate.modelType))} | ${formatPercent(topCandidate.confidence || 0)}</span></div>` : ''}
+                </div>
+                ${analysis.warning ? `<div class="stitch-analysis-note is-warning">${escapeHtml(analysis.warning)}</div>` : ''}
+                ${analysis.error ? `<div class="stitch-analysis-note is-error">${escapeHtml(analysis.error)}</div>` : ''}
+                <div class="stitch-settings-stack">
+                    ${STITCH_ANALYSIS_GROUPS.map((group) => `
+                        <details class="stitch-foldout" ${OPEN_ANALYSIS_GROUPS.has(group.id) ? 'open' : ''}>
+                            <summary>${escapeHtml(group.title)}</summary>
+                            <div class="stitch-foldout-body">
+                                <div class="stitch-setting-grid">
+                                    ${group.fields.map((field) => renderSettingField(document, field)).join('')}
+                                </div>
+                            </div>
+                        </details>
+                    `).join('')}
+                </div>
             </div>
         `;
     }
@@ -301,89 +372,101 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
     function renderSelection(document) {
         const input = getSelectedStitchInput(document);
         const placement = input ? getPlacementByInput(document, input.id) : null;
+
         if (!input || !placement) {
-            refs.selectionCard.innerHTML = '<div class="stitch-mini-empty">Select an image to move, rotate, scale, or lock it.</div>';
+            refs.selectionPanel.innerHTML = '<div class="stitch-mini-empty">Select an image to move, rotate, scale, hide, or lock it.</div>';
             return;
         }
 
-        refs.selectionCard.innerHTML = `
-            <div class="stitch-selection-header">
-                <strong>${escapeHtml(input.name)}</strong>
-                <span>${escapeHtml(formatDimensions(input.width, input.height))}</span>
-            </div>
-            <div class="stitch-setting-grid stitch-setting-grid-selection">
-                ${STITCH_SELECTION_FIELDS.map((field) => `
-                    <label class="stitch-setting">
-                        <span class="stitch-setting-label">
-                            <span>${escapeHtml(field.label)}</span>
-                            ${tooltipMarkup(`placement:${field.key}`, field.help)}
-                        </span>
-                        <input
-                            type="number"
-                            ${field.key === 'scale' ? 'min="0.05" max="8" step="0.01"' : ''}
-                            ${field.key === 'rotation' ? 'min="-180" max="180" step="0.5"' : ''}
-                            ${field.key === 'x' || field.key === 'y' ? 'step="1"' : ''}
-                            value="${field.key === 'rotation' ? formatNumber((placement.rotation || 0) * (180 / Math.PI), 1) : formatNumber(placement[field.key], field.key === 'scale' ? 2 : 0)}"
-                            data-stitch-placement="${field.key}"
-                            data-input-id="${input.id}"
-                        >
-                    </label>
-                `).join('')}
-            </div>
-            ${placement.warp ? `
-                <div class="stitch-analysis-note">
-                    Auto warp: ${escapeHtml(formatModelType(placement.warp.type))} grid ${escapeHtml(String(placement.warp.cols))} x ${escapeHtml(String(placement.warp.rows))}
+        refs.selectionPanel.innerHTML = `
+            <div class="stitch-stack">
+                <div class="stitch-summary-card">
+                    <div class="stitch-summary-row"><strong>Image</strong><span>${escapeHtml(input.name)}</span></div>
+                    <div class="stitch-summary-row"><strong>Size</strong><span>${escapeHtml(formatDimensions(input.width, input.height))}</span></div>
+                    <div class="stitch-summary-row"><strong>Visible</strong><span>${placement.visible === false ? 'No' : 'Yes'}</span></div>
+                    <div class="stitch-summary-row"><strong>Locked</strong><span>${placement.locked ? 'Yes' : 'No'}</span></div>
                 </div>
-            ` : ''}
-            <div class="stitch-selection-help-row">
-                <span class="stitch-selection-help-chip">
-                    <strong>Reset Image</strong>
-                    ${tooltipMarkup('action:reset', STITCH_SELECTION_ACTION_HELP.reset)}
-                </span>
-                <span class="stitch-selection-help-chip">
-                    <strong>Hide / Show</strong>
-                    ${tooltipMarkup('action:visibility', STITCH_SELECTION_ACTION_HELP.visibility)}
-                </span>
-                <span class="stitch-selection-help-chip">
-                    <strong>Lock</strong>
-                    ${tooltipMarkup('action:lock', STITCH_SELECTION_ACTION_HELP.lock)}
-                </span>
-            </div>
-            <div class="button-cluster stitch-selection-actions">
-                <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}">${placement.visible === false ? 'Show' : 'Hide'}</button>
-                <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}">${placement.locked ? 'Unlock' : 'Lock'}</button>
+                <div class="stitch-setting-grid">
+                    ${STITCH_SELECTION_FIELDS.map((field) => `
+                        <label class="stitch-setting">
+                            <span class="stitch-setting-label">
+                                <span>${escapeHtml(field.label)}</span>
+                                ${tooltipMarkup(`placement:${field.key}`, field.help)}
+                            </span>
+                            <input
+                                type="number"
+                                ${field.key === 'scale' ? 'min="0.05" max="8" step="0.01"' : ''}
+                                ${field.key === 'rotation' ? 'min="-180" max="180" step="0.5"' : ''}
+                                ${field.key === 'x' || field.key === 'y' ? 'step="1"' : ''}
+                                value="${field.key === 'rotation' ? formatNumber((placement.rotation || 0) * (180 / Math.PI), 1) : formatNumber(placement[field.key], field.key === 'scale' ? 2 : 0)}"
+                                data-stitch-placement="${field.key}"
+                                data-input-id="${input.id}"
+                            >
+                        </label>
+                    `).join('')}
+                </div>
+                ${placement.warp ? `<div class="stitch-analysis-note">Auto warp: ${escapeHtml(formatModelType(placement.warp.type))} grid ${escapeHtml(String(placement.warp.cols))} x ${escapeHtml(String(placement.warp.rows))}</div>` : ''}
+                <div class="stitch-button-row stitch-button-row-3">
+                    <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}">${placement.visible === false ? 'Show' : 'Hide'}</button>
+                    <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}">${placement.locked ? 'Unlock' : 'Lock'}</button>
+                    <button type="button" class="mini-button" data-stitch-action="reset-selected">Reset</button>
+                </div>
+                <details class="stitch-foldout">
+                    <summary>Help</summary>
+                    <div class="stitch-foldout-body">
+                        <div class="stitch-selection-help-row">
+                            <span class="stitch-selection-help-chip"><strong>Reset Image</strong>${tooltipMarkup('action:reset', STITCH_SELECTION_ACTION_HELP.reset)}</span>
+                            <span class="stitch-selection-help-chip"><strong>Hide / Show</strong>${tooltipMarkup('action:visibility', STITCH_SELECTION_ACTION_HELP.visibility)}</span>
+                            <span class="stitch-selection-help-chip"><strong>Lock</strong>${tooltipMarkup('action:lock', STITCH_SELECTION_ACTION_HELP.lock)}</span>
+                        </div>
+                    </div>
+                </details>
             </div>
         `;
     }
 
-    function renderAlternatives(document) {
+    function renderCandidates(document) {
         const candidates = document.candidates || [];
-        if (!candidates.length) {
-            refs.alternatives.innerHTML = '<div class="stitch-mini-empty">Run the analysis to generate stitch candidates.</div>';
-            return;
-        }
+        const activeCandidate = candidates.find((candidate) => candidate.id === document.activeCandidateId) || null;
 
-        refs.alternatives.innerHTML = `
-            <div class="stitch-alt-header">
-                <strong>Alternatives</strong>
-                <button type="button" class="mini-button" data-stitch-action="toggle-alternatives">${document.workspace.alternativesOpen === false ? 'Show' : 'Hide'}</button>
-            </div>
-            ${document.workspace.alternativesOpen === false ? '' : `
-                <div class="stitch-alt-list">
-                    ${candidates.map((candidate) => `
-                        <button
-                            type="button"
-                            class="stitch-alt-chip ${document.activeCandidateId === candidate.id ? 'is-active' : ''}"
-                            data-stitch-action="use-candidate"
-                            data-candidate-id="${candidate.id}"
-                        >
-                            <strong>${escapeHtml(candidate.name)}</strong>
-                            <span>#${candidate.rank || 0} | ${escapeHtml(formatModelType(candidate.modelType))}</span>
-                            <span>${formatPercent(candidate.coverage)} coverage | ${formatPercent(candidate.confidence || 0)} confidence</span>
-                        </button>
-                    `).join('')}
+        refs.candidatesPanel.innerHTML = `
+            <div class="stitch-stack">
+                <div class="stitch-button-row stitch-button-row-2">
+                    <button type="button" class="mini-button" data-stitch-action="open-gallery" ${candidates.length ? '' : 'disabled'}>Open Gallery</button>
+                    <button type="button" class="mini-button" data-stitch-action="toggle-alternatives" ${candidates.length ? '' : 'disabled'}>${document.workspace.alternativesOpen === false ? 'Show List' : 'Hide List'}</button>
                 </div>
-            `}
+                <div class="stitch-button-row stitch-button-row-2">
+                    <button type="button" class="mini-button" data-stitch-action="export-project" ${document.inputs.length ? '' : 'disabled'}>Export PNG</button>
+                    <button type="button" class="mini-button" data-stitch-action="save-library" ${document.inputs.length ? '' : 'disabled'}>Save Library</button>
+                </div>
+                ${activeCandidate ? `
+                    <div class="stitch-summary-card">
+                        <div class="stitch-summary-row"><strong>Active</strong><span>${escapeHtml(activeCandidate.name)}</span></div>
+                        <div class="stitch-summary-row"><strong>Rank</strong><span>#${activeCandidate.rank || 0}</span></div>
+                        <div class="stitch-summary-row"><strong>Model</strong><span>${escapeHtml(formatModelType(activeCandidate.modelType))}</span></div>
+                        <div class="stitch-summary-row"><strong>Confidence</strong><span>${formatPercent(activeCandidate.confidence || 0)}</span></div>
+                        <div class="stitch-summary-row"><strong>Coverage</strong><span>${formatPercent(activeCandidate.coverage || 0)}</span></div>
+                    </div>
+                ` : '<div class="stitch-mini-empty">Run analysis to generate candidate layouts.</div>'}
+                ${document.workspace.alternativesOpen === false || !candidates.length ? '' : `
+                    <div class="stitch-candidate-list">
+                        ${candidates.map((candidate) => `
+                            <article class="stitch-candidate-card ${document.activeCandidateId === candidate.id ? 'is-active' : ''}">
+                                <button type="button" class="stitch-candidate-main" data-stitch-action="use-candidate" data-candidate-id="${candidate.id}">
+                                    <span class="stitch-candidate-copy">
+                                        <strong>${escapeHtml(candidate.name)}</strong>
+                                        <span>#${candidate.rank || 0} | ${escapeHtml(formatModelType(candidate.modelType))}</span>
+                                        <span>${formatPercent(candidate.coverage)} coverage | ${formatPercent(candidate.confidence || 0)} confidence</span>
+                                    </span>
+                                </button>
+                                <div class="stitch-candidate-actions">
+                                    <button type="button" class="mini-button" data-stitch-action="use-candidate" data-candidate-id="${candidate.id}">Use</button>
+                                </div>
+                            </article>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
         `;
     }
 
@@ -413,30 +496,43 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
     }
 
     function renderHeader(document) {
-        const activeCandidate = document.candidates.find((candidate) => candidate.id === document.activeCandidateId);
+        const activeCandidate = document.candidates.find((candidate) => candidate.id === document.activeCandidateId) || null;
+        const activePlacements = getActivePlacements(document);
+        const chips = [];
+
         refs.title.textContent = document.inputs.length
             ? activeCandidate
-                ? `${activeCandidate.name} (${formatModelType(activeCandidate.modelType)} | ${document.inputs.length} input${document.inputs.length === 1 ? '' : 's'})`
+                ? `${activeCandidate.name} (${formatModelType(activeCandidate.modelType)})`
                 : `Stitch Draft (${document.inputs.length} input${document.inputs.length === 1 ? '' : 's'})`
             : 'Stitch Workspace';
-        refs.metrics.innerHTML = `
-            <span>Render ${formatDimensions(stitchEngine.runtime.renderWidth, stitchEngine.runtime.renderHeight)}</span>
-            <span>${document.inputs.length} source${document.inputs.length === 1 ? '' : 's'}</span>
-            ${activeCandidate ? `<span>${escapeHtml(formatPercent(activeCandidate.confidence || 0))} confidence</span>` : ''}
-        `;
+
+        if (stitchEngine.runtime.renderWidth || stitchEngine.runtime.renderHeight) {
+            chips.push(buildMetricChip('Render', formatDimensions(stitchEngine.runtime.renderWidth, stitchEngine.runtime.renderHeight)));
+        }
+        chips.push(buildMetricChip('Sources', String(document.inputs.length)));
+        chips.push(buildMetricChip('Visible', String(activePlacements.length)));
+        chips.push(buildMetricChip('Panel', getPanelLabel(document.workspace.sidebarView)));
+        if (activeCandidate) chips.push(buildMetricChip('Confidence', formatPercent(activeCandidate.confidence || 0), false));
+        refs.metrics.innerHTML = chips.join('');
+
+        const status = getStageStatus(document);
+        refs.status.textContent = status.text;
+        refs.status.dataset.tone = status.tone;
     }
 
     async function render(document) {
         currentDocument = normalizeStitchDocument(document);
+        renderDockState(currentDocument);
         renderHeader(currentDocument);
         renderInputs(currentDocument);
         renderAnalysis(currentDocument);
         renderSelection(currentDocument);
-        renderAlternatives(currentDocument);
+        renderCandidates(currentDocument);
         renderGallery(currentDocument);
         refs.empty.classList.toggle('is-visible', !currentDocument.inputs.length);
         applyTooltipState();
         stitchEngine.requestRender(currentDocument);
+        requestAnimationFrame(() => renderHeader(currentDocument));
     }
 
     function toCanvasPoint(event) {
@@ -498,66 +594,88 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
             setOpenTooltip(openTooltipId === tooltipId ? null : tooltipId);
             return;
         }
+
         const target = event.target.closest('[data-stitch-action]');
         if (!target) return;
+
         const action = target.dataset.stitchAction;
         const inputId = target.dataset.inputId;
         const candidateId = target.dataset.candidateId;
 
+        if (action === 'workspace-tab') {
+            actions.setStitchSidebarView?.(target.dataset.sidebarView || 'inputs');
+            return;
+        }
         if (action === 'add-images') {
             refs.fileInput.click();
             return;
         }
+        if (action === 'new-project') {
+            await actions.newStitchProject?.();
+            return;
+        }
         if (action === 'run-analysis') {
-            await actions.runStitchAnalysis();
+            await actions.runStitchAnalysis?.();
             return;
         }
         if (action === 'open-gallery') {
-            actions.setStitchGalleryOpen(true);
+            actions.setStitchGalleryOpen?.(true);
             return;
         }
         if (action === 'close-gallery') {
-            actions.setStitchGalleryOpen(false);
+            actions.setStitchGalleryOpen?.(false);
             return;
         }
         if (action === 'use-candidate') {
-            actions.chooseStitchCandidate(candidateId);
+            actions.chooseStitchCandidate?.(candidateId);
             return;
         }
         if (action === 'toggle-alternatives') {
-            actions.setStitchAlternativesOpen(currentDocument.workspace.alternativesOpen === false);
+            actions.setStitchAlternativesOpen?.(currentDocument.workspace.alternativesOpen === false);
             return;
         }
         if (action === 'select-input') {
-            actions.selectStitchInput(inputId);
+            actions.selectStitchInput?.(inputId);
             return;
         }
         if (action === 'remove-input') {
-            await actions.removeStitchInput(inputId);
+            await actions.removeStitchInput?.(inputId);
             return;
         }
         if (action === 'toggle-lock') {
-            actions.toggleStitchInputLock(inputId);
+            actions.toggleStitchInputLock?.(inputId);
             return;
         }
         if (action === 'toggle-visibility') {
-            actions.toggleStitchInputVisibility(inputId);
+            actions.toggleStitchInputVisibility?.(inputId);
             return;
         }
         if (action === 'move-up') {
-            actions.reorderStitchInput(inputId, -1);
+            actions.reorderStitchInput?.(inputId, -1);
             return;
         }
         if (action === 'move-down') {
-            actions.reorderStitchInput(inputId, 1);
+            actions.reorderStitchInput?.(inputId, 1);
             return;
         }
         if (action === 'reset-selected') {
-            actions.resetSelectedStitchPlacement();
+            actions.resetSelectedStitchPlacement?.();
             return;
         }
         if (action === 'reset-candidate') {
-            actions.resetActiveStitchCandidate();
+            actions.resetActiveStitchCandidate?.();
+            return;
+        }
+        if (action === 'fit-view') {
+            actions.resetStitchView?.();
+            return;
+        }
+        if (action === 'export-project') {
+            await actions.exportStitchProject?.();
+            return;
+        }
+        if (action === 'save-library') {
+            await actions.saveProjectToLibrary?.(null, { projectType: 'stitch' });
         }
     });
 
@@ -570,7 +688,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
     root.addEventListener('change', (event) => {
         const target = event.target;
         if (target.matches('[data-stitch-setting]')) {
-            actions.updateStitchSetting(
+            actions.updateStitchSetting?.(
                 target.dataset.stitchSetting,
                 target.type === 'checkbox' ? target.checked : target.value
             );
@@ -580,8 +698,8 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
             const key = target.dataset.stitchPlacement;
             const inputId = target.dataset.inputId;
             let value = Number(target.value);
-            if (key === 'rotation') value = value * (Math.PI / 180);
-            actions.updateStitchPlacement(inputId, { [key]: value });
+            if (key === 'rotation') value *= (Math.PI / 180);
+            actions.updateStitchPlacement?.(inputId, { [key]: value });
         }
     });
 
@@ -614,9 +732,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
     });
 
     root.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && openTooltipId) {
-            setOpenTooltip(null);
-        }
+        if (event.key === 'Escape' && openTooltipId) setOpenTooltip(null);
     });
 
     root.ownerDocument.addEventListener('pointerdown', (event) => {
@@ -624,9 +740,8 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         if (!root.contains(event.target)) setOpenTooltip(null);
     });
 
-    // Close tooltips on scroll to prevent "floating" detached from trigger
     root.addEventListener('scroll', (event) => {
-        if (openTooltipId && event.target.closest('.stitch-sidebar, .stitch-main')) {
+        if (openTooltipId && event.target.closest('.stitch-dock-panel-body, .stitch-gallery-panel')) {
             setOpenTooltip(null);
         }
     }, { capture: true, passive: true });
