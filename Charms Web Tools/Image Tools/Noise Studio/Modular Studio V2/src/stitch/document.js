@@ -14,6 +14,7 @@ const WARP_MODES = ['auto', 'off', 'perspective', 'mesh'];
 const MESH_DENSITIES = ['low', 'medium', 'high'];
 const WARP_DISTRIBUTIONS = ['anchored', 'balanced'];
 const BLEND_MODES = ['auto', 'alpha', 'feather', 'seam'];
+const FEATURE_DETECTORS = ['auto', 'orb', 'akaze', 'sift'];
 const PHOTO_BACKENDS = ['opencv-wasm'];
 const ANALYSIS_BACKENDS = ['screenshot-js', 'opencv-wasm'];
 const LEGACY_DEFAULTS = Object.freeze({
@@ -96,6 +97,7 @@ export function createEmptyStitchDocument(theme = 'light') {
             warpDistribution: 'balanced',
             blendMode: 'auto',
             photoBackend: 'opencv-wasm',
+            featureDetector: 'auto',
             maxFeatures: DEFAULT_MAX_FEATURES,
             matchRatio: DEFAULT_MATCH_RATIO,
             ransacIterations: DEFAULT_RANSAC_ITERATIONS,
@@ -147,6 +149,7 @@ export function coerceStitchSettingValue(key, value) {
     if (key === 'warpDistribution') return WARP_DISTRIBUTIONS.includes(value) ? value : 'balanced';
     if (key === 'blendMode') return BLEND_MODES.includes(value) ? value : 'auto';
     if (key === 'photoBackend') return PHOTO_BACKENDS.includes(value) ? value : 'opencv-wasm';
+    if (key === 'featureDetector') return FEATURE_DETECTORS.includes(value) ? value : 'auto';
     if (key === 'analysisMaxDimension') return clamp(Math.round(Number(value) || DEFAULT_ANALYSIS_MAX_DIMENSION), 128, 2048);
     if (key === 'maxFeatures') return clamp(Math.round(Number(value) || DEFAULT_MAX_FEATURES), 20, 4000);
     if (key === 'matchRatio') return clamp(Number(value) || DEFAULT_MATCH_RATIO, 0.4, 0.99);
@@ -175,6 +178,7 @@ function normalizeSettings(settings = {}) {
         warpDistribution: coerceStitchSettingValue('warpDistribution', settings.warpDistribution),
         blendMode: coerceStitchSettingValue('blendMode', settings.blendMode),
         photoBackend: coerceStitchSettingValue('photoBackend', settings.photoBackend),
+        featureDetector: coerceStitchSettingValue('featureDetector', settings.featureDetector),
         maxFeatures: coerceStitchSettingValue('maxFeatures', useUpgradedDefaults ? DEFAULT_MAX_FEATURES : settings.maxFeatures),
         matchRatio: coerceStitchSettingValue('matchRatio', useUpgradedDefaults ? DEFAULT_MATCH_RATIO : settings.matchRatio),
         ransacIterations: coerceStitchSettingValue('ransacIterations', useUpgradedDefaults ? DEFAULT_RANSAC_ITERATIONS : settings.ransacIterations),

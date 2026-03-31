@@ -1,0 +1,35 @@
+{
+  "name": "site-bundler-refactor",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "npm run test:unit",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "clean-css": "^5.3.3",
+    "diff": "^7.0.0",
+    "file-saver": "^2.0.5",
+    "html-minifier-terser": "^7.2.0",
+    "jszip": "^3.10.1",
+    "terser": "^5.44.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2",
+    "@types/clean-css": "^4.2.11",
+    "@types/diff": "^7.0.1",
+    "@types/file-saver": "^2.0.7",
+    "autoprefixer": "^10.4.21",
+    "jsdom": "^26.1.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.3",
+    "vitest": "^3.2.4"
+  }
+}

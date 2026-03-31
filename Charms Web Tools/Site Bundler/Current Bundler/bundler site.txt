@@ -1,0 +1,98 @@
+SITE BUNDLER HANDOFF
+
+Current location
+- Workspace root: E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Site Bundler\Current Bundler
+- App entry for development: E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Site Bundler\Current Bundler\index.html
+- Source app: E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Site Bundler\Current Bundler\src
+- Production build output: E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Site Bundler\Current Bundler\dist
+- Legacy reference files kept in place: v9.html, v9.css, v9.js
+
+What this site does
+- This is a browser-based HTML/CSS/JS bundler and minifier with extra utility tools.
+- It lets a user import project files, edit them in-place, scan project references, choose an entry HTML page, and build output in three modes:
+  - Inline: emits a single HTML artifact with combined CSS and JS injected into the page.
+  - Bundle: emits an entry HTML artifact, combined CSS and JS artifacts, and preserves secondary HTML pages as separate output artifacts.
+  - Batch: emits per-file minified artifacts and can rewrite local references to the emitted filenames.
+- It also includes:
+  - Extract Output: extracts embedded CSS, JS, and data-URL assets from an HTML file and writes a manifest.
+  - Folder Cleaner: performs a dry scan and then copies only files and non-empty folders into a cleaned destination.
+  - Image Converter: converts JPG/PNG/WEBP files, supports folder uploads, and exports the result as a ZIP.
+
+Current architecture
+- The old one-file runtime has been replaced with a Vite + TypeScript app.
+- UI shell: index.html
+- Main browser controller: src/main.ts
+- Core shared types: src/types.ts
+- Asset/path helpers: src/utils
+- Build engine:
+  - src/services/build/builder.ts
+  - src/services/build/core.ts
+  - src/services/build/worker-client.ts
+  - src/workers/build-worker.ts
+- Utility services:
+  - src/services/reference-graph.ts
+  - src/services/extractor.ts
+  - src/services/cleaner.ts
+  - src/services/session.ts
+- Styling:
+  - Tailwind utilities are compiled at build time.
+  - Existing brutalist custom styling is kept in src/styles.css.
+
+Key behavior changes from the old version
+- Runtime vendor script loading was removed.
+- Minifiers now load lazily inside a dedicated worker instead of loading everything up-front in the page.
+- Build results now use a filename snapshot, so changing output names after a build does not mutate already-built artifact paths.
+- Asset renaming preserves the asset directory instead of flattening everything into the root.
+- Reference review no longer silently excludes optional assets. Optional assets remain selected by default and can be explicitly unchecked.
+- Bundle mode preserves non-entry HTML pages as emitted artifacts.
+- Batch mode supports single-file work and rewrites local references against emitted filenames when enabled.
+- Session export/import is based on source assets and config, not cached diff markup or duplicated build payloads.
+
+Supported asset handling
+- Text-oriented assets: HTML, CSS, JS, JSON, map, webmanifest, TXT/CSV/XML
+- Binary-oriented assets: images, fonts, audio, video, WASM, PDF, other unknown binaries
+- Binary assets are stored with MIME metadata and base64 payloads in app state.
+
+Important build details
+- Reference scanning prefers:
+  1. paths relative to the source asset directory
+  2. exact normalized paths
+  3. basename fallback only when it is unique
+- Missing references are surfaced in a modal and warnings are carried into the build result.
+- Ambiguous basename matches are treated as warnings.
+- Bundle output keeps secondary HTML pages.
+- Inline output focuses on HTML/CSS binary inlining. Non-inline external assets referenced only from JS strings are warned about rather than silently rewritten.
+
+Utility tab details
+- Extract Output:
+  - Extracts inline style tags to CSS files.
+  - Extracts inline script tags to JS files.
+  - Decodes data URLs from src/srcset and inline CSS url() references when enabled.
+  - Writes extracted/manifest.json plus index.extracted.html.
+- Folder Cleaner:
+  - Dry scan reports file count, non-empty folders, empty folders, and collisions.
+  - Copy run writes to <source>_cleaned inside the destination folder.
+  - Optional skip-existing behavior is exposed in the UI.
+  - Uses the File System Access API, so it is Chromium-browser dependent.
+- Image Converter:
+  - Supports drag/drop, file upload, and folder upload.
+  - Preserves relative paths for folder input.
+  - Converts selected image files and optionally carries through non-image files into the ZIP.
+
+Commands
+- Install dependencies: npm install
+- Start dev server: npm run dev
+- Build production output: npm run build
+- Run unit tests: npm run test:unit
+- Run Playwright smoke test: npm run test:e2e
+
+Verification completed
+- npm run build: passed
+- npm run test:unit: passed
+- npm run test:e2e: passed after installing the Playwright Chromium browser
+
+Known limits
+- Inline mode does not generically rewrite every possible JS-driven external asset workflow into a self-contained single file. Warnings are emitted when external assets remain.
+- Folder Cleaner requires a browser with showDirectoryPicker support.
+- Image conversion is currently limited to JPG, PNG, and WEBP targets.
+- Legacy v9 files are still present as references; the current app is the Vite/TypeScript version rooted at index.html and dist/.

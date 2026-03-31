@@ -5,6 +5,7 @@ const MIN_PAIR_INLIER_RATIO = 0.18
 const MIN_PAIR_OVERLAP_RATIO = 0.08
 const MAX_PAIR_REPROJECTION_MULTIPLIER = 2.8
 const MAX_FLOW_POINTS = 1200
+const TWO_IMAGE_MAX_FLOW_POINTS = 1800
 const MIN_FLOW_SUPPORT = 12
 const MAX_FLOW_ERROR = 24
 const BOOT_TIMEOUT_MS = 20000
@@ -16,12 +17,34 @@ const MIN_DENSE_POINT_SPACING = 6
 const MIN_SUPPORT_DETAIL_STRENGTH = 0.08
 const MAX_LOCAL_WARP_FRACTION = 0.015
 const MAX_LOCAL_WARP_PIXELS = 28
+const TWO_IMAGE_SEAM_SUPPORT_RATIO = 0.6
+const TWO_IMAGE_SUPPORT_PAD = 0.04
+const TWO_IMAGE_LOCALITY_FALLOFF = 0.18
+const TWO_IMAGE_INNER_WARP_MULTIPLIER = 1.35
+const TWO_IMAGE_OUTER_WARP_MULTIPLIER = 0.55
+const TWO_IMAGE_FORWARD_BACKWARD_ERROR = 1.25
+const AUTO_AKAZE_MAX_IMAGE_PIXELS = 2_400_000
+const AUTO_AKAZE_MAX_FEATURES = 2500
+const AUTO_AKAZE_THRESHOLD = 0.0018
+const AUTO_SIFT_MAX_IMAGE_PIXELS = 14_000_000
+const AUTO_SIFT_MAX_FEATURES = 2200
+const AUTO_SIFT_CONTRAST_THRESHOLD = 0.03
+const AUTO_SIFT_EDGE_THRESHOLD = 12
+const AUTO_SIFT_COVERAGE_THRESHOLD = 0.82
+const AUTO_SIFT_CONFIDENCE_THRESHOLD = 0.62
+const SIFT_FEATURE_MAX_IMAGE_PIXELS = 4_320_000
+const SIFT_FEATURE_MAX_DIMENSION = 2400
+const SIFT_FEATURE_FALLBACK_MAX_IMAGE_PIXELS = 3_000_000
+const SIFT_FEATURE_FALLBACK_MAX_DIMENSION = 2000
+const SIFT_FEATURE_MIN_FALLBACK_IMAGE_PIXELS = 2_000_000
+const SIFT_FEATURE_MIN_FALLBACK_DIMENSION = 1600
 
 let cvReady = false
 let cvInitError = null
 let readyPosted = false
 let candidateCounter = 0
 let bootTimeoutHandle = 0
+let cv = null
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value))
@@ -51,6 +74,13 @@ function computeMad(values = [], median = computeMedian(values)) {
     return computeMedian(values.map((value) => Math.abs((Number(value) || 0) - median)))
 }
 
+function installCvInstance(candidate) {
+    if (!candidate || (typeof candidate !== 'object' && typeof candidate !== 'function')) return false
+    cv = candidate
+    self.cv = candidate
+    return true
+}
+
 function derivePreparedCorrectionLimit(improvements, settings) {
     const median = computeMedian(improvements)
     const mad = computeMad(improvements, median)
@@ -70,6 +100,30 @@ function deriveWorldWarpBudget(record, magnitudes = []) {
         3,
         Math.min(MAX_LOCAL_WARP_PIXELS, Math.max(8, maxDimension * MAX_LOCAL_WARP_FRACTION))
     )
+}
+
+function createMeshRefinementProfile(totalInputs, candidateType = 'mesh') {
+    if (candidateType !== 'mesh' || totalInputs !== 2) return null
+    return {
+        maxSeedRatio: 0.45,
+        maxSeedCap: TWO_IMAGE_MAX_FLOW_POINTS,
+        seamSupportRatio: TWO_IMAGE_SEAM_SUPPORT_RATIO,
+        supportPad: TWO_IMAGE_SUPPORT_PAD,
+        localityFalloff: TWO_IMAGE_LOCALITY_FALLOFF,
+        innerWarpMultiplier: TWO_IMAGE_INNER_WARP_MULTIPLIER,
+        outerWarpMultiplier: TWO_IMAGE_OUTER_WARP_MULTIPLIER,
+        coarseFlow: {
+            window: 31,
+            maxLevel: 4,
+            maxError: 32
+        },
+        fineFlow: {
+            window: 15,
+            maxLevel: 2,
+            maxError: 18
+        },
+        forwardBackwardError: TWO_IMAGE_FORWARD_BACKWARD_ERROR
+    }
 }
 
 function createCandidateId() {
@@ -284,10 +338,92 @@ function createManualLayoutCandidate(imageRecords, reason = '') {
     }
 }
 
-function buildGrayMat(preparedInput) {
-    const mat = new cv.Mat(preparedInput.height, preparedInput.width, cv.CV_8UC1)
-    mat.data.set(preparedInput.gray)
+function buildGrayMatFromGray(gray, width, height) {
+    const mat = new cv.Mat(height, width, cv.CV_8UC1)
+    mat.data.set(gray)
     return mat
+}
+
+function buildGrayMat(preparedInput) {
+    return buildGrayMatFromGray(preparedInput.gray, preparedInput.width, preparedInput.height)
+}
+
+function resizeGrayBuffer(gray, sourceWidth, sourceHeight, targetWidth, targetHeight) {
+    if (targetWidth === sourceWidth && targetHeight === sourceHeight) return gray
+    const output = new Uint8Array(targetWidth * targetHeight)
+    const scaleX = sourceWidth / targetWidth
+    const scaleY = sourceHeight / targetHeight
+    for (let y = 0; y < targetHeight; y += 1) {
+        const sourceY = ((y + 0.5) * scaleY) - 0.5
+        const y0 = clamp(Math.floor(sourceY), 0, sourceHeight - 1)
+        const y1 = Math.min(sourceHeight - 1, y0 + 1)
+        const wy = clamp(sourceY - y0, 0, 1)
+        const row0 = y0 * sourceWidth
+        const row1 = y1 * sourceWidth
+        for (let x = 0; x < targetWidth; x += 1) {
+            const sourceX = ((x + 0.5) * scaleX) - 0.5
+            const x0 = clamp(Math.floor(sourceX), 0, sourceWidth - 1)
+            const x1 = Math.min(sourceWidth - 1, x0 + 1)
+            const wx = clamp(sourceX - x0, 0, 1)
+            const top = ((gray[row0 + x0] || 0) * (1 - wx)) + ((gray[row0 + x1] || 0) * wx)
+            const bottom = ((gray[row1 + x0] || 0) * (1 - wx)) + ((gray[row1 + x1] || 0) * wx)
+            output[(y * targetWidth) + x] = Math.round((top * (1 - wy)) + (bottom * wy))
+        }
+    }
+    return output
+}
+
+function deriveFeatureImageSize(width, height, maxDimension, maxPixels) {
+    const safeWidth = Math.max(1, Math.round(Number(width) || 1))
+    const safeHeight = Math.max(1, Math.round(Number(height) || 1))
+    const area = safeWidth * safeHeight
+    const dimensionScale = maxDimension > 0
+        ? Math.min(1, maxDimension / Math.max(safeWidth, safeHeight))
+        : 1
+    const pixelScale = maxPixels > 0 && area > 0
+        ? Math.min(1, Math.sqrt(maxPixels / area))
+        : 1
+    const scale = Math.min(dimensionScale, pixelScale)
+    if (!Number.isFinite(scale) || scale >= 0.999) {
+        return { width: safeWidth, height: safeHeight, scale: 1, adjusted: false }
+    }
+    return {
+        width: Math.max(1, Math.round(safeWidth * scale)),
+        height: Math.max(1, Math.round(safeHeight * scale)),
+        scale,
+        adjusted: true
+    }
+}
+
+function deriveSiftExtractionPlans(preparedInput) {
+    const width = Math.max(1, Math.round(Number(preparedInput?.width) || 1))
+    const height = Math.max(1, Math.round(Number(preparedInput?.height) || 1))
+    const preparedArea = width * height
+    const preparedWithinHighLimit = preparedArea <= SIFT_FEATURE_MAX_IMAGE_PIXELS
+        && Math.max(width, height) <= SIFT_FEATURE_MAX_DIMENSION
+    const plans = preparedWithinHighLimit
+        ? [{ label: 'prepared', width, height, scaleX: 1, scaleY: 1, adjusted: false }]
+        : []
+    const variants = [
+        deriveFeatureImageSize(width, height, SIFT_FEATURE_MAX_DIMENSION, SIFT_FEATURE_MAX_IMAGE_PIXELS),
+        deriveFeatureImageSize(width, height, SIFT_FEATURE_FALLBACK_MAX_DIMENSION, SIFT_FEATURE_FALLBACK_MAX_IMAGE_PIXELS),
+        deriveFeatureImageSize(width, height, SIFT_FEATURE_MIN_FALLBACK_DIMENSION, SIFT_FEATURE_MIN_FALLBACK_IMAGE_PIXELS)
+    ]
+    const seen = new Set([`${width}x${height}`])
+    variants.forEach((variant, index) => {
+        const key = `${variant.width}x${variant.height}`
+        if (!variant.adjusted || seen.has(key)) return
+        seen.add(key)
+        plans.push({
+            label: index === 0 ? 'scaled-high' : (index === 1 ? 'scaled-safe' : 'scaled-compat'),
+            width: variant.width,
+            height: variant.height,
+            scaleX: width / Math.max(1, variant.width),
+            scaleY: height / Math.max(1, variant.height),
+            adjusted: true
+        })
+    })
+    return plans
 }
 
 function computeGradientStrengthMap(gray, width, height) {
@@ -323,14 +459,14 @@ function sampleGradientStrength(record, x, y) {
     return clamp(gradient[(iy * record.width) + ix] || 0, 0, 1)
 }
 
-function extractKeypoints(vector) {
+function extractKeypoints(vector, scaleX = 1, scaleY = 1) {
     const result = []
     const size = vector.size()
     for (let index = 0; index < size; index += 1) {
         const keypoint = vector.get(index)
         result.push({
-            x: Number(keypoint.pt?.x || 0),
-            y: Number(keypoint.pt?.y || 0),
+            x: Number(keypoint.pt?.x || 0) * scaleX,
+            y: Number(keypoint.pt?.y || 0) * scaleY,
             response: Number(keypoint.response || 0)
         })
         if (typeof keypoint.delete === 'function') keypoint.delete()
@@ -338,46 +474,307 @@ function extractKeypoints(vector) {
     return result
 }
 
-function createImageRecords(document, preparedInputs, settings) {
+function createAkazeExtractor(maxFeatures, options = {}) {
+    let extractor = null
+    if (typeof cv?.AKAZE_create === 'function') {
+        try {
+            extractor = cv.AKAZE_create()
+        } catch (_error) {
+            extractor = null
+        }
+    } else if (cv?.AKAZE && typeof cv.AKAZE.create === 'function') {
+        try {
+            extractor = cv.AKAZE.create()
+        } catch (_error) {
+            extractor = null
+        }
+    }
+    else if (typeof cv.AKAZE === 'function') {
+        try {
+            extractor = new cv.AKAZE()
+        } catch (_error) {
+            extractor = null
+        }
+    }
+    if (!extractor) return null
+
+    const mldbDescriptor = typeof cv.AKAZE_DESCRIPTOR_MLDB === 'number'
+        ? cv.AKAZE_DESCRIPTOR_MLDB
+        : (typeof cv?.AKAZE?.DESCRIPTOR_MLDB === 'number' ? cv.AKAZE.DESCRIPTOR_MLDB : null)
+    if (mldbDescriptor != null && typeof extractor.setDescriptorType === 'function') {
+        try { extractor.setDescriptorType(mldbDescriptor) } catch (_error) {}
+    }
+    if (typeof extractor.setThreshold === 'function') {
+        try { extractor.setThreshold(Number(options.threshold) || AUTO_AKAZE_THRESHOLD) } catch (_error) {}
+    }
+    if (typeof extractor.setNOctaves === 'function') {
+        try { extractor.setNOctaves(4) } catch (_error) {}
+    }
+    if (typeof extractor.setNOctaveLayers === 'function') {
+        try { extractor.setNOctaveLayers(4) } catch (_error) {}
+    }
+    if (typeof extractor.setMaxPoints === 'function') {
+        try { extractor.setMaxPoints(maxFeatures) } catch (_error) {}
+    }
+    return extractor
+}
+
+function hasSiftSupport() {
+    return !!cv && (
+        typeof cv.SIFT_create === 'function'
+        || (cv.SIFT && typeof cv.SIFT.create === 'function')
+        || typeof cv.SIFT === 'function'
+    )
+}
+
+function createSiftExtractor(maxFeatures, options = {}) {
+    let extractor = null
+    if (typeof cv?.SIFT_create === 'function') {
+        try {
+            extractor = cv.SIFT_create()
+        } catch (_error) {
+            extractor = null
+        }
+        if (!extractor) {
+            try {
+                extractor = cv.SIFT_create(
+                    maxFeatures,
+                    Math.max(3, Math.round(Number(options.nOctaveLayers) || 3)),
+                    Number(options.contrastThreshold) || AUTO_SIFT_CONTRAST_THRESHOLD,
+                    Number(options.edgeThreshold) || AUTO_SIFT_EDGE_THRESHOLD,
+                    Number(options.sigma) || 1.6
+                )
+            } catch (_error) {
+                extractor = null
+            }
+        }
+    } else if (cv?.SIFT && typeof cv.SIFT.create === 'function') {
+        try {
+            extractor = cv.SIFT.create()
+        } catch (_error) {
+            extractor = null
+        }
+    } else if (typeof cv.SIFT === 'function') {
+        try {
+            extractor = new cv.SIFT()
+        } catch (_error) {
+            extractor = null
+        }
+    }
+    if (!extractor) return null
+
+    if (typeof extractor.setNFeatures === 'function') {
+        try { extractor.setNFeatures(maxFeatures) } catch (_error) {}
+    }
+    if (typeof extractor.setNOctaveLayers === 'function') {
+        try { extractor.setNOctaveLayers(Math.max(3, Math.round(Number(options.nOctaveLayers) || 3))) } catch (_error) {}
+    }
+    if (typeof extractor.setContrastThreshold === 'function') {
+        try { extractor.setContrastThreshold(Number(options.contrastThreshold) || AUTO_SIFT_CONTRAST_THRESHOLD) } catch (_error) {}
+    }
+    if (typeof extractor.setEdgeThreshold === 'function') {
+        try { extractor.setEdgeThreshold(Number(options.edgeThreshold) || AUTO_SIFT_EDGE_THRESHOLD) } catch (_error) {}
+    }
+    if (typeof extractor.setSigma === 'function') {
+        try { extractor.setSigma(Number(options.sigma) || 1.6) } catch (_error) {}
+    }
+    return extractor
+}
+
+function createOrbExtractor(maxFeatures) {
+    let extractor = null
+    if (typeof cv?.ORB_create === 'function') {
+        try {
+            extractor = cv.ORB_create()
+        } catch (_error) {
+            extractor = null
+        }
+        if (!extractor) {
+            try {
+                extractor = cv.ORB_create(maxFeatures)
+            } catch (_error) {
+                extractor = null
+            }
+        }
+    } else if (cv?.ORB && typeof cv.ORB.create === 'function') {
+        try {
+            extractor = cv.ORB.create()
+        } catch (_error) {
+            extractor = null
+        }
+    } else if (typeof cv?.ORB === 'function') {
+        try {
+            extractor = new cv.ORB()
+        } catch (_error) {
+            extractor = null
+        }
+    }
+    if (!extractor) return null
+    if (typeof extractor.setMaxFeatures === 'function') {
+        try { extractor.setMaxFeatures(maxFeatures) } catch (_error) {}
+    }
+    return extractor
+}
+
+function createFeatureExtractor(mode, settings) {
+    const configuredMaxFeatures = Math.max(200, Number(settings.maxFeatures) || 4000)
+    const maxFeatures = Math.max(200, Math.min(configuredMaxFeatures, Number(settings._detectorMaxFeaturesCap) || configuredMaxFeatures))
+    if (mode === 'sift') {
+        const extractor = createSiftExtractor(maxFeatures, settings._siftOptions || {})
+        if (!extractor) {
+            throw new Error('SIFT is not available in the current OpenCV.js build. Replace src/vendor/opencv/opencv.js with a SIFT-enabled custom build and try again.')
+        }
+        return {
+            id: 'sift',
+            label: 'SIFT',
+            extractor,
+            createExtractor: () => createSiftExtractor(maxFeatures, settings._siftOptions || {}),
+            matcherNorm: typeof cv.NORM_L2 === 'number' ? cv.NORM_L2 : cv.NORM_HAMMING
+        }
+    }
+    if (mode === 'akaze') {
+        const extractor = createAkazeExtractor(maxFeatures, settings._akazeOptions || {})
+        if (extractor) {
+            const defaultNorm = typeof extractor.defaultNorm === 'function'
+                ? extractor.defaultNorm()
+                : cv.NORM_HAMMING
+            return {
+                id: 'akaze',
+                label: 'AKAZE',
+                extractor,
+                matcherNorm: defaultNorm || cv.NORM_HAMMING
+            }
+        }
+    }
+
+    const extractor = createOrbExtractor(maxFeatures)
+    if (!extractor) {
+        throw new Error('ORB is not available in the current OpenCV.js runtime.')
+    }
+    return {
+        id: 'orb',
+        label: 'ORB',
+        extractor,
+        matcherNorm: cv.NORM_HAMMING
+    }
+}
+
+function createImageRecords(document, preparedInputs, settings, feature) {
     const inputById = new Map((Array.isArray(document?.inputs) ? document.inputs : []).map((input, index) => [input.id || `input-${index + 1}`, input]))
     const records = []
-    const orb = new cv.ORB()
-    orb.setMaxFeatures(Math.max(200, Number(settings.maxFeatures) || 4000))
+    const sharedExtractor = feature.extractor
 
     try {
         preparedInputs.forEach((preparedInput, index) => {
             const input = inputById.get(preparedInput.id) || document?.inputs?.[index] || {}
-            const mat = buildGrayMat(preparedInput)
-            const emptyMask = new cv.Mat()
-            const keypointVector = new cv.KeyPointVector()
-            const descriptors = new cv.Mat()
-            orb.detectAndCompute(mat, emptyMask, keypointVector, descriptors)
-            emptyMask.delete()
+            const inputName = preparedInput.name || input.name || `Input ${index + 1}`
+            let mat = null
+            let descriptors = null
+            let keypointVector = null
+            const extractor = sharedExtractor
+            try {
+                if (!extractor) {
+                    throw new Error(`${feature.label} extractor could not be created.`)
+                }
+                const extractionPlans = feature.id === 'sift'
+                    ? deriveSiftExtractionPlans(preparedInput)
+                    : [{ label: 'prepared', width: preparedInput.width, height: preparedInput.height, scaleX: 1, scaleY: 1, adjusted: false }]
+                const attemptErrors = []
+                let selectedPlan = extractionPlans[0]
 
-            const originalWidth = Math.max(1, Number(input.width || preparedInput.originalWidth || preparedInput.width || 1))
-            const originalHeight = Math.max(1, Number(input.height || preparedInput.originalHeight || preparedInput.height || 1))
-            const keypoints = extractKeypoints(keypointVector)
-            keypointVector.delete()
+                for (const plan of extractionPlans) {
+                    const attemptExtractor = feature.id === 'sift' && typeof feature.createExtractor === 'function'
+                        ? feature.createExtractor()
+                        : extractor
+                    let featureMat = null
+                    let emptyMask = null
+                    let attemptKeypointVector = null
+                    let attemptDescriptors = null
+                    try {
+                        if (!attemptExtractor) {
+                            throw new Error(`${feature.label} extractor retry could not be created.`)
+                        }
+                        const featureGray = plan.adjusted
+                            ? resizeGrayBuffer(preparedInput.gray, preparedInput.width, preparedInput.height, plan.width, plan.height)
+                            : preparedInput.gray
+                        featureMat = buildGrayMatFromGray(featureGray, plan.width, plan.height)
+                        emptyMask = new cv.Mat()
+                        attemptKeypointVector = new cv.KeyPointVector()
+                        attemptDescriptors = new cv.Mat()
+                        attemptExtractor.detectAndCompute(featureMat, emptyMask, attemptKeypointVector, attemptDescriptors)
+                        keypointVector = attemptKeypointVector
+                        descriptors = attemptDescriptors
+                        selectedPlan = plan
+                        attemptKeypointVector = null
+                        attemptDescriptors = null
+                        break
+                    } catch (error) {
+                        const errorText = error?.message || error?.stack || String(error)
+                        attemptErrors.push(`${plan.width}x${plan.height}${plan.adjusted ? ' scaled' : ' prepared'}${errorText ? ` (${errorText})` : ''}`)
+                    } finally {
+                        if (attemptExtractor !== extractor) attemptExtractor?.delete?.()
+                        emptyMask?.delete?.()
+                        featureMat?.delete?.()
+                        attemptKeypointVector?.delete?.()
+                        attemptDescriptors?.delete?.()
+                    }
+                }
 
-            records.push({
-                id: preparedInput.id,
-                name: preparedInput.name || input.name || `Input ${index + 1}`,
-                index,
-                width: preparedInput.width,
-                height: preparedInput.height,
-                originalWidth,
-                originalHeight,
-                scaleX: preparedInput.width / Math.max(1, originalWidth),
-                scaleY: preparedInput.height / Math.max(1, originalHeight),
-                gray: preparedInput.gray,
-                gradient: computeGradientStrengthMap(preparedInput.gray, preparedInput.width, preparedInput.height),
-                mat,
-                descriptors,
-                keypoints
-            })
+                if (!descriptors || !keypointVector) {
+                    const detail = attemptErrors.length ? ` Tried ${attemptErrors.join(' -> ')}.` : ''
+                    throw new Error(`${feature.label} could not compute descriptors.${detail}`)
+                }
+
+                mat = buildGrayMat(preparedInput)
+                const originalWidth = Math.max(1, Number(input.width || preparedInput.originalWidth || preparedInput.width || 1))
+                const originalHeight = Math.max(1, Number(input.height || preparedInput.originalHeight || preparedInput.height || 1))
+                const keypoints = extractKeypoints(keypointVector, selectedPlan.scaleX, selectedPlan.scaleY)
+                if (feature.id === 'sift' && selectedPlan.adjusted) {
+                    logDebug('Scaled SIFT feature extraction.', {
+                        input: inputName,
+                        from: `${preparedInput.width}x${preparedInput.height}`,
+                        to: `${selectedPlan.width}x${selectedPlan.height}`
+                    })
+                }
+
+                records.push({
+                    id: preparedInput.id,
+                    name: inputName,
+                    index,
+                    width: preparedInput.width,
+                    height: preparedInput.height,
+                    originalWidth,
+                    originalHeight,
+                    scaleX: preparedInput.width / Math.max(1, originalWidth),
+                    scaleY: preparedInput.height / Math.max(1, originalHeight),
+                    gray: preparedInput.gray,
+                    gradient: computeGradientStrengthMap(preparedInput.gray, preparedInput.width, preparedInput.height),
+                    mat,
+                    descriptors,
+                    keypoints,
+                    detectorMode: feature.id,
+                    detectorLabel: feature.label,
+                    featureExtractionWidth: selectedPlan.width,
+                    featureExtractionHeight: selectedPlan.height,
+                    featureExtractionScaleX: selectedPlan.scaleX,
+                    featureExtractionScaleY: selectedPlan.scaleY
+                })
+
+                mat = null
+                descriptors = null
+            } catch (error) {
+                throw new Error(`${feature.label} feature extraction failed on ${inputName}${error?.message ? `: ${error.message}` : '.'}`)
+            } finally {
+                keypointVector?.delete?.()
+                mat?.delete?.()
+                descriptors?.delete?.()
+            }
         })
+    } catch (error) {
+        destroyImageRecords(records)
+        throw error
     } finally {
-        orb.delete()
+        sharedExtractor?.delete?.()
     }
 
     return records
@@ -635,6 +1032,7 @@ function solvePairEdge(sourceRecord, targetRecord, matcher, settings) {
     const baseDiagnostics = {
         pair: `${sourceRecord.id} -> ${targetRecord.id}`,
         method: 'opencv-homography',
+        detector: sourceRecord.detectorMode || targetRecord.detectorMode || 'orb',
         sourceKeypoints: sourceRecord.keypoints.length,
         targetKeypoints: targetRecord.keypoints.length
     }
@@ -651,7 +1049,7 @@ function solvePairEdge(sourceRecord, targetRecord, matcher, settings) {
                 overlapRatio: 0,
                 reprojectionError: 0,
                 accepted: false,
-                reason: 'Not enough ORB descriptors were detected.'
+                reason: 'Not enough feature descriptors were detected.'
             }
         }
     }
@@ -824,8 +1222,8 @@ function solvePairEdge(sourceRecord, targetRecord, matcher, settings) {
     }
 }
 
-function buildPairEdges(imageRecords, settings, requestId = '') {
-    const matcher = new cv.BFMatcher(cv.NORM_HAMMING, false)
+function buildPairEdges(imageRecords, settings, requestId = '', feature) {
+    const matcher = new cv.BFMatcher(feature?.matcherNorm || cv.NORM_HAMMING, false)
     const diagnostics = []
     const acceptedEdges = []
     const totalPairs = (imageRecords.length * (imageRecords.length - 1)) / 2
@@ -1119,6 +1517,8 @@ function createResidualAccumulator(record, density, dimensions = null, options =
         cols,
         rows,
         maxResidual: Number.isFinite(Number(options.maxResidual)) ? Number(options.maxResidual) : null,
+        profile: options.profile || null,
+        corridor: options.corridor || null,
         support: {
             minU: 1,
             minV: 1,
@@ -1129,15 +1529,17 @@ function createResidualAccumulator(record, density, dimensions = null, options =
         nodes: Array.from({ length: cols * rows }, () => ({
             sumX: 0,
             sumY: 0,
-            weight: 0
+            weight: 0,
+            preferredWeight: 0
         }))
     }
 }
 
-function addResidualSample(accumulator, localPoint, residualX, residualY, weight = 1) {
+function addResidualSample(accumulator, localPoint, residualX, residualY, weight = 1, options = {}) {
     const u = clamp(localPoint.x / Math.max(1, accumulator.record.originalWidth), 0, 1)
     const v = clamp(localPoint.y / Math.max(1, accumulator.record.originalHeight), 0, 1)
     const sampleWeight = Math.max(0.0001, Number(weight) || 0.0001)
+    const preferredWeight = clamp(Number(options.preferredWeight) || 0, 0, 1)
     accumulator.support.minU = Math.min(accumulator.support.minU, u)
     accumulator.support.minV = Math.min(accumulator.support.minV, v)
     accumulator.support.maxU = Math.max(accumulator.support.maxU, u)
@@ -1164,6 +1566,7 @@ function addResidualSample(accumulator, localPoint, residualX, residualY, weight
         node.sumX += residualX * totalWeight
         node.sumY += residualY * totalWeight
         node.weight += totalWeight
+        node.preferredWeight += totalWeight * preferredWeight
     })
 }
 
@@ -1182,8 +1585,9 @@ function getExpandedSupportBounds(accumulator) {
             maxV: 1
         }
     }
-    const padU = Math.max(MESH_SUPPORT_PAD, accumulator.cols > 1 ? (1 / (accumulator.cols - 1)) : MESH_SUPPORT_PAD)
-    const padV = Math.max(MESH_SUPPORT_PAD, accumulator.rows > 1 ? (1 / (accumulator.rows - 1)) : MESH_SUPPORT_PAD)
+    const supportPad = accumulator.profile?.supportPad || MESH_SUPPORT_PAD
+    const padU = Math.max(supportPad, accumulator.cols > 1 ? (1 / (accumulator.cols - 1)) : supportPad)
+    const padV = Math.max(supportPad, accumulator.rows > 1 ? (1 / (accumulator.rows - 1)) : supportPad)
     return {
         minU: clamp(accumulator.support.minU - padU, 0, 1),
         minV: clamp(accumulator.support.minV - padV, 0, 1),
@@ -1192,12 +1596,12 @@ function getExpandedSupportBounds(accumulator) {
     }
 }
 
-function computeSupportLocalityFactor(u, v, bounds) {
+function computeSupportLocalityFactor(u, v, bounds, falloff = MESH_LOCALITY_FALLOFF) {
     const dx = distanceOutsideRange(u, bounds.minU, bounds.maxU)
     const dy = distanceOutsideRange(v, bounds.minV, bounds.maxV)
     const distance = Math.hypot(dx, dy)
     if (distance <= 1e-6) return 1
-    return Math.pow(clamp(1 - (distance / MESH_LOCALITY_FALLOFF), 0, 1), 1.6)
+    return Math.pow(clamp(1 - (distance / falloff), 0, 1), 1.6)
 }
 
 function computeEdgePinFactor(u, v, supportStrength, localityFactor) {
@@ -1205,6 +1609,16 @@ function computeEdgePinFactor(u, v, supportStrength, localityFactor) {
     const borderRelax = Math.pow(clamp(borderDistance / MESH_EDGE_PIN_DISTANCE, 0, 1), 0.85)
     const borderFloor = Math.max(Math.sqrt(supportStrength), 0.18 + (borderRelax * 0.82))
     return clamp(Math.max(borderFloor, localityFactor * 0.36), 0, 1)
+}
+
+function isWithinSupportBounds(u, v, bounds) {
+    return u >= bounds.minU && u <= bounds.maxU && v >= bounds.minV && v <= bounds.maxV
+}
+
+function isWithinSeamCorridor(u, v, corridor) {
+    if (!corridor) return false
+    const axisValue = corridor.orientation === 'vertical' ? u : v
+    return Math.abs(axisValue - corridor.center) <= corridor.halfWidth
 }
 
 function finalizeResidualAccumulator(accumulator) {
@@ -1215,15 +1629,12 @@ function finalizeResidualAccumulator(accumulator) {
     const maxResidual = Math.max(2, Number(accumulator.maxResidual) || defaultLimit)
     const rawNodes = accumulator.nodes.map((node) => {
         if (!node.weight) return { x: 0, y: 0, weight: 0 }
-        let x = node.sumX / node.weight
-        let y = node.sumY / node.weight
-        const magnitude = Math.hypot(x, y)
-        if (magnitude > maxResidual) {
-            const scale = maxResidual / magnitude
-            x *= scale
-            y *= scale
+        return {
+            x: node.sumX / node.weight,
+            y: node.sumY / node.weight,
+            weight: node.weight,
+            preferredWeight: node.preferredWeight || 0
         }
-        return { x, y, weight: node.weight }
     })
 
     if ((accumulator.support?.totalWeight || 0) <= 0) {
@@ -1231,6 +1642,7 @@ function finalizeResidualAccumulator(accumulator) {
     }
 
     const maxWeight = Math.max(1e-6, ...rawNodes.map((node) => node.weight))
+    const maxPreferredWeight = Math.max(1e-6, ...rawNodes.map((node) => node.preferredWeight || 0))
     const supportBounds = getExpandedSupportBounds(accumulator)
     const smoothedNodes = rawNodes.map((node, index) => {
         const row = Math.floor(index / accumulator.cols)
@@ -1261,16 +1673,76 @@ function finalizeResidualAccumulator(accumulator) {
         const u = accumulator.cols > 1 ? col / (accumulator.cols - 1) : 0
         const v = accumulator.rows > 1 ? row / (accumulator.rows - 1) : 0
         const supportStrength = clamp(node.weight / maxWeight, 0, 1)
-        const localityFactor = computeSupportLocalityFactor(u, v, supportBounds)
+        const preferredStrength = clamp((node.preferredWeight || 0) / maxPreferredWeight, 0, 1)
+        const localityFactor = computeSupportLocalityFactor(u, v, supportBounds, accumulator.profile?.localityFalloff || MESH_LOCALITY_FALLOFF)
         const spillFactor = Math.max(supportStrength, localityFactor * 0.82)
         const edgePinFactor = computeEdgePinFactor(u, v, supportStrength, localityFactor)
-        const attenuation = clamp(Math.max(supportStrength, spillFactor * edgePinFactor), 0, 1)
+        const preferredRegion = isWithinSupportBounds(u, v, supportBounds) || isWithinSeamCorridor(u, v, accumulator.corridor)
+        const residualLimit = maxResidual * (
+            accumulator.profile
+                ? (preferredRegion ? accumulator.profile.innerWarpMultiplier : accumulator.profile.outerWarpMultiplier)
+                : 1
+        )
+        let x = node.x
+        let y = node.y
+        const magnitude = Math.hypot(x, y)
+        if (magnitude > residualLimit) {
+            const scale = residualLimit / magnitude
+            x *= scale
+            y *= scale
+        }
+        const attenuation = accumulator.profile
+            ? clamp(
+                preferredRegion
+                    ? Math.max(
+                        supportStrength,
+                        (spillFactor * edgePinFactor * 0.92),
+                        0.42 + (preferredStrength * 0.48)
+                    )
+                    : Math.min(
+                        Math.max(supportStrength * 0.78, spillFactor * edgePinFactor * 0.78),
+                        0.88
+                    ),
+                0,
+                1
+            )
+            : clamp(Math.max(supportStrength, spillFactor * edgePinFactor), 0, 1)
         return {
-            x: round(node.x * attenuation, 4),
-            y: round(node.y * attenuation, 4),
+            x: round(x * attenuation, 4),
+            y: round(y * attenuation, 4),
             weight: round(Math.max(supportStrength, attenuation * 0.85), 4)
         }
     })
+}
+
+function sampleResidualGridAtLocalPoint(grid, record, localPoint) {
+    if (!grid?.nodes?.length) return { x: 0, y: 0 }
+    const cols = Math.max(2, grid.cols || 2)
+    const rows = Math.max(2, grid.rows || 2)
+    const u = clamp(localPoint.x / Math.max(1, record.originalWidth), 0, 1)
+    const v = clamp(localPoint.y / Math.max(1, record.originalHeight), 0, 1)
+    const scaledX = u * (cols - 1)
+    const scaledY = v * (rows - 1)
+    const minCol = Math.floor(scaledX)
+    const minRow = Math.floor(scaledY)
+    const maxCol = Math.min(cols - 1, minCol + 1)
+    const maxRow = Math.min(rows - 1, minRow + 1)
+    const tx = scaledX - minCol
+    const ty = scaledY - minRow
+    const topLeft = grid.nodes[(minRow * cols) + minCol] || { x: 0, y: 0 }
+    const topRight = grid.nodes[(minRow * cols) + maxCol] || topLeft
+    const bottomLeft = grid.nodes[(maxRow * cols) + minCol] || topLeft
+    const bottomRight = grid.nodes[(maxRow * cols) + maxCol] || topRight
+    const blend = (channel) => (
+        ((topLeft[channel] || 0) * (1 - tx) * (1 - ty))
+        + ((topRight[channel] || 0) * tx * (1 - ty))
+        + ((bottomLeft[channel] || 0) * (1 - tx) * ty)
+        + ((bottomRight[channel] || 0) * tx * ty)
+    )
+    return {
+        x: blend('x'),
+        y: blend('y')
+    }
 }
 
 function createOverlapMask(sourceRecord, targetRecord, homographyPrepared) {
@@ -1299,8 +1771,92 @@ function createOverlapMask(sourceRecord, targetRecord, homographyPrepared) {
     }
 }
 
-function addSeedPoint(points, buckets, point, spacing, maxPoints, width, height) {
-    if (!point || points.length >= maxPoints) return
+function analyzeMaskBounds(mask, width, height) {
+    const data = mask?.data || []
+    let minX = width
+    let minY = height
+    let maxX = -1
+    let maxY = -1
+    let count = 0
+    for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+            if (!(data[(y * width) + x] || 0)) continue
+            count += 1
+            if (x < minX) minX = x
+            if (y < minY) minY = y
+            if (x > maxX) maxX = x
+            if (y > maxY) maxY = y
+        }
+    }
+    if (!count || maxX < minX || maxY < minY) return null
+    const overlapWidth = (maxX - minX) + 1
+    const overlapHeight = (maxY - minY) + 1
+    const orientation = overlapWidth >= overlapHeight ? 'vertical' : 'horizontal'
+    const corridorSpan = orientation === 'vertical' ? overlapWidth : overlapHeight
+    const corridorHalfWidth = Math.max(3, Math.round(corridorSpan * 0.18))
+    return {
+        minX,
+        minY,
+        maxX,
+        maxY,
+        overlapWidth,
+        overlapHeight,
+        orientation,
+        center: orientation === 'vertical'
+            ? (minX + maxX) * 0.5
+            : (minY + maxY) * 0.5,
+        corridorHalfWidth
+    }
+}
+
+function buildSeamCorridorMask(mask, bounds) {
+    if (!mask || !bounds) return null
+    const corridorMask = cv.Mat.zeros(mask.rows, mask.cols, cv.CV_8UC1)
+    const sourceData = mask.data || []
+    const targetData = corridorMask.data || []
+    for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+        for (let x = bounds.minX; x <= bounds.maxX; x += 1) {
+            const index = (y * mask.cols) + x
+            if (!(sourceData[index] || 0)) continue
+            const axisValue = bounds.orientation === 'vertical' ? x : y
+            if (Math.abs(axisValue - bounds.center) <= bounds.corridorHalfWidth) {
+                targetData[index] = 255
+            }
+        }
+    }
+    return corridorMask
+}
+
+function createOverlapAnalysis(sourceRecord, targetRecord, homographyPrepared, profile = null) {
+    if (!Array.isArray(homographyPrepared) || homographyPrepared.length !== 9) return null
+    const mask = createOverlapMask(sourceRecord, targetRecord, homographyPrepared)
+    if (!mask) return null
+    const bounds = analyzeMaskBounds(mask, sourceRecord.width, sourceRecord.height)
+    if (!bounds) {
+        mask.delete()
+        return null
+    }
+    const seamMask = profile ? buildSeamCorridorMask(mask, bounds) : null
+    return {
+        mask,
+        bounds,
+        seamMask
+    }
+}
+
+function computeCorridorWeight(point, overlapAnalysis) {
+    const bounds = overlapAnalysis?.bounds
+    if (!bounds) return 0
+    const axisValue = bounds.orientation === 'vertical'
+        ? Number(point?.x)
+        : Number(point?.y)
+    if (!Number.isFinite(axisValue)) return 0
+    const normalizedDistance = Math.abs(axisValue - bounds.center) / Math.max(1, bounds.corridorHalfWidth)
+    return Math.pow(clamp(1 - normalizedDistance, 0, 1), 1.25)
+}
+
+function addSeedPoint(points, pointLookup, point, spacing, maxPoints, width, height, seamBias = 0) {
+    if (!point) return
     const x = Number(point.x)
     const y = Number(point.y)
     if (!Number.isFinite(x) || !Number.isFinite(y)) return
@@ -1308,55 +1864,188 @@ function addSeedPoint(points, buckets, point, spacing, maxPoints, width, height)
     const bucketX = Math.round(x / Math.max(1, spacing))
     const bucketY = Math.round(y / Math.max(1, spacing))
     const key = `${bucketX}:${bucketY}`
-    if (buckets.has(key)) return
-    buckets.add(key)
-    points.push({ x, y })
+    if (pointLookup.has(key)) {
+        const existing = points[pointLookup.get(key)]
+        if (existing) existing.seamBias = Math.max(existing.seamBias || 0, seamBias || 0)
+        return
+    }
+    if (points.length >= maxPoints) return
+    pointLookup.set(key, points.length)
+    points.push({ x, y, seamBias: clamp(seamBias || 0, 0, 1) })
 }
 
-function buildDenseSupportSeeds(edge, sourceRecord, targetRecord, settings) {
+function appendGoodFeatureSeeds(points, pointLookup, mat, mask, budget, spacing, width, height, seamBias = 0) {
+    if (!mask || budget <= 0) return 0
+    let corners = null
+    let added = 0
+    try {
+        corners = new cv.Mat()
+        cv.goodFeaturesToTrack(
+            mat,
+            corners,
+            budget,
+            MIN_DENSE_FEATURE_QUALITY,
+            spacing,
+            mask,
+            5,
+            false,
+            0.04
+        )
+        if ((corners.rows || 0) > 0 && typeof cv.cornerSubPix === 'function') {
+            let winSize = null
+            let zeroZone = null
+            let criteria = null
+            try {
+                winSize = new cv.Size(5, 5)
+                zeroZone = new cv.Size(-1, -1)
+                criteria = new cv.TermCriteria(
+                    cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER,
+                    30,
+                    0.01
+                )
+                cv.cornerSubPix(mat, corners, winSize, zeroZone, criteria)
+            } catch (_error) {
+                // Keep the original corners when sub-pixel refinement is unavailable.
+            } finally {
+                if (criteria?.delete) criteria.delete()
+                if (zeroZone?.delete) zeroZone.delete()
+                if (winSize?.delete) winSize.delete()
+            }
+        }
+        const beforeCount = points.length
+        extractPointsFromMat(corners).forEach((point) => {
+            addSeedPoint(points, pointLookup, point, spacing, beforeCount + budget, width, height, seamBias)
+        })
+        added = points.length - beforeCount
+    } finally {
+        if (corners?.delete) corners.delete()
+    }
+    return added
+}
+
+function buildDenseSupportSeeds(edge, sourceRecord, targetRecord, settings, overlapAnalysis, profile = null) {
     const maxSeedPoints = clamp(
-        Math.round(Math.min(MAX_FLOW_POINTS, Math.max(180, (Number(settings.maxFeatures) || 4000) * 0.3))),
+        Math.round(Math.min(
+            profile?.maxSeedCap || MAX_FLOW_POINTS,
+            Math.max(180, (Number(settings.maxFeatures) || 4000) * (profile?.maxSeedRatio || 0.3))
+        )),
         MIN_FLOW_SUPPORT,
-        MAX_FLOW_POINTS
+        profile?.maxSeedCap || MAX_FLOW_POINTS
     )
     const spacing = Math.max(
         MIN_DENSE_POINT_SPACING,
         Math.round(Math.min(sourceRecord.width, sourceRecord.height) / 90)
     )
     const points = []
-    const buckets = new Set()
+    const pointLookup = new Map()
 
     edge.inlierPairs.forEach((pair) => {
-        addSeedPoint(points, buckets, pair.source, spacing, maxSeedPoints, sourceRecord.width, sourceRecord.height)
+        addSeedPoint(
+            points,
+            pointLookup,
+            pair.source,
+            spacing,
+            maxSeedPoints,
+            sourceRecord.width,
+            sourceRecord.height,
+            computeCorridorWeight(pair.source, overlapAnalysis)
+        )
     })
 
-    let overlapMask = null
-    let corners = null
-    try {
-        overlapMask = createOverlapMask(sourceRecord, targetRecord, edge.homographyPrepared)
-        if (overlapMask) {
-            corners = new cv.Mat()
-            cv.goodFeaturesToTrack(
+    if (overlapAnalysis?.mask) {
+        const remaining = Math.max(0, maxSeedPoints - points.length)
+        if (profile?.seamSupportRatio && overlapAnalysis.seamMask) {
+            const seamBudget = Math.min(remaining, Math.round(remaining * profile.seamSupportRatio))
+            appendGoodFeatureSeeds(
+                points,
+                pointLookup,
                 sourceRecord.mat,
-                corners,
-                Math.max(0, maxSeedPoints - points.length),
-                MIN_DENSE_FEATURE_QUALITY,
-                spacing,
-                overlapMask,
-                5,
-                false,
-                0.04
+                overlapAnalysis.seamMask,
+                seamBudget,
+                Math.max(MIN_DENSE_POINT_SPACING, Math.round(spacing * 0.8)),
+                sourceRecord.width,
+                sourceRecord.height,
+                1
             )
-            extractPointsFromMat(corners).forEach((point) => {
-                addSeedPoint(points, buckets, point, spacing, maxSeedPoints, sourceRecord.width, sourceRecord.height)
-            })
         }
-    } finally {
-        if (corners?.delete) corners.delete()
-        if (overlapMask?.delete) overlapMask.delete()
+        appendGoodFeatureSeeds(
+            points,
+            pointLookup,
+            sourceRecord.mat,
+            overlapAnalysis.mask,
+            Math.max(0, maxSeedPoints - points.length),
+            spacing,
+            sourceRecord.width,
+            sourceRecord.height,
+            0
+        )
     }
 
-    return points
+    return {
+        points,
+        seededPointCount: points.length,
+        maxSeedPoints
+    }
+}
+
+function normalizeCorridor(bounds, record) {
+    if (!bounds) return null
+    const axisScale = bounds.orientation === 'vertical'
+        ? Math.max(1, record.width)
+        : Math.max(1, record.height)
+    return {
+        orientation: bounds.orientation,
+        center: clamp(
+            bounds.orientation === 'vertical'
+                ? ((bounds.center || 0) / Math.max(1, record.width))
+                : ((bounds.center || 0) / Math.max(1, record.height)),
+            0,
+            1
+        ),
+        halfWidth: clamp((bounds.corridorHalfWidth || 0) / axisScale, 0.02, 0.3)
+    }
+}
+
+function createFlowCriteria() {
+    return new cv.TermCriteria(cv.TermCriteria_COUNT | cv.TermCriteria_EPS, 30, 0.01)
+}
+
+function runOpticalFlowPass(sourceMat, targetMat, sourceFlat, initialTargetFlat, pass) {
+    const pointCount = Math.min(sourceFlat.length, initialTargetFlat.length) / 2
+    const prevPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, sourceFlat.slice(0, pointCount * 2))
+    const nextPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, initialTargetFlat.slice(0, pointCount * 2))
+    const status = new cv.Mat()
+    const error = new cv.Mat()
+    const windowSize = new cv.Size(pass.window, pass.window)
+    const criteria = createFlowCriteria()
+
+    try {
+        cv.calcOpticalFlowPyrLK(
+            sourceMat,
+            targetMat,
+            prevPoints,
+            nextPoints,
+            status,
+            error,
+            windowSize,
+            pass.maxLevel,
+            criteria,
+            cv.OPTFLOW_USE_INITIAL_FLOW,
+            0.0001
+        )
+        return {
+            nextData: Array.from(nextPoints.data32F || []),
+            statusData: Array.from(status.data || []),
+            errorData: Array.from(error.data32F || [])
+        }
+    } finally {
+        prevPoints.delete()
+        nextPoints.delete()
+        status.delete()
+        error.delete()
+        if (typeof criteria.delete === 'function') criteria.delete()
+        if (typeof windowSize.delete === 'function') windowSize.delete()
+    }
 }
 
 function chooseAdaptiveGridDimensions(density, sampleCount, averageResidual) {
@@ -1405,16 +2094,22 @@ function chooseResidualWeights(sourceState, targetState, distribution = 'balance
     return { source: 0.5, target: 0.5 }
 }
 
-function computeFlowSupport(edge, recordsById, settings) {
+function computeFlowSupport(edge, recordsById, settings, profile = null) {
     const sourceRecord = recordsById.get(edge.sourceId)
     const targetRecord = recordsById.get(edge.targetId)
     if (!sourceRecord || !targetRecord) return { count: 0, samples: [] }
     if (edge.inlierPairs.length < MIN_FLOW_SUPPORT) return { count: 0, samples: [] }
 
-    const supportPoints = buildDenseSupportSeeds(edge, sourceRecord, targetRecord, settings)
+    const sourceOverlapAnalysis = createOverlapAnalysis(sourceRecord, targetRecord, edge.homographyPrepared, profile)
+    const targetOverlapAnalysis = profile
+        ? createOverlapAnalysis(targetRecord, sourceRecord, edge.inversePrepared || invertHomography(edge.homographyPrepared), profile)
+        : null
+    const seedData = buildDenseSupportSeeds(edge, sourceRecord, targetRecord, settings, sourceOverlapAnalysis, profile)
+    const supportPoints = seedData.points
     const sourceFlat = []
     const targetFlat = []
     const supportWeights = []
+    const seamBiases = []
 
     supportPoints.forEach((point) => {
         const predicted = applyHomography(edge.homographyPrepared, point.x, point.y)
@@ -1428,57 +2123,113 @@ function computeFlowSupport(edge, recordsById, settings) {
         sourceFlat.push(point.x, point.y)
         targetFlat.push(predicted.x, predicted.y)
         supportWeights.push(featureWeight)
+        seamBiases.push(clamp(Math.max(point.seamBias || 0, computeCorridorWeight(predicted, targetOverlapAnalysis)), 0, 1))
     })
 
     const pointCount = Math.min(sourceFlat.length / 2, targetFlat.length / 2, supportWeights.length)
-    if (pointCount < MIN_FLOW_SUPPORT) return { count: 0, samples: [] }
-
-    const prevPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, sourceFlat.slice(0, pointCount * 2))
-    const nextPoints = cv.matFromArray(pointCount, 1, cv.CV_32FC2, targetFlat.slice(0, pointCount * 2))
-    const status = new cv.Mat()
-    const error = new cv.Mat()
-    const windowSize = new cv.Size(21, 21)
-    const criteria = new cv.TermCriteria(cv.TermCriteria_COUNT | cv.TermCriteria_EPS, 30, 0.01)
-
     try {
-        cv.calcOpticalFlowPyrLK(
+        if (pointCount < MIN_FLOW_SUPPORT) {
+            return {
+                count: 0,
+                samples: [],
+                seededPointCount: seedData.seededPointCount,
+                detailCandidateCount: pointCount,
+                coarseTrackedCount: 0,
+                fineTrackedCount: 0,
+                forwardBackwardRejectedCount: 0,
+                preparedFilteredCount: 0,
+                sourceCorridor: profile ? normalizeCorridor(sourceOverlapAnalysis?.bounds, sourceRecord) : null,
+                targetCorridor: profile ? normalizeCorridor(targetOverlapAnalysis?.bounds, targetRecord) : null
+            }
+        }
+
+        const coarsePass = profile?.coarseFlow || {
+            window: 21,
+            maxLevel: 3,
+            maxError: MAX_FLOW_ERROR
+        }
+        const finePass = profile?.fineFlow || coarsePass
+        const coarseResult = runOpticalFlowPass(
             sourceRecord.mat,
             targetRecord.mat,
-            prevPoints,
-            nextPoints,
-            status,
-            error,
-            windowSize,
-            3,
-            criteria,
-            cv.OPTFLOW_USE_INITIAL_FLOW,
-            0.0001
+            sourceFlat,
+            targetFlat,
+            coarsePass
         )
+        const fineResult = profile
+            ? runOpticalFlowPass(
+                sourceRecord.mat,
+                targetRecord.mat,
+                sourceFlat,
+                coarseResult.nextData,
+                finePass
+            )
+            : coarseResult
+        const reverseResult = profile
+            ? runOpticalFlowPass(
+                targetRecord.mat,
+                sourceRecord.mat,
+                fineResult.nextData,
+                sourceFlat,
+                finePass
+            )
+            : null
 
-        const nextData = nextPoints.data32F || []
-        const prevData = prevPoints.data32F || []
-        const statusData = status.data || []
-        const errorData = error.data32F || []
+        let coarseTrackedCount = 0
+        let fineTrackedCount = 0
+        let forwardBackwardRejectedCount = 0
         const rawSamples = []
 
         for (let index = 0; index < pointCount; index += 1) {
-            if (!statusData[index]) continue
-            if (!Number.isFinite(errorData[index]) || errorData[index] > MAX_FLOW_ERROR) continue
+            const coarseAccepted = coarseResult.statusData[index]
+                && Number.isFinite(coarseResult.errorData[index])
+                && coarseResult.errorData[index] <= coarsePass.maxError
+            if (!coarseAccepted) continue
+            coarseTrackedCount += 1
+
+            const fineAccepted = fineResult.statusData[index]
+                && Number.isFinite(fineResult.errorData[index])
+                && fineResult.errorData[index] <= finePass.maxError
+            if (!fineAccepted) continue
+            fineTrackedCount += 1
+
             const sourcePrepared = {
-                x: prevData[index * 2],
-                y: prevData[(index * 2) + 1]
+                x: sourceFlat[index * 2],
+                y: sourceFlat[(index * 2) + 1]
             }
             const trackedPrepared = {
-                x: nextData[index * 2],
-                y: nextData[(index * 2) + 1]
+                x: fineResult.nextData[index * 2],
+                y: fineResult.nextData[(index * 2) + 1]
             }
             const predictedPrepared = applyHomography(edge.homographyPrepared, sourcePrepared.x, sourcePrepared.y)
             if (!predictedPrepared || !Number.isFinite(trackedPrepared.x) || !Number.isFinite(trackedPrepared.y)) continue
+
+            let backwardError = 0
+            if (reverseResult) {
+                const backwardAccepted = reverseResult.statusData[index]
+                    && Number.isFinite(reverseResult.errorData[index])
+                    && reverseResult.errorData[index] <= finePass.maxError
+                if (!backwardAccepted) {
+                    forwardBackwardRejectedCount += 1
+                    continue
+                }
+                backwardError = Math.hypot(
+                    (reverseResult.nextData[index * 2] || 0) - sourcePrepared.x,
+                    (reverseResult.nextData[(index * 2) + 1] || 0) - sourcePrepared.y
+                )
+                if (backwardError > (profile?.forwardBackwardError || TWO_IMAGE_FORWARD_BACKWARD_ERROR)) {
+                    forwardBackwardRejectedCount += 1
+                    continue
+                }
+            }
+
             rawSamples.push({
                 sourcePrepared,
                 trackedPrepared,
                 predictedPrepared,
                 featureWeight: supportWeights[index] || 1,
+                seamBias: seamBiases[index] || 0,
+                backwardError,
                 improvement: Math.hypot(
                     trackedPrepared.x - predictedPrepared.x,
                     trackedPrepared.y - predictedPrepared.y
@@ -1492,28 +2243,48 @@ function computeFlowSupport(edge, recordsById, settings) {
         return {
             count: samples.length,
             samples,
-            preparedCorrectionLimit
+            preparedCorrectionLimit,
+            seededPointCount: seedData.seededPointCount,
+            detailCandidateCount: pointCount,
+            coarseTrackedCount,
+            fineTrackedCount,
+            forwardBackwardRejectedCount,
+            preparedFilteredCount: Math.max(0, rawSamples.length - samples.length),
+            sourceCorridor: profile ? normalizeCorridor(sourceOverlapAnalysis?.bounds, sourceRecord) : null,
+            targetCorridor: profile ? normalizeCorridor(targetOverlapAnalysis?.bounds, targetRecord) : null
         }
     } finally {
-        prevPoints.delete()
-        nextPoints.delete()
-        status.delete()
-        error.delete()
-        if (typeof criteria.delete === 'function') criteria.delete()
-        if (typeof windowSize.delete === 'function') windowSize.delete()
+        sourceOverlapAnalysis?.mask?.delete?.()
+        sourceOverlapAnalysis?.seamMask?.delete?.()
+        targetOverlapAnalysis?.mask?.delete?.()
+        targetOverlapAnalysis?.seamMask?.delete?.()
     }
 }
 
-function buildMeshResiduals(states, acceptedEdges, recordsById, settings, flowCache) {
+function buildMeshResiduals(states, acceptedEdges, recordsById, settings, flowCache, totalInputs = states.size) {
+    const profile = createMeshRefinementProfile(totalInputs, 'mesh')
     const sampleSets = new Map()
+    const evaluationSets = []
     let supportCount = 0
     let improvementSum = 0
+    let seededSupportCount = 0
+    let detailCandidateCount = 0
+    let coarseTrackedCount = 0
+    let fineTrackedCount = 0
+    let forwardBackwardRejectedCount = 0
+    let preparedFilteredCount = 0
 
     acceptedEdges.forEach((edge) => {
         if (!states.has(edge.sourceId) || !states.has(edge.targetId)) return
         const cacheKey = edge.id
-        const flow = flowCache.get(cacheKey) || computeFlowSupport(edge, recordsById, settings)
+        const flow = flowCache.get(cacheKey) || computeFlowSupport(edge, recordsById, settings, profile)
         flowCache.set(cacheKey, flow)
+        seededSupportCount += flow.seededPointCount || 0
+        detailCandidateCount += flow.detailCandidateCount || 0
+        coarseTrackedCount += flow.coarseTrackedCount || 0
+        fineTrackedCount += flow.fineTrackedCount || 0
+        forwardBackwardRejectedCount += flow.forwardBackwardRejectedCount || 0
+        preparedFilteredCount += flow.preparedFilteredCount || 0
         if (flow.count < MIN_FLOW_SUPPORT) return
 
         const sourceState = states.get(edge.sourceId)
@@ -1570,13 +2341,15 @@ function buildMeshResiduals(states, acceptedEdges, recordsById, settings, flowCa
                 const sampleSet = sampleSets.get(edge.sourceId) || {
                     record: sourceRecord,
                     samples: [],
-                    residualMagnitudes: []
+                    residualMagnitudes: [],
+                    corridor: flow.sourceCorridor || null
                 }
                 sampleSet.samples.push({
                     localPoint: sourceOriginal,
                     residualX: residualX * weights.source,
                     residualY: residualY * weights.source,
-                    weight: sampleWeight
+                    weight: sampleWeight,
+                    preferredWeight: sample.seamBias || 0
                 })
                 sampleSet.residualMagnitudes.push(residualMagnitude * weights.source)
                 sampleSets.set(edge.sourceId, sampleSet)
@@ -1586,13 +2359,15 @@ function buildMeshResiduals(states, acceptedEdges, recordsById, settings, flowCa
                 const sampleSet = sampleSets.get(edge.targetId) || {
                     record: targetRecord,
                     samples: [],
-                    residualMagnitudes: []
+                    residualMagnitudes: [],
+                    corridor: flow.targetCorridor || null
                 }
                 sampleSet.samples.push({
                     localPoint: targetOriginal,
                     residualX: -residualX * weights.target,
                     residualY: -residualY * weights.target,
-                    weight: sampleWeight
+                    weight: sampleWeight,
+                    preferredWeight: sample.seamBias || 0
                 })
                 sampleSet.residualMagnitudes.push(residualMagnitude * weights.target)
                 sampleSets.set(edge.targetId, sampleSet)
@@ -1600,6 +2375,14 @@ function buildMeshResiduals(states, acceptedEdges, recordsById, settings, flowCa
 
             supportCount += 1
             improvementSum += residualMagnitude + sample.improvement
+        })
+
+        evaluationSets.push({
+            flow,
+            sourceState,
+            targetState,
+            sourceRecord,
+            targetRecord
         })
     })
 
@@ -1612,9 +2395,20 @@ function buildMeshResiduals(states, acceptedEdges, recordsById, settings, flowCa
             : 0
         const dimensions = chooseAdaptiveGridDimensions(settings.meshDensity, sampleSet.samples.length, averageResidual)
         const warpBudget = deriveWorldWarpBudget(sampleSet.record, sampleSet.residualMagnitudes)
-        const accumulator = createResidualAccumulator(sampleSet.record, settings.meshDensity, dimensions, { maxResidual: warpBudget })
+        const accumulator = createResidualAccumulator(sampleSet.record, settings.meshDensity, dimensions, {
+            maxResidual: warpBudget,
+            profile,
+            corridor: sampleSet.corridor
+        })
         sampleSet.samples.forEach((sample) => {
-            addResidualSample(accumulator, sample.localPoint, sample.residualX, sample.residualY, sample.weight)
+            addResidualSample(
+                accumulator,
+                sample.localPoint,
+                sample.residualX,
+                sample.residualY,
+                sample.weight,
+                { preferredWeight: sample.preferredWeight || 0 }
+            )
         })
         const nodes = finalizeResidualAccumulator(accumulator)
         const weightedNodes = nodes.filter((node) => node.weight > 0)
@@ -1630,11 +2424,51 @@ function buildMeshResiduals(states, acceptedEdges, recordsById, settings, flowCa
         })
     })
 
+    let seamResidualBefore = 0
+    let seamResidualAfter = 0
+    let seamResidualWeight = 0
+    evaluationSets.forEach((entry) => {
+        const sourceGrid = grids.get(entry.sourceRecord.id)
+        const targetGrid = grids.get(entry.targetRecord.id)
+        entry.flow.samples.forEach((sample) => {
+            const sourceOriginal = convertPreparedPointToOriginal(sample.sourcePrepared, entry.sourceRecord)
+            const targetOriginal = convertPreparedPointToOriginal(sample.trackedPrepared, entry.targetRecord)
+            const sourceWorld = applyHomography(entry.sourceState.homographyToAnchor, sourceOriginal.x, sourceOriginal.y)
+            const targetWorld = applyHomography(entry.targetState.homographyToAnchor, targetOriginal.x, targetOriginal.y)
+            if (!sourceWorld || !targetWorld) return
+
+            const sourceResidual = sampleResidualGridAtLocalPoint(sourceGrid, entry.sourceRecord, sourceOriginal)
+            const targetResidual = sampleResidualGridAtLocalPoint(targetGrid, entry.targetRecord, targetOriginal)
+            const before = Math.hypot(targetWorld.x - sourceWorld.x, targetWorld.y - sourceWorld.y)
+            const after = Math.hypot(
+                (targetWorld.x + targetResidual.x) - (sourceWorld.x + sourceResidual.x),
+                (targetWorld.y + targetResidual.y) - (sourceWorld.y + sourceResidual.y)
+            )
+            const weight = Math.max(
+                0.1,
+                (sample.featureWeight || 1) * (profile ? (0.2 + ((sample.seamBias || 0) * 0.8)) : 1)
+            )
+            seamResidualBefore += before * weight
+            seamResidualAfter += after * weight
+            seamResidualWeight += weight
+        })
+    })
+
     return {
         grids,
         supportCount,
         averageImprovement: supportCount ? (improvementSum / supportCount) : 0,
-        distortionPenalty: distortionSamples ? (distortionPenalty / distortionSamples) : 0
+        distortionPenalty: distortionSamples ? (distortionPenalty / distortionSamples) : 0,
+        seamResidualBefore: seamResidualWeight ? (seamResidualBefore / seamResidualWeight) : 0,
+        seamResidualAfter: seamResidualWeight ? (seamResidualAfter / seamResidualWeight) : 0,
+        flowDiagnostics: {
+            seededSupportCount,
+            detailCandidateCount,
+            coarseTrackedCount,
+            fineTrackedCount,
+            forwardBackwardRejectedCount,
+            preparedFilteredCount
+        }
     }
 }
 
@@ -1647,8 +2481,23 @@ function buildCandidate(anchorRecord, imageRecords, states, acceptedEdges, recor
         .filter(Boolean)
 
     const meshResiduals = type === 'mesh'
-        ? buildMeshResiduals(candidateStates, acceptedEdges, recordsById, settings, flowCache)
-        : { grids: new Map(), supportCount: 0, averageImprovement: 0, distortionPenalty: 0 }
+        ? buildMeshResiduals(candidateStates, acceptedEdges, recordsById, settings, flowCache, imageRecords.length)
+        : {
+            grids: new Map(),
+            supportCount: 0,
+            averageImprovement: 0,
+            distortionPenalty: 0,
+            seamResidualBefore: 0,
+            seamResidualAfter: 0,
+            flowDiagnostics: {
+                seededSupportCount: 0,
+                detailCandidateCount: 0,
+                coarseTrackedCount: 0,
+                fineTrackedCount: 0,
+                forwardBackwardRejectedCount: 0,
+                preparedFilteredCount: 0
+            }
+        }
 
     if (type === 'mesh' && meshResiduals.supportCount < MIN_FLOW_SUPPORT) return null
 
@@ -1717,7 +2566,13 @@ function buildCandidate(anchorRecord, imageRecords, states, acceptedEdges, recor
         + (averageInliers * 2.2)
         - (averageReprojection * 7.5)
         + (type === 'mesh'
-            ? ((meshResiduals.supportCount * 0.18) + (meshResiduals.averageImprovement * 4.5) - (meshResiduals.distortionPenalty * 0.22))
+            ? (
+                (meshResiduals.supportCount * 0.18)
+                + (meshResiduals.averageImprovement * 4.5)
+                - (meshResiduals.distortionPenalty * 0.22)
+                + Math.max(0, (meshResiduals.seamResidualBefore || 0) - (meshResiduals.seamResidualAfter || 0)) * 16
+                - ((meshResiduals.seamResidualAfter || 0) * 10)
+            )
             : 0)
         + Math.max(0, usedEdges.length - 1) * 3
     )
@@ -1729,6 +2584,10 @@ function buildCandidate(anchorRecord, imageRecords, states, acceptedEdges, recor
     if (settings.warpDistribution === 'balanced' && candidateStates !== states) diagnostics.push('Balanced world frame')
     if (type === 'mesh') {
         diagnostics.push(`${meshResiduals.supportCount} optical-flow supports`)
+        diagnostics.push(`${meshResiduals.flowDiagnostics.seededSupportCount || 0} seeded / ${(meshResiduals.flowDiagnostics.detailCandidateCount || 0)} detail / ${(meshResiduals.supportCount || 0)} kept`)
+        diagnostics.push(`Flow coarse ${(meshResiduals.flowDiagnostics.coarseTrackedCount || 0)} | fine ${(meshResiduals.flowDiagnostics.fineTrackedCount || 0)} | FB rejected ${(meshResiduals.flowDiagnostics.forwardBackwardRejectedCount || 0)}`)
+        diagnostics.push(`Prepared-flow rejects ${(meshResiduals.flowDiagnostics.preparedFilteredCount || 0)}`)
+        diagnostics.push(`Seam residual ${round(meshResiduals.seamResidualBefore || 0, 2)} -> ${round(meshResiduals.seamResidualAfter || 0, 2)}`)
         diagnostics.push(settings.warpDistribution === 'balanced' ? 'Balanced deformation sharing' : 'Anchored deformation sharing')
         const meshSummaries = [...meshResiduals.grids.values()].map((grid) => `${grid.cols}x${grid.rows}`).join(', ')
         if (meshSummaries) diagnostics.push(`Adaptive mesh grids: ${meshSummaries}`)
@@ -1800,6 +2659,7 @@ function normalizeSettings(settings = {}) {
         meshDensity: ['low', 'medium', 'high'].includes(settings.meshDensity) ? settings.meshDensity : 'medium',
         warpMode: ['auto', 'off', 'perspective', 'mesh'].includes(settings.warpMode) ? settings.warpMode : 'auto',
         warpDistribution: ['anchored', 'balanced'].includes(settings.warpDistribution) ? settings.warpDistribution : 'balanced',
+        featureDetector: ['auto', 'orb', 'akaze', 'sift'].includes(settings.featureDetector) ? settings.featureDetector : 'auto',
         maxFeatures: Math.max(200, Number(settings.maxFeatures) || 4000),
         matchRatio: clamp(Number(settings.matchRatio) || 0.75, 0.4, 0.99),
         ransacIterations: Math.max(200, Number(settings.ransacIterations) || 5000),
@@ -1816,43 +2676,90 @@ function buildWarning(topCandidate, meshRequested, meshBuilt) {
     return ''
 }
 
-function analyzePhotoDocument(document, preparedInputs, requestId = '') {
-    const settings = normalizeSettings(document?.settings || {})
-    emitProgress(requestId, 'Preparing photo analysis...', `${preparedInputs.length} image${preparedInputs.length === 1 ? '' : 's'}`)
-    if (preparedInputs.length <= 1) {
-        const manualCandidate = createManualLayoutCandidate(preparedInputs.map((preparedInput, index) => ({
-            id: preparedInput.id,
-            originalWidth: preparedInput.originalWidth || preparedInput.width,
-            originalHeight: preparedInput.originalHeight || preparedInput.height,
-            index
-        })), preparedInputs.length ? '' : 'Add two or more images to analyze a stitch.')
-        return {
-            backend: PHOTO_BACKEND,
-            candidates: [manualCandidate],
-            warning: preparedInputs.length ? 'Only one image was available, so no overlap analysis ran.' : 'Add images to begin stitching.',
-            diagnostics: []
-        }
-    }
-
-    emitProgress(requestId, 'Extracting ORB features...', '', { phase: 'features', completed: 0, total: preparedInputs.length })
-    const imageRecords = createImageRecords(document, preparedInputs, settings)
-    const recordsById = new Map(imageRecords.map((record) => [record.id, record]))
-    emitProgress(
-        requestId,
-        'Extracted ORB features',
-        imageRecords.map((record) => `${record.name}: ${record.keypoints.length}`).join(' | '),
-        { phase: 'features', completed: preparedInputs.length, total: preparedInputs.length }
+function scorePhotoAnalysisResult(result = {}) {
+    const topCandidate = Array.isArray(result?.candidates) ? result.candidates[0] : null
+    if (!topCandidate) return -Infinity
+    return (
+        (topCandidate.source === 'manual' ? -120 : 0)
+        + (Number(topCandidate.score) || 0)
+        + ((Number(topCandidate.coverage) || 0) * 28)
+        + ((Number(topCandidate.confidence) || 0) * 36)
+        + ((Number(result.acceptedEdgeCount) || 0) * 7)
+        + (topCandidate.modelType === 'mesh' ? 6 : topCandidate.modelType === 'perspective' ? 3 : 0)
     )
+}
+
+function shouldRetryWithAkaze(result, settings) {
+    if ((settings.featureDetector || 'auto') !== 'auto') return false
+    const topCandidate = Array.isArray(result?.candidates) ? result.candidates[0] : null
+    if (!topCandidate) return true
+    if (topCandidate.source === 'manual') return true
+    if ((result.acceptedEdgeCount || 0) < 1) return true
+    return (Number(topCandidate.coverage) || 0) < 0.65 || (Number(topCandidate.confidence) || 0) < 0.4
+}
+
+function shouldRetryWithSift(result, settings, preparedInputs = []) {
+    if ((settings.featureDetector || 'auto') !== 'auto') return false
+    if (!hasSiftSupport()) return false
+    if (preparedInputs.length !== 2) return false
+    const topCandidate = Array.isArray(result?.candidates) ? result.candidates[0] : null
+    if (!topCandidate) return true
+    if (topCandidate.source === 'manual') return true
+    if ((result.acceptedEdgeCount || 0) < 1) return true
+    if (topCandidate.modelType !== 'mesh') return true
+    return (Number(topCandidate.coverage) || 0) < AUTO_SIFT_COVERAGE_THRESHOLD
+        || (Number(topCandidate.confidence) || 0) < AUTO_SIFT_CONFIDENCE_THRESHOLD
+}
+
+function sortPairDiagnostics(diagnostics = []) {
+    return [...diagnostics].sort((left, right) => {
+        if (left.accepted !== right.accepted) return left.accepted ? -1 : 1
+        return (right.score || 0) - (left.score || 0)
+    })
+}
+
+function buildCandidateDiagnostics(ranked = [], detectorLabel = 'ORB') {
+    return ranked.map((candidate) => ({
+        pair: `candidate:${candidate.name}`,
+        method: candidate.modelType,
+        detector: detectorLabel.toLowerCase(),
+        score: round(candidate.score, 4),
+        matches: candidate.placements.length,
+        coverage: round(candidate.coverage || 0, 4),
+        accepted: true
+    }))
+}
+
+function runPhotoAnalysisPass(document, preparedInputs, settings, requestId = '', detectorMode = 'orb', detectorOptions = {}) {
+    const featureSettings = {
+        ...settings,
+        _detectorMaxFeaturesCap: detectorOptions.maxFeaturesCap,
+        _akazeOptions: detectorMode === 'akaze' ? detectorOptions : null
+    }
+    const feature = createFeatureExtractor(detectorMode, featureSettings)
+    emitProgress(requestId, `Extracting ${feature.label} features...`, '', { phase: 'features', completed: 0, total: preparedInputs.length })
+    let imageRecords = []
 
     try {
-        const pairResult = buildPairEdges(imageRecords, settings, requestId)
+        imageRecords = createImageRecords(document, preparedInputs, settings, feature)
+        const recordsById = new Map(imageRecords.map((record) => [record.id, record]))
+        emitProgress(
+            requestId,
+            `Extracted ${feature.label} features`,
+            imageRecords.map((record) => `${record.name}: ${record.keypoints.length}`).join(' | '),
+            { phase: 'features', completed: preparedInputs.length, total: preparedInputs.length }
+        )
+        const pairResult = buildPairEdges(imageRecords, settings, requestId, feature)
         const acceptedEdges = pairResult.acceptedEdges
         if (!acceptedEdges.length) {
             return {
                 backend: PHOTO_BACKEND,
                 candidates: [createManualLayoutCandidate(imageRecords, 'No photo overlaps passed homography validation.')],
                 warning: 'No photo overlaps passed homography validation. Falling back to manual layout.',
-                diagnostics: pairResult.diagnostics
+                diagnostics: sortPairDiagnostics(pairResult.diagnostics),
+                acceptedEdgeCount: 0,
+                detectorMode: feature.id,
+                detectorLabel: feature.label
             }
         }
 
@@ -1932,7 +2839,12 @@ function analyzePhotoDocument(document, preparedInputs, requestId = '') {
         })
 
         candidates.push(createManualLayoutCandidate(imageRecords, 'Manual fallback layout.'))
-        const ranked = rankCandidates(dedupeCandidates(candidates)).slice(0, settings.maxCandidates)
+        const ranked = rankCandidates(dedupeCandidates(candidates))
+            .slice(0, settings.maxCandidates)
+            .map((candidate) => ({
+                ...candidate,
+                diagnostics: [...(candidate.diagnostics || []), `${feature.label} features`]
+            }))
         const warning = buildWarning(ranked[0], buildMesh, meshBuilt)
         emitProgress(
             requestId,
@@ -1945,22 +2857,210 @@ function analyzePhotoDocument(document, preparedInputs, requestId = '') {
             backend: PHOTO_BACKEND,
             candidates: ranked,
             warning,
-            diagnostics: pairResult.diagnostics
-                .sort((left, right) => {
-                    if (left.accepted !== right.accepted) return left.accepted ? -1 : 1
-                    return (right.score || 0) - (left.score || 0)
-                })
-                .concat(ranked.map((candidate) => ({
-                    pair: `candidate:${candidate.name}`,
-                    method: candidate.modelType,
-                    score: round(candidate.score, 4),
-                    matches: candidate.placements.length,
-                    coverage: round(candidate.coverage || 0, 4),
-                    accepted: true
-                })))
+            diagnostics: sortPairDiagnostics(pairResult.diagnostics).concat(buildCandidateDiagnostics(ranked, feature.label)),
+            acceptedEdgeCount: acceptedEdges.length,
+            detectorMode: feature.id,
+            detectorLabel: feature.label
         }
     } finally {
         destroyImageRecords(imageRecords)
+    }
+}
+
+function isAutomaticAkazeRetrySafe(preparedInputs = []) {
+    return preparedInputs.every((preparedInput) => (
+        Math.max(1, Number(preparedInput?.width) || 0) * Math.max(1, Number(preparedInput?.height) || 0)
+    ) <= AUTO_AKAZE_MAX_IMAGE_PIXELS)
+}
+
+function isAutomaticSiftRetrySafe(preparedInputs = []) {
+    return preparedInputs.length === 2 && preparedInputs.every((preparedInput) => (
+        Math.max(1, Number(preparedInput?.width) || 0) * Math.max(1, Number(preparedInput?.height) || 0)
+    ) <= AUTO_SIFT_MAX_IMAGE_PIXELS)
+}
+
+function analyzePhotoDocument(document, preparedInputs, requestId = '') {
+    const settings = normalizeSettings(document?.settings || {})
+    emitProgress(requestId, 'Preparing photo analysis...', `${preparedInputs.length} image${preparedInputs.length === 1 ? '' : 's'}`)
+    if (preparedInputs.length <= 1) {
+        const manualCandidate = createManualLayoutCandidate(preparedInputs.map((preparedInput, index) => ({
+            id: preparedInput.id,
+            originalWidth: preparedInput.originalWidth || preparedInput.width,
+            originalHeight: preparedInput.originalHeight || preparedInput.height,
+            index
+        })), preparedInputs.length ? '' : 'Add two or more images to analyze a stitch.')
+        return {
+            backend: PHOTO_BACKEND,
+            candidates: [manualCandidate],
+            warning: preparedInputs.length ? 'Only one image was available, so no overlap analysis ran.' : 'Add images to begin stitching.',
+            diagnostics: []
+        }
+    }
+
+    const requestedDetector = settings.featureDetector || 'auto'
+    const primaryDetector = requestedDetector === 'sift'
+        ? 'sift'
+        : (requestedDetector === 'akaze' ? 'akaze' : 'orb')
+    const primaryResult = runPhotoAnalysisPass(document, preparedInputs, settings, requestId, primaryDetector)
+    if (requestedDetector === 'sift') {
+        return primaryResult
+    }
+
+    let bestResult = primaryResult
+    if (shouldRetryWithAkaze(primaryResult, settings) && primaryResult.detectorMode !== 'akaze' && primaryResult.detectorMode !== 'sift') {
+        if (!isAutomaticAkazeRetrySafe(preparedInputs)) {
+            bestResult = {
+                ...primaryResult,
+                diagnostics: [
+                    ...(primaryResult.diagnostics || []),
+                    {
+                        method: 'feature-detector-fallback',
+                        from: 'orb',
+                        to: 'akaze',
+                        selected: primaryResult.detectorMode || 'orb',
+                        accepted: false,
+                        reason: 'Automatic AKAZE retry was skipped because the prepared images were too large for a safe browser fallback.'
+                    }
+                ]
+            }
+        } else {
+            emitProgress(requestId, 'Retrying photo features...', 'ORB looked weak, so Stitch is trying AKAZE for a stronger fallback.')
+            let akazeResult = null
+            try {
+                akazeResult = runPhotoAnalysisPass(document, preparedInputs, settings, requestId, 'akaze', {
+                    maxFeaturesCap: AUTO_AKAZE_MAX_FEATURES,
+                    threshold: AUTO_AKAZE_THRESHOLD
+                })
+            } catch (error) {
+                const reason = error?.message || 'AKAZE fallback failed.'
+                logError('AKAZE fallback failed. Keeping ORB result.', reason)
+                emitProgress(requestId, 'Keeping ORB features...', 'AKAZE fallback failed, so Stitch kept the usable ORB result.')
+                bestResult = {
+                    ...primaryResult,
+                    diagnostics: [
+                        ...(primaryResult.diagnostics || []),
+                        {
+                            method: 'feature-detector-fallback',
+                            from: 'orb',
+                            to: 'akaze',
+                            selected: primaryResult.detectorMode || 'orb',
+                            accepted: false,
+                            reason
+                        }
+                    ]
+                }
+            }
+            if (akazeResult) {
+                if (akazeResult.detectorMode === 'akaze' && scorePhotoAnalysisResult(akazeResult) > scorePhotoAnalysisResult(primaryResult)) {
+                    bestResult = {
+                        ...akazeResult,
+                        diagnostics: [
+                            ...(akazeResult.diagnostics || []),
+                            {
+                                method: 'feature-detector-fallback',
+                                from: 'orb',
+                                to: 'akaze',
+                                selected: 'akaze',
+                                accepted: true
+                            }
+                        ]
+                    }
+                } else {
+                    bestResult = {
+                        ...primaryResult,
+                        diagnostics: [
+                            ...(primaryResult.diagnostics || []),
+                            {
+                                method: 'feature-detector-fallback',
+                                from: 'orb',
+                                to: akazeResult.detectorMode || 'orb',
+                                selected: primaryResult.detectorMode || 'orb',
+                                accepted: true
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    if (!shouldRetryWithSift(bestResult, settings, preparedInputs)) {
+        return bestResult
+    }
+
+    if (!isAutomaticSiftRetrySafe(preparedInputs)) {
+        return {
+            ...bestResult,
+            diagnostics: [
+                ...(bestResult.diagnostics || []),
+                {
+                    method: 'feature-detector-fallback',
+                    from: bestResult.detectorMode || 'orb',
+                    to: 'sift',
+                    selected: bestResult.detectorMode || 'orb',
+                    accepted: false,
+                    reason: 'Automatic SIFT retry was skipped because the prepared images were too large for a safe browser fallback.'
+                }
+            ]
+        }
+    }
+
+    emitProgress(requestId, 'Retrying photo features...', 'The pair still looks weak, so Stitch is trying SIFT for maximum feature accuracy.')
+    let siftResult = null
+    try {
+        siftResult = runPhotoAnalysisPass(document, preparedInputs, settings, requestId, 'sift', {
+            maxFeaturesCap: AUTO_SIFT_MAX_FEATURES,
+            contrastThreshold: AUTO_SIFT_CONTRAST_THRESHOLD,
+            edgeThreshold: AUTO_SIFT_EDGE_THRESHOLD
+        })
+    } catch (error) {
+        const reason = error?.message || 'SIFT fallback failed.'
+        logError('SIFT fallback failed. Keeping the stronger existing result.', reason)
+        emitProgress(requestId, 'Keeping current features...', 'SIFT fallback failed, so Stitch kept the stronger existing result.')
+        return {
+            ...bestResult,
+            diagnostics: [
+                ...(bestResult.diagnostics || []),
+                {
+                    method: 'feature-detector-fallback',
+                    from: bestResult.detectorMode || 'orb',
+                    to: 'sift',
+                    selected: bestResult.detectorMode || 'orb',
+                    accepted: false,
+                    reason
+                }
+            ]
+        }
+    }
+
+    if (siftResult.detectorMode === 'sift' && scorePhotoAnalysisResult(siftResult) > scorePhotoAnalysisResult(bestResult)) {
+        return {
+            ...siftResult,
+            diagnostics: [
+                ...(siftResult.diagnostics || []),
+                {
+                    method: 'feature-detector-fallback',
+                    from: bestResult.detectorMode || 'orb',
+                    to: 'sift',
+                    selected: 'sift',
+                    accepted: true
+                }
+            ]
+        }
+    }
+
+    return {
+        ...bestResult,
+        diagnostics: [
+            ...(bestResult.diagnostics || []),
+            {
+                method: 'feature-detector-fallback',
+                from: bestResult.detectorMode || 'orb',
+                to: 'sift',
+                selected: bestResult.detectorMode || 'orb',
+                accepted: true
+            }
+        ]
     }
 }
 
@@ -1972,7 +3072,13 @@ function postReadyOnce() {
     }
     readyPosted = true
     cvReady = true
-    logDebug('Runtime ready.')
+    logDebug('Runtime ready.', {
+        features2d: {
+            orb: !!cv && (typeof cv.ORB_create === 'function' || typeof cv.ORB === 'function'),
+            akaze: !!cv && (typeof cv.AKAZE_create === 'function' || typeof cv.AKAZE === 'function'),
+            sift: !!cv && (typeof cv.SIFT_create === 'function' || typeof cv.SIFT === 'function')
+        }
+    })
     self.postMessage({ type: 'ready' })
 }
 
@@ -1995,11 +3101,12 @@ try {
     }, BOOT_TIMEOUT_MS)
     logDebug('Loading vendored OpenCV.js...')
     importScripts('../vendor/opencv/opencv.js')
-    if (!self.cv || typeof self.cv !== 'object') {
+    if (!self.cv || (typeof self.cv !== 'object' && typeof self.cv !== 'function')) {
         throw new Error('OpenCV.js did not expose a global cv object.')
     }
-    const previousOnRuntimeInitialized = self.cv.onRuntimeInitialized
-    self.cv.onRuntimeInitialized = () => {
+    const importedCv = self.cv
+    const previousOnRuntimeInitialized = importedCv.onRuntimeInitialized
+    importedCv.onRuntimeInitialized = () => {
         if (typeof previousOnRuntimeInitialized === 'function') {
             try {
                 previousOnRuntimeInitialized()
@@ -2007,14 +3114,20 @@ try {
                 logError('Existing onRuntimeInitialized handler threw an error.', error)
             }
         }
+        installCvInstance(importedCv)
         postReadyOnce()
     }
-    if (typeof self.cv.then === 'function') {
-        self.cv.then(
-            () => postReadyOnce(),
+    if (typeof importedCv.then === 'function') {
+        Promise.resolve(importedCv).then(
+            (resolvedCv) => {
+                if (!installCvInstance(resolvedCv || importedCv)) {
+                    throw new Error('OpenCV.js resolved without a usable runtime instance.')
+                }
+                postReadyOnce()
+            },
             (error) => postInitError(error)
         )
-    } else if (typeof self.cv.Mat === 'function' && typeof self.cv.getBuildInformation === 'function') {
+    } else if (installCvInstance(importedCv) && typeof cv.Mat === 'function' && typeof cv.getBuildInformation === 'function') {
         postReadyOnce()
     }
     logDebug('OpenCV.js imported, waiting for runtime...')
@@ -2038,6 +3151,7 @@ self.addEventListener('message', (event) => {
         const result = analyzePhotoDocument(document, preparedInputs || [], requestId)
         self.postMessage({ requestId, result })
     } catch (error) {
+        logError('Photo analysis failed.', error?.stack || error)
         self.postMessage({ requestId, error: error?.message || 'OpenCV.js photo analysis failed.' })
     }
 })

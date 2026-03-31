@@ -24,7 +24,7 @@ export const STITCH_ANALYSIS_GROUPS = [
                     { value: 'feather', label: 'Feather' },
                     { value: 'seam', label: 'Seam' }
                 ],
-                help: 'Auto keeps screenshots crisp with direct alpha compositing and uses softer edge treatment for photo-style candidates. Alpha keeps every source fully opaque. Feather softens borders. Seam uses a stronger fade to hide boundary mismatches at the cost of some edge sharpness.'
+                help: 'Auto keeps screenshots crisp with direct alpha compositing and uses overlap-aware multi-band blending for photo-style candidates. Alpha keeps direct source-over compositing. Feather uses a smooth overlap gradient plus exposure compensation. Seam uses a content-aware seam mask with the same multi-band blend so hard joins hide more cleanly.'
             }
         ]
     },
@@ -93,7 +93,7 @@ export const STITCH_ANALYSIS_GROUPS = [
                 min: 256,
                 max: 2048,
                 step: 16,
-                help: 'Sets the working resolution for the analysis pass when full-resolution mode is off. Photo stitching benefits from more detail here because ORB matching, homography solving, and flow refinement all depend on visible overlap structure.'
+                help: 'Sets the working resolution for the analysis pass when full-resolution mode is off. Photo stitching benefits from more detail here because feature matching, homography solving, and flow refinement all depend on visible overlap structure.'
             },
             {
                 key: 'useFullResolutionAnalysis',
@@ -102,13 +102,25 @@ export const STITCH_ANALYSIS_GROUPS = [
                 help: 'Skips the analysis downscale and keeps the matcher on the original image sizes. This can improve difficult screenshots or very high-detail photo overlaps, but it is slower and uses more memory.'
             },
             {
+                key: 'featureDetector',
+                label: 'Feature Detector',
+                type: 'select',
+                options: [
+                    { value: 'auto', label: 'Auto' },
+                    { value: 'orb', label: 'ORB' },
+                    { value: 'akaze', label: 'AKAZE' },
+                    { value: 'sift', label: 'SIFT' }
+                ],
+                help: 'Auto starts with fast ORB features, retries AKAZE when the first photo solve looks weak, and can escalate to SIFT on hard two-image photo pairs when the custom SIFT-enabled OpenCV.js build is installed. ORB is the fastest choice. AKAZE is slower, but it can rescue blurrier or lower-texture overlaps. SIFT is the most accurate option for difficult photo seams, but it is also the slowest and requires the SIFT-enabled vendor build.'
+            },
+            {
                 key: 'maxFeatures',
                 label: 'Max Features',
                 type: 'number',
                 min: 200,
                 max: 4000,
                 step: 25,
-                help: 'Controls how many ORB features the photo backend keeps from each image. Higher values help difficult overlaps and perspective changes, but they also add solve time and may admit more repetitive-texture matches.'
+                help: 'Controls how many photo features the backend tries to keep from each image. Higher values help difficult overlaps and perspective changes, but they also add solve time and may admit more repetitive-texture matches.'
             },
             {
                 key: 'matchRatio',

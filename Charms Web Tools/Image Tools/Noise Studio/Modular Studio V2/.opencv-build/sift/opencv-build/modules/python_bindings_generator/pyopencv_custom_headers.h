@@ -1,0 +1,10 @@
+//user-defined headers
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/core/misc/python/pyopencv_async.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/core/misc/python/pyopencv_core.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/core/misc/python/pyopencv_cuda.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/core/misc/python/pyopencv_umat.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/flann/misc/python/pyopencv_flann.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/dnn/misc/python/pyopencv_dnn.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/features2d/misc/python/pyopencv_features2d.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/objdetect/misc/python/pyopencv_objdetect.hpp"
+#include "C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/opencv-4.x/modules/video/misc/python/pyopencv_video.hpp"

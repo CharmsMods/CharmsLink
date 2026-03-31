@@ -3,6 +3,7 @@ import { hasRenderableLayers, MAX_PREVIEW_ZOOM } from '../state/documentHelpers.
 import { createLibraryPanel } from './libraryPanel.js';
 import { clientToImageUv, computePreviewTransform, getPointerRatio } from './previewViewport.js';
 import { createStitchWorkspace } from '../stitch/ui.js';
+import { createThreeDWorkspace } from '../3d/ui.js';
 
 const GROUP_LABELS = {
     base: 'Base',
@@ -784,12 +785,15 @@ function renderSectionTabs(state) {
         ? 'library'
         : state.ui.activeSection === 'stitch'
             ? 'stitch'
-            : 'editor';
+            : state.ui.activeSection === '3d'
+                ? '3d'
+                : 'editor';
     return `
         <nav class="section-switcher">
             <button type="button" class="mode-button ${activeSection === 'editor' ? 'is-active' : ''}" data-action="set-app-section" data-section="editor">Editor</button>
             <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
             <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
+            <button type="button" class="mode-button ${activeSection === '3d' ? 'is-active' : ''}" data-action="set-app-section" data-section="3d">3D</button>
         </nav>
     `;
 }
@@ -840,6 +844,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             </div>
             <section class="app-section-panel" id="libraryPanel"></section>
             <section class="app-section-panel" id="stitchPanel"></section>
+            <section class="app-section-panel" id="threedPanel"></section>
             <input id="imageInput" type="file" accept="image/*" hidden>
             <input id="stateInput" type="file" accept=".json,.mns.json" hidden>
             <input id="paletteImageInput" type="file" accept="image/*" hidden>
@@ -859,6 +864,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         sidebarPanel: root.querySelector('#sidebarPanel'),
         libraryPanel: root.querySelector('#libraryPanel'),
         stitchPanel: root.querySelector('#stitchPanel'),
+        threedPanel: root.querySelector('#threedPanel'),
         previewShell: root.querySelector('#previewShell'),
         previewEmpty: root.querySelector('#previewEmpty'),
         sourcePreviewCanvas: root.querySelector('#sourcePreviewCanvas'),
@@ -908,6 +914,8 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         actions,
         stitchEngine: extras.stitchEngine
     });
+    const threedPanel = createThreeDWorkspace(actions, { getState: actions.getState });
+    refs.threedPanel.appendChild(threedPanel.root);
 
     function getLiveState() {
         return actions.getState?.() || latestState;
@@ -1518,12 +1526,12 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
         document.documentElement.dataset.theme = state.document.view.theme === 'dark' ? 'dark' : 'light';
         refs.sectionTabsSlot.innerHTML = renderSectionTabs(state);
-        refs.toolbarSlot.innerHTML = state.ui.activeSection === 'library'
-            ? ''
+        refs.toolbarSlot.innerHTML = state.ui.activeSection === 'editor'
+            ? renderStudioToolbar(state)
             : state.ui.activeSection === 'stitch'
                 ? renderStitchToolbar(state)
-                : renderStudioToolbar(state);
-        refs.toolbarSlot.style.display = state.ui.activeSection === 'library' ? 'none' : 'block';
+                : '';
+        refs.toolbarSlot.style.display = (state.ui.activeSection === 'editor' || state.ui.activeSection === 'stitch') ? 'block' : 'none';
         refs.noticeStrip.className = `notice-strip ${state.notice ? `is-${state.notice.type || 'info'}` : ''}`;
         refs.noticeStrip.textContent = state.notice?.text || '';
         refs.noticeStrip.style.display = state.notice ? 'flex' : 'none';
@@ -1531,16 +1539,24 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         refs.workspaceShell.style.display = state.ui.activeSection === 'editor' ? 'grid' : 'none';
         refs.libraryPanel.style.display = state.ui.activeSection === 'library' ? 'block' : 'none';
         refs.stitchPanel.style.display = state.ui.activeSection === 'stitch' ? 'block' : 'none';
+        refs.threedPanel.style.display = state.ui.activeSection === '3d' ? 'block' : 'none';
         if (state.ui.activeSection !== lastActiveSection) {
             if (state.ui.activeSection === 'library') {
                 libraryPanel.activate();
                 stitchPanel.deactivate();
+                threedPanel.deactivate();
             } else if (state.ui.activeSection === 'stitch') {
                 libraryPanel.deactivate();
                 stitchPanel.activate();
+                threedPanel.deactivate();
+            } else if (state.ui.activeSection === '3d') {
+                libraryPanel.deactivate();
+                stitchPanel.deactivate();
+                threedPanel.activate();
             } else {
                 libraryPanel.deactivate();
                 stitchPanel.deactivate();
+                threedPanel.deactivate();
             }
             lastActiveSection = state.ui.activeSection;
         }
@@ -1558,6 +1574,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
         drawToleranceSpectrums(state);
         stitchPanel.render(state.stitchDocument).catch((error) => console.error(error));
+        threedPanel.render(state);
 
         refs.batchSlot.innerHTML = renderBatchDialog(state);
         refs.jsonCompareSlot.innerHTML = renderJsonCompareDialog(state);
@@ -1664,6 +1681,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         },
         openStitchPicker() {
             stitchPanel.openPicker?.();
+        },
+        captureThreeDPreview() {
+            return threedPanel.capturePreview?.();
         },
         clientToImageUv(clientX, clientY) {
             return clientToImageUv(clientX, clientY, refs.previewScaleWrap.getBoundingClientRect());

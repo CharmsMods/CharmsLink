@@ -42,8 +42,31 @@ function formatDateTime(value) {
     return date.toLocaleString();
 }
 
+function isThreeDPayload(payload) {
+    return !!payload && (
+        payload.kind === '3d-document'
+        || payload.mode === '3d'
+        || payload.schema === '3d-document'
+    );
+}
+
+function inferProjectTypeFromPayload(payload, fallbackType = null) {
+    if (fallbackType === '3d' || isThreeDPayload(payload)) return '3d';
+    if (fallbackType === 'stitch' || payload?.kind === 'stitch-document' || payload?.mode === 'stitch') return 'stitch';
+    return 'studio';
+}
+
 function getProjectTypeLabel(projectType) {
+    if (projectType === '3d') return '3D';
     return projectType === 'stitch' ? 'Stitch' : 'Editor';
+}
+
+function getProjectSourceLabel(projectType) {
+    return projectType === '3d' ? 'Preview Size' : 'Source Size';
+}
+
+function getProjectSourceCountLabel(projectType) {
+    return projectType === '3d' ? 'Asset Count' : 'Source Count';
 }
 
 function formatParamValue(value) {
@@ -86,8 +109,21 @@ function normalizeLibraryDocumentPayload(payload) {
     delete normalized._librarySourceArea;
     delete normalized._librarySourceCount;
     normalized.version = normalized.version === 2 ? 'mns/v2' : (normalized.version || 'mns/v2');
-    normalized.kind = normalized.kind || (normalized.mode === 'stitch' ? 'stitch-document' : 'document');
-    normalized.mode = normalized.mode || (normalized.kind === 'stitch-document' ? 'stitch' : 'studio');
+    const inferredType = inferProjectTypeFromPayload(normalized);
+    if (!normalized.kind) {
+        normalized.kind = inferredType === '3d'
+            ? '3d-document'
+            : inferredType === 'stitch'
+                ? 'stitch-document'
+                : 'document';
+    }
+    if (!normalized.mode) {
+        normalized.mode = inferredType === '3d'
+            ? '3d'
+            : inferredType === 'stitch'
+                ? 'stitch'
+                : 'studio';
+    }
     if (Array.isArray(normalized.layerStack)) {
         normalized.layerStack = normalized.layerStack.map((layer) => ({
             ...layer,
@@ -101,7 +137,7 @@ function buildLibraryProjectExportPayload(project) {
     return {
         _libraryName: project.name,
         _libraryTags: normalizeTagList(project.tags),
-        _libraryProjectType: project.projectType || (project.payload?.kind === 'stitch-document' || project.payload?.mode === 'stitch' ? 'stitch' : 'studio'),
+        _libraryProjectType: project.projectType || inferProjectTypeFromPayload(project.payload),
         _libraryHoverSource: project.hoverSource || null,
         _librarySourceArea: Number(project.sourceAreaOverride || project.sourceArea || 0) || 0,
         _librarySourceCount: Number(project.sourceCount || 0) || 0,
@@ -167,7 +203,7 @@ function createImportEntryFromPayload(rawPayload, fallbackName, index = 0, expli
     const finalPayload = {
         _libraryName: name,
         _libraryTags: tags,
-        _libraryProjectType: rawPayload?._libraryProjectType || (payload.kind === 'stitch-document' || payload.mode === 'stitch' ? 'stitch' : 'studio'),
+        _libraryProjectType: rawPayload?._libraryProjectType || inferProjectTypeFromPayload(payload),
         _libraryHoverSource: rawPayload?._libraryHoverSource || null,
         _librarySourceArea: Number(rawPayload?._librarySourceArea || 0) || 0,
         _librarySourceCount: Number(rawPayload?._librarySourceCount || 0) || 0,
@@ -881,6 +917,56 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             `;
         }
 
+        if (isThreeDPayload(payload)) {
+            const items = Array.isArray(payload.scene?.items) ? payload.scene.items : [];
+            const models = items.filter((item) => item.kind === 'model');
+            const imagePlanes = items.filter((item) => item.kind === 'image-plane');
+            const primitives = items.filter((item) => item.kind === 'primitive');
+            const lights = items.filter((item) => item.kind === 'light');
+            const renderSettings = payload.render && typeof payload.render === 'object' ? payload.render : {};
+            const viewSettings = payload.view && typeof payload.view === 'object' ? payload.view : {};
+            return `
+                <section class="library-layer-card">
+                    <div class="library-layer-card-header">
+                        <strong>Scene Items</strong>
+                        <span>${items.length} total</span>
+                    </div>
+                    <div class="library-layer-card-body">
+                        ${items.length ? items.map((item) => `
+                            <div class="library-param-row">
+                                <span class="library-param-key">${escapeHtml(item.name || (item.kind === 'light' ? 'Light' : 'Model'))}</span>
+                                <span class="library-param-val">${escapeHtml(item.kind === 'light' ? item.light?.lightType || 'light' : item.kind === 'primitive' ? item.asset?.primitiveType || 'primitive' : item.asset?.format || 'model')}</span>
+                            </div>
+                        `).join('') : '<div class="library-detail-empty">This 3D scene did not include any saved items.</div>'}
+                    </div>
+                </section>
+                <section class="library-layer-card">
+                    <div class="library-layer-card-header">
+                        <strong>Scene Summary</strong>
+                        <span>${models.length} model${models.length === 1 ? '' : 's'} / ${imagePlanes.length} plane${imagePlanes.length === 1 ? '' : 's'} / ${primitives.length} primitive${primitives.length === 1 ? '' : 's'} / ${lights.length} light${lights.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <div class="library-layer-card-body">
+                        <div class="library-param-row">
+                            <span class="library-param-key">Render Mode</span>
+                            <span class="library-param-val">${escapeHtml(formatParamValue(renderSettings.mode || 'raster'))}</span>
+                        </div>
+                        <div class="library-param-row">
+                            <span class="library-param-key">Target Samples</span>
+                            <span class="library-param-val">${escapeHtml(formatParamValue(renderSettings.samplesTarget || 0))}</span>
+                        </div>
+                        <div class="library-param-row">
+                            <span class="library-param-key">Exposure</span>
+                            <span class="library-param-val">${escapeHtml(formatParamValue(renderSettings.exposure || 1))}</span>
+                        </div>
+                        <div class="library-param-row">
+                            <span class="library-param-key">Camera FOV</span>
+                            <span class="library-param-val">${escapeHtml(formatParamValue(viewSettings.fov || 50))}</span>
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
         const layers = Array.isArray(payload?.layerStack) ? payload.layerStack : [];
         if (!layers.length) {
             return '<div class="library-detail-empty">This saved project did not include any layers.</div>';
@@ -935,6 +1021,12 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     }
 
     function renderProjectSummaryCard(data) {
+        const sourceLabel = getProjectSourceLabel(data.projectType);
+        const countLabel = getProjectSourceCountLabel(data.projectType);
+        const sourceCount = data.projectType === '3d'
+            ? Number(data.sourceCount || data.payload?.scene?.items?.filter?.((item) => item.kind !== 'light').length || 0)
+            : Number(data.sourceCount || (data.projectType === 'stitch' ? 0 : 1));
+        const sceneItemCount = Number(data.payload?.scene?.items?.length || 0);
         return `
             <section class="library-source-info">
                 <div class="library-layer-card-header">
@@ -947,21 +1039,28 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                         <span class="library-param-val">${escapeHtml(getProjectTypeLabel(data.projectType))}</span>
                     </div>
                     <div class="library-param-row">
-                        <span class="library-param-key">Source Size</span>
+                        <span class="library-param-key">${escapeHtml(sourceLabel)}</span>
                         <span class="library-param-val">${escapeHtml(formatDimensions(data.sourceWidth, data.sourceHeight))}</span>
                     </div>
                     <div class="library-param-row">
-                        <span class="library-param-key">Source Count</span>
-                        <span class="library-param-val">${escapeHtml(String(data.sourceCount || (data.projectType === 'stitch' ? 0 : 1)))}</span>
+                        <span class="library-param-key">${escapeHtml(countLabel)}</span>
+                        <span class="library-param-val">${escapeHtml(String(sourceCount))}</span>
                     </div>
                     <div class="library-param-row">
                         <span class="library-param-key">Rendered Size</span>
                         <span class="library-param-val">${escapeHtml(formatDimensions(data.renderWidth, data.renderHeight))}</span>
                     </div>
-                    <div class="library-param-row">
-                        <span class="library-param-key">Source Area</span>
-                        <span class="library-param-val">${escapeHtml(formatArea(data.sourceArea))}</span>
-                    </div>
+                    ${data.projectType === '3d' ? `
+                        <div class="library-param-row">
+                            <span class="library-param-key">Scene Items</span>
+                            <span class="library-param-val">${escapeHtml(String(sceneItemCount))}</span>
+                        </div>
+                    ` : `
+                        <div class="library-param-row">
+                            <span class="library-param-key">Source Area</span>
+                            <span class="library-param-val">${escapeHtml(formatArea(data.sourceArea))}</span>
+                        </div>
+                    `}
                     <div class="library-param-row">
                         <span class="library-param-key">Render Area</span>
                         <span class="library-param-val">${escapeHtml(formatArea(data.renderArea))}</span>
@@ -1004,7 +1103,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                 <div class="library-card-meta">
                     <div class="library-card-title">${escapeHtml(item.name)}</div>
                     <div class="library-card-dimensions">
-                        <span>Source ${escapeHtml(formatDimensions(item.sourceWidth, item.sourceHeight))}</span>
+                        <span>${escapeHtml(getProjectSourceLabel(item.projectType))} ${escapeHtml(formatDimensions(item.sourceWidth, item.sourceHeight))}</span>
                         <span>Render ${escapeHtml(formatDimensions(item.renderWidth, item.renderHeight))}</span>
                     </div>
                     ${renderTagPills(item.tags)}
@@ -1041,7 +1140,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
 
         refs.detailOverlay.classList.add('is-active');
         refs.detailName.textContent = detailData.name;
-        refs.detailMeta.textContent = `${getProjectTypeLabel(detailData.projectType)} | Saved ${formatDateTime(detailData.timestamp)} | Source ${formatDimensions(detailData.sourceWidth, detailData.sourceHeight)} | Render ${formatDimensions(detailData.renderWidth, detailData.renderHeight)}`;
+        refs.detailMeta.textContent = `${getProjectTypeLabel(detailData.projectType)} | Saved ${formatDateTime(detailData.timestamp)} | ${getProjectSourceLabel(detailData.projectType)} ${formatDimensions(detailData.sourceWidth, detailData.sourceHeight)} | Render ${formatDimensions(detailData.renderWidth, detailData.renderHeight)}`;
         refs.detailBase.src = detailData.url;
         if (detailData.hoverSrc) refs.detailHover.src = detailData.hoverSrc;
         else refs.detailHover.removeAttribute('src');
@@ -1160,7 +1259,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                         <strong>${escapeHtml(focusedProject.name)}</strong>
                         <div class="library-selected-meta">
                             <span>${escapeHtml(getProjectTypeLabel(focusedProject.projectType))}</span>
-                            <span>Source ${escapeHtml(formatDimensions(focusedProject.sourceWidth, focusedProject.sourceHeight))}</span>
+                            <span>${escapeHtml(getProjectSourceLabel(focusedProject.projectType))} ${escapeHtml(formatDimensions(focusedProject.sourceWidth, focusedProject.sourceHeight))}</span>
                             <span>Render ${escapeHtml(formatDimensions(focusedProject.renderWidth, focusedProject.renderHeight))}</span>
                             <span>Saved ${escapeHtml(formatDateTime(focusedProject.timestamp))}</span>
                         </div>
@@ -1647,15 +1746,26 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             const tags = normalizeTagList(project.tags || []);
             let renderWidth = Number(project.renderWidth || 0);
             let renderHeight = Number(project.renderHeight || 0);
+            const projectType = project.projectType || inferProjectTypeFromPayload(project.payload);
             const hoverSource = project.hoverSource || project.payload?._libraryHoverSource || project.payload?.source || null;
-            const sourceWidth = Number(project.sourceWidth || hoverSource?.width || project.payload?.source?.width || 0);
-            const sourceHeight = Number(project.sourceHeight || hoverSource?.height || project.payload?.source?.height || 0);
+            const previewImageData = project.payload?.preview?.imageData || '';
+            const sourceWidth = Number(project.sourceWidth || hoverSource?.width || project.payload?.source?.width || project.payload?.preview?.width || 0);
+            const sourceHeight = Number(project.sourceHeight || hoverSource?.height || project.payload?.source?.height || project.payload?.preview?.height || 0);
             const sourceAreaOverride = Number(project.sourceAreaOverride || project.payload?._librarySourceArea || 0) || 0;
-            const sourceCount = Number(project.sourceCount || project.payload?._librarySourceCount || (project.projectType === 'stitch' ? project.payload?.inputs?.length || 0 : (hoverSource?.imageData ? 1 : 0)) || 0);
+            const sourceCount = Number(
+                project.sourceCount
+                || project.payload?._librarySourceCount
+                || (projectType === '3d'
+                    ? project.payload?.scene?.items?.filter?.((item) => item.kind !== 'light').length || 0
+                    : projectType === 'stitch'
+                        ? project.payload?.inputs?.length || 0
+                        : (hoverSource?.imageData ? 1 : 0))
+                || 0
+            );
             let previewSignature = getProjectPreviewSignature(project, renderWidth, renderHeight);
             let url = previous?.previewSignature === previewSignature
                 ? previous.url
-                : (project.blob ? URL.createObjectURL(project.blob) : (hoverSource?.imageData || ''));
+                : (project.blob ? URL.createObjectURL(project.blob) : (hoverSource?.imageData || previewImageData || ''));
 
             if ((!renderWidth || !renderHeight) && previous?.previewSignature === previewSignature) {
                 renderWidth = previous.renderWidth;
@@ -1680,7 +1790,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                 ...project,
                 name: String(project.name || 'Untitled Project'),
                 payload: project.payload || {},
-                projectType: project.projectType || (project.payload?.kind === 'stitch-document' || project.payload?.mode === 'stitch' ? 'stitch' : 'studio'),
+                projectType,
                 tags,
                 url,
                 hoverSrc: hoverSource?.imageData || '',

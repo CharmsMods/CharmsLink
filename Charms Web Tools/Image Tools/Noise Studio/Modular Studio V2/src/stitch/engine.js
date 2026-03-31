@@ -77,6 +77,15 @@ function getCandidateForPlacements(document, placements) {
     return normalized.candidates.find((candidate) => candidate.placements === placements) || null;
 }
 
+const MAX_MULTI_BAND_LEVELS = 5;
+const MIN_MULTI_BAND_DIMENSION = 24;
+const MIN_BLEND_ALPHA = 2;
+const MIN_GAIN_WEIGHT = 64;
+const MIN_GAIN_MEAN = 10;
+const GAIN_MIN = 0.72;
+const GAIN_MAX = 1.4;
+const CHANNEL_GAIN_MIX = 0.35;
+
 function resolveBlendMode(document, placement, candidate = null) {
     const settingsBlend = document.settings?.blendMode || 'auto';
     const candidateBlend = candidate?.blendMode || settingsBlend;
@@ -85,44 +94,35 @@ function resolveBlendMode(document, placement, candidate = null) {
     return placement?.warp ? 'feather' : 'alpha';
 }
 
-function applyRectFeatherMask(ctx, bounds, featherSize) {
-    const { minX, minY, maxX, maxY } = bounds;
-    const width = Math.max(1, maxX - minX);
-    const height = Math.max(1, maxY - minY);
-    const size = Math.max(1, Math.min(featherSize, width * 0.5, height * 0.5));
+function clampByte(value) {
+    return Math.min(255, Math.max(0, Math.round(value)));
+}
 
-    ctx.save();
-    ctx.globalCompositeOperation = 'destination-out';
+function smoothstep(value) {
+    const t = clamp(value, 0, 1);
+    return t * t * (3 - (2 * t));
+}
 
-    // Top
-    const top = ctx.createLinearGradient(0, minY, 0, minY + size);
-    top.addColorStop(0, 'rgba(255,255,255,1)');
-    top.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = top;
-    ctx.fillRect(minX, minY, width, size);
+function buildBlendRegion(bounds, canvasWidth, canvasHeight) {
+    const minX = clamp(Math.floor(Math.min(bounds.minX, bounds.maxX)), 0, Math.max(0, canvasWidth - 1));
+    const minY = clamp(Math.floor(Math.min(bounds.minY, bounds.maxY)), 0, Math.max(0, canvasHeight - 1));
+    const maxX = clamp(Math.ceil(Math.max(bounds.minX, bounds.maxX)), minX + 1, Math.max(1, canvasWidth));
+    const maxY = clamp(Math.ceil(Math.max(bounds.minY, bounds.maxY)), minY + 1, Math.max(1, canvasHeight));
+    return {
+        minX,
+        minY,
+        maxX,
+        maxY,
+        width: Math.max(0, maxX - minX),
+        height: Math.max(0, maxY - minY)
+    };
+}
 
-    // Bottom
-    const bottom = ctx.createLinearGradient(0, maxY - size, 0, maxY);
-    bottom.addColorStop(0, 'rgba(255,255,255,0)');
-    bottom.addColorStop(1, 'rgba(255,255,255,1)');
-    ctx.fillStyle = bottom;
-    ctx.fillRect(minX, maxY - size, width, size);
-
-    // Left
-    const left = ctx.createLinearGradient(minX, 0, minX + size, 0);
-    left.addColorStop(0, 'rgba(255,255,255,1)');
-    left.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = left;
-    ctx.fillRect(minX, minY, size, height);
-
-    // Right
-    const right = ctx.createLinearGradient(maxX - size, 0, maxX, 0);
-    right.addColorStop(0, 'rgba(255,255,255,0)');
-    right.addColorStop(1, 'rgba(255,255,255,1)');
-    ctx.fillStyle = right;
-    ctx.fillRect(maxX - size, minY, size, height);
-
-    ctx.restore();
+function scaleImageAlpha(data, opacity = 1) {
+    if (opacity >= 0.999) return;
+    for (let index = 0; index < data.length; index += 4) {
+        data[index + 3] = clampByte((data[index + 3] || 0) * opacity);
+    }
 }
 
 function computeLuminance(r, g, b) {
@@ -162,6 +162,81 @@ function computeEdgeStrengthMap(imageData, width, height) {
         edge[index] *= inverseMax;
     }
     return edge;
+}
+
+function analyzeBlendOverlap(baseData, layerData, width, height) {
+    const overlapMask = new Uint8Array(width * height);
+    let overlapCount = 0;
+    let baseCount = 0;
+    let layerCount = 0;
+    let overlapMinX = width;
+    let overlapMinY = height;
+    let overlapMaxX = -1;
+    let overlapMaxY = -1;
+
+    for (let index = 0; index < width * height; index += 1) {
+        const dataIndex = index * 4;
+        const baseAlpha = baseData[dataIndex + 3] || 0;
+        const layerAlpha = layerData[dataIndex + 3] || 0;
+        const hasBase = baseAlpha > MIN_BLEND_ALPHA;
+        const hasLayer = layerAlpha > MIN_BLEND_ALPHA;
+        if (hasBase) baseCount += 1;
+        if (hasLayer) layerCount += 1;
+        if (!hasBase || !hasLayer) continue;
+        overlapMask[index] = 1;
+        overlapCount += 1;
+        const x = index % width;
+        const y = Math.floor(index / width);
+        if (x < overlapMinX) overlapMinX = x;
+        if (y < overlapMinY) overlapMinY = y;
+        if (x > overlapMaxX) overlapMaxX = x;
+        if (y > overlapMaxY) overlapMaxY = y;
+    }
+
+    return {
+        overlapMask,
+        overlapCount,
+        baseCount,
+        layerCount,
+        overlapMinX,
+        overlapMinY,
+        overlapMaxX,
+        overlapMaxY
+    };
+}
+
+function determineBlendOrientation(overlapWidth, overlapHeight) {
+    return overlapWidth >= overlapHeight ? 'vertical' : 'horizontal';
+}
+
+function determineBlendSide(width, height, overlap, orientation) {
+    if (orientation === 'vertical') {
+        const leftMargin = overlap.overlapMinX;
+        const rightMargin = Math.max(0, (width - 1) - overlap.overlapMaxX);
+        return rightMargin >= leftMargin ? 'right' : 'left';
+    }
+    const topMargin = overlap.overlapMinY;
+    const bottomMargin = Math.max(0, (height - 1) - overlap.overlapMaxY);
+    return bottomMargin >= topMargin ? 'bottom' : 'top';
+}
+
+function buildLinearSelectionMask(mask, overlapMask, width, height, overlap, orientation, side) {
+    const overlapWidth = Math.max(1, (overlap.overlapMaxX - overlap.overlapMinX) + 1);
+    const overlapHeight = Math.max(1, (overlap.overlapMaxY - overlap.overlapMinY) + 1);
+    const widthSpan = Math.max(1, overlapWidth - 1);
+    const heightSpan = Math.max(1, overlapHeight - 1);
+
+    for (let y = overlap.overlapMinY; y <= overlap.overlapMaxY; y += 1) {
+        for (let x = overlap.overlapMinX; x <= overlap.overlapMaxX; x += 1) {
+            const index = (y * width) + x;
+            if (!overlapMask[index]) continue;
+            const t = orientation === 'vertical'
+                ? (x - overlap.overlapMinX) / widthSpan
+                : (y - overlap.overlapMinY) / heightSpan;
+            const eased = smoothstep(t);
+            mask[index] = side === 'right' || side === 'bottom' ? eased : (1 - eased);
+        }
+    }
 }
 
 function findContentAwareSeam(costs, overlapMask, width, height, orientation = 'vertical') {
@@ -270,106 +345,395 @@ function findContentAwareSeam(costs, overlapMask, width, height, orientation = '
     return seam;
 }
 
-function applyContentAwareSeamMask(compositeCtx, layerCtx, bounds, preferredSide = null) {
-    const minX = Math.max(0, Math.floor(Math.min(bounds.minX, bounds.maxX)));
-    const minY = Math.max(0, Math.floor(Math.min(bounds.minY, bounds.maxY)));
-    const maxX = Math.max(minX + 1, Math.ceil(Math.max(bounds.minX, bounds.maxX)));
-    const maxY = Math.max(minY + 1, Math.ceil(Math.max(bounds.minY, bounds.maxY)));
-    const width = maxX - minX;
-    const height = maxY - minY;
-    if (width < 8 || height < 8) {
-        applyRectFeatherMask(layerCtx, bounds, Math.max(8, Math.min(width, height) * 0.18));
-        return false;
-    }
+function buildSeamSelectionMask(mask, baseData, layerData, overlapMask, width, height, overlap, orientation, side) {
+    const overlapWidth = (overlap.overlapMaxX - overlap.overlapMinX) + 1;
+    const overlapHeight = (overlap.overlapMaxY - overlap.overlapMinY) + 1;
+    if (overlapWidth < 8 || overlapHeight < 8) return false;
 
-    const baseImage = compositeCtx.getImageData(minX, minY, width, height);
-    const layerImage = layerCtx.getImageData(minX, minY, width, height);
-    const baseData = baseImage.data;
-    const layerData = layerImage.data;
-    const overlapMask = new Uint8Array(width * height);
     const costs = new Float32Array(width * height);
     const baseEdge = computeEdgeStrengthMap(baseData, width, height);
     const layerEdge = computeEdgeStrengthMap(layerData, width, height);
 
-    let overlapCount = 0;
-    let overlapMinX = width;
-    let overlapMinY = height;
-    let overlapMaxX = -1;
-    let overlapMaxY = -1;
     for (let index = 0; index < width * height; index += 1) {
+        if (!overlapMask[index]) continue;
         const dataIndex = index * 4;
-        const baseAlpha = baseData[dataIndex + 3] || 0;
-        const layerAlpha = layerData[dataIndex + 3] || 0;
-        if (!baseAlpha || !layerAlpha) continue;
-        overlapMask[index] = 1;
-        overlapCount += 1;
-        const x = index % width;
-        const y = Math.floor(index / width);
-        if (x < overlapMinX) overlapMinX = x;
-        if (y < overlapMinY) overlapMinY = y;
-        if (x > overlapMaxX) overlapMaxX = x;
-        if (y > overlapMaxY) overlapMaxY = y;
         const diff = (
-            Math.abs(baseData[dataIndex] - layerData[dataIndex])
-            + Math.abs(baseData[dataIndex + 1] - layerData[dataIndex + 1])
-            + Math.abs(baseData[dataIndex + 2] - layerData[dataIndex + 2])
+            Math.abs((baseData[dataIndex] || 0) - (layerData[dataIndex] || 0))
+            + Math.abs((baseData[dataIndex + 1] || 0) - (layerData[dataIndex + 1] || 0))
+            + Math.abs((baseData[dataIndex + 2] || 0) - (layerData[dataIndex + 2] || 0))
         ) / 255;
         const edgePenalty = (baseEdge[index] + layerEdge[index]) * 0.45;
         costs[index] = 1 + (diff * 0.75) + edgePenalty;
     }
-    if (overlapCount < 24 || overlapMaxX < overlapMinX || overlapMaxY < overlapMinY) {
-        applyRectFeatherMask(layerCtx, bounds, Math.max(8, Math.min(width, height) * 0.18));
-        return false;
-    }
 
-    const overlapWidth = (overlapMaxX - overlapMinX) + 1;
-    const overlapHeight = (overlapMaxY - overlapMinY) + 1;
-    const orientation = overlapWidth >= overlapHeight ? 'vertical' : 'horizontal';
     const seam = findContentAwareSeam(costs, overlapMask, width, height, orientation);
-    if (!seam) {
-        applyRectFeatherMask(layerCtx, bounds, Math.max(8, Math.min(overlapWidth, overlapHeight) * 0.18));
-        return false;
-    }
+    if (!seam) return false;
 
-    const side = preferredSide || (
-        orientation === 'vertical'
-            ? (((bounds.minX + bounds.maxX) * 0.5) >= (minX + (overlapWidth * 0.5)) ? 'right' : 'left')
-            : (((bounds.minY + bounds.maxY) * 0.5) >= (minY + (overlapHeight * 0.5)) ? 'bottom' : 'top')
-    );
     const feather = Math.max(3, Math.round(Math.min(overlapWidth, overlapHeight) * 0.04));
-
-    for (let y = overlapMinY; y <= overlapMaxY; y += 1) {
-        for (let x = overlapMinX; x <= overlapMaxX; x += 1) {
+    for (let y = overlap.overlapMinY; y <= overlap.overlapMaxY; y += 1) {
+        for (let x = overlap.overlapMinX; x <= overlap.overlapMaxX; x += 1) {
             const index = (y * width) + x;
             if (!overlapMask[index]) continue;
-            const dataIndex = index * 4;
-            let alphaScale = 1;
+            let blend = 1;
             if (orientation === 'vertical') {
                 const seamX = seam[y] || 0;
                 const distance = x - seamX;
                 if (side === 'right') {
-                    if (distance <= -feather) alphaScale = 0;
-                    else if (distance < feather) alphaScale = (distance + feather) / (feather * 2);
+                    if (distance <= -feather) blend = 0;
+                    else if (distance < feather) blend = (distance + feather) / (feather * 2);
                 } else {
-                    if (distance >= feather) alphaScale = 0;
-                    else if (distance > -feather) alphaScale = 1 - ((distance + feather) / (feather * 2));
+                    if (distance >= feather) blend = 0;
+                    else if (distance > -feather) blend = 1 - ((distance + feather) / (feather * 2));
                 }
             } else {
                 const seamY = seam[x] || 0;
                 const distance = y - seamY;
                 if (side === 'bottom') {
-                    if (distance <= -feather) alphaScale = 0;
-                    else if (distance < feather) alphaScale = (distance + feather) / (feather * 2);
+                    if (distance <= -feather) blend = 0;
+                    else if (distance < feather) blend = (distance + feather) / (feather * 2);
                 } else {
-                    if (distance >= feather) alphaScale = 0;
-                    else if (distance > -feather) alphaScale = 1 - ((distance + feather) / (feather * 2));
+                    if (distance >= feather) blend = 0;
+                    else if (distance > -feather) blend = 1 - ((distance + feather) / (feather * 2));
                 }
             }
-            layerData[dataIndex + 3] = Math.round((layerData[dataIndex + 3] || 0) * clamp(alphaScale, 0, 1));
+            mask[index] = clamp(blend, 0, 1);
         }
     }
 
-    layerCtx.putImageData(layerImage, minX, minY);
+    return true;
+}
+
+function buildSelectionMask(baseData, layerData, width, height, blendMode, overlap) {
+    const mask = new Float32Array(width * height);
+    for (let index = 0; index < width * height; index += 1) {
+        const dataIndex = index * 4;
+        const baseAlpha = baseData[dataIndex + 3] || 0;
+        const layerAlpha = layerData[dataIndex + 3] || 0;
+        mask[index] = layerAlpha > MIN_BLEND_ALPHA && baseAlpha <= MIN_BLEND_ALPHA ? 1 : 0;
+    }
+
+    if (!overlap.overlapCount || overlap.overlapMaxX < overlap.overlapMinX || overlap.overlapMaxY < overlap.overlapMinY) {
+        return mask;
+    }
+
+    const overlapWidth = (overlap.overlapMaxX - overlap.overlapMinX) + 1;
+    const overlapHeight = (overlap.overlapMaxY - overlap.overlapMinY) + 1;
+    const orientation = determineBlendOrientation(overlapWidth, overlapHeight);
+    const side = determineBlendSide(width, height, overlap, orientation);
+    const applied = blendMode === 'seam'
+        ? buildSeamSelectionMask(mask, baseData, layerData, overlap.overlapMask, width, height, overlap, orientation, side)
+        : false;
+    if (!applied) {
+        buildLinearSelectionMask(mask, overlap.overlapMask, width, height, overlap, orientation, side);
+    }
+    return mask;
+}
+
+function computeGainCompensation(baseData, layerData, overlapMask) {
+    const baseSum = [0, 0, 0];
+    const layerSum = [0, 0, 0];
+    let baseLuma = 0;
+    let layerLuma = 0;
+    let weightSum = 0;
+
+    for (let index = 0; index < overlapMask.length; index += 1) {
+        if (!overlapMask[index]) continue;
+        const dataIndex = index * 4;
+        const baseAlpha = (baseData[dataIndex + 3] || 0) / 255;
+        const layerAlpha = (layerData[dataIndex + 3] || 0) / 255;
+        const weight = Math.max(0.001, baseAlpha * layerAlpha);
+        baseSum[0] += (baseData[dataIndex] || 0) * weight;
+        baseSum[1] += (baseData[dataIndex + 1] || 0) * weight;
+        baseSum[2] += (baseData[dataIndex + 2] || 0) * weight;
+        layerSum[0] += (layerData[dataIndex] || 0) * weight;
+        layerSum[1] += (layerData[dataIndex + 1] || 0) * weight;
+        layerSum[2] += (layerData[dataIndex + 2] || 0) * weight;
+        baseLuma += computeLuminance(baseData[dataIndex] || 0, baseData[dataIndex + 1] || 0, baseData[dataIndex + 2] || 0) * weight;
+        layerLuma += computeLuminance(layerData[dataIndex] || 0, layerData[dataIndex + 1] || 0, layerData[dataIndex + 2] || 0) * weight;
+        weightSum += weight;
+    }
+
+    if (weightSum < MIN_GAIN_WEIGHT) return [1, 1, 1];
+    const baseMean = baseSum.map((value) => value / weightSum);
+    const layerMean = layerSum.map((value) => value / weightSum);
+    const baseLumaMean = baseLuma / weightSum;
+    const layerLumaMean = layerLuma / weightSum;
+    if (baseLumaMean < MIN_GAIN_MEAN || layerLumaMean < MIN_GAIN_MEAN) return [1, 1, 1];
+
+    const lumaGain = clamp(baseLumaMean / Math.max(MIN_GAIN_MEAN, layerLumaMean), GAIN_MIN, GAIN_MAX);
+    return baseMean.map((channelMean, channelIndex) => {
+        const channelGain = clamp(channelMean / Math.max(MIN_GAIN_MEAN, layerMean[channelIndex]), GAIN_MIN, GAIN_MAX);
+        return clamp((channelGain * CHANNEL_GAIN_MIX) + (lumaGain * (1 - CHANNEL_GAIN_MIX)), GAIN_MIN, GAIN_MAX);
+    });
+}
+
+function applyGainToLayerData(data, gains) {
+    if (gains.every((gain) => Math.abs(gain - 1) < 0.001)) return;
+    for (let index = 0; index < data.length; index += 4) {
+        if ((data[index + 3] || 0) <= MIN_BLEND_ALPHA) continue;
+        data[index] = clampByte((data[index] || 0) * gains[0]);
+        data[index + 1] = clampByte((data[index + 1] || 0) * gains[1]);
+        data[index + 2] = clampByte((data[index + 2] || 0) * gains[2]);
+    }
+}
+
+function composeCoverageAlpha(baseAlpha = 0, layerAlpha = 0) {
+    const normalizedBase = clamp(baseAlpha, 0, 255) / 255;
+    const normalizedLayer = clamp(layerAlpha, 0, 255) / 255;
+    return clampByte((1 - ((1 - normalizedBase) * (1 - normalizedLayer))) * 255);
+}
+
+function imageDataToPremultipliedFloat(data) {
+    const result = new Float32Array(data.length);
+    for (let index = 0; index < data.length; index += 4) {
+        const alpha = clamp(data[index + 3] || 0, 0, 255);
+        const alphaScale = alpha / 255;
+        result[index] = (data[index] || 0) * alphaScale;
+        result[index + 1] = (data[index + 1] || 0) * alphaScale;
+        result[index + 2] = (data[index + 2] || 0) * alphaScale;
+        result[index + 3] = alpha;
+    }
+    return result;
+}
+
+function downsampleRgba(data, width, height) {
+    const targetWidth = Math.max(1, Math.ceil(width / 2));
+    const targetHeight = Math.max(1, Math.ceil(height / 2));
+    const result = new Float32Array(targetWidth * targetHeight * 4);
+
+    for (let y = 0; y < targetHeight; y += 1) {
+        for (let x = 0; x < targetWidth; x += 1) {
+            const sourceX = x * 2;
+            const sourceY = y * 2;
+            const targetIndex = ((y * targetWidth) + x) * 4;
+            let count = 0;
+            for (let offsetY = 0; offsetY < 2; offsetY += 1) {
+                for (let offsetX = 0; offsetX < 2; offsetX += 1) {
+                    const sampleX = sourceX + offsetX;
+                    const sampleY = sourceY + offsetY;
+                    if (sampleX >= width || sampleY >= height) continue;
+                    const sourceIndex = ((sampleY * width) + sampleX) * 4;
+                    result[targetIndex] += data[sourceIndex] || 0;
+                    result[targetIndex + 1] += data[sourceIndex + 1] || 0;
+                    result[targetIndex + 2] += data[sourceIndex + 2] || 0;
+                    result[targetIndex + 3] += data[sourceIndex + 3] || 0;
+                    count += 1;
+                }
+            }
+            const scale = 1 / Math.max(1, count);
+            result[targetIndex] *= scale;
+            result[targetIndex + 1] *= scale;
+            result[targetIndex + 2] *= scale;
+            result[targetIndex + 3] *= scale;
+        }
+    }
+
+    return { data: result, width: targetWidth, height: targetHeight };
+}
+
+function downsampleScalar(data, width, height) {
+    const targetWidth = Math.max(1, Math.ceil(width / 2));
+    const targetHeight = Math.max(1, Math.ceil(height / 2));
+    const result = new Float32Array(targetWidth * targetHeight);
+
+    for (let y = 0; y < targetHeight; y += 1) {
+        for (let x = 0; x < targetWidth; x += 1) {
+            const sourceX = x * 2;
+            const sourceY = y * 2;
+            let value = 0;
+            let count = 0;
+            for (let offsetY = 0; offsetY < 2; offsetY += 1) {
+                for (let offsetX = 0; offsetX < 2; offsetX += 1) {
+                    const sampleX = sourceX + offsetX;
+                    const sampleY = sourceY + offsetY;
+                    if (sampleX >= width || sampleY >= height) continue;
+                    value += data[(sampleY * width) + sampleX] || 0;
+                    count += 1;
+                }
+            }
+            result[(y * targetWidth) + x] = value / Math.max(1, count);
+        }
+    }
+
+    return { data: result, width: targetWidth, height: targetHeight };
+}
+
+function upsampleRgba(data, width, height, targetWidth, targetHeight) {
+    const result = new Float32Array(targetWidth * targetHeight * 4);
+    for (let y = 0; y < targetHeight; y += 1) {
+        const sourceY = height === 1 || targetHeight === 1 ? 0 : (y * (height - 1)) / Math.max(1, targetHeight - 1);
+        const y0 = Math.floor(sourceY);
+        const y1 = Math.min(height - 1, y0 + 1);
+        const yMix = sourceY - y0;
+        for (let x = 0; x < targetWidth; x += 1) {
+            const sourceX = width === 1 || targetWidth === 1 ? 0 : (x * (width - 1)) / Math.max(1, targetWidth - 1);
+            const x0 = Math.floor(sourceX);
+            const x1 = Math.min(width - 1, x0 + 1);
+            const xMix = sourceX - x0;
+            const targetIndex = ((y * targetWidth) + x) * 4;
+            const topLeft = ((y0 * width) + x0) * 4;
+            const topRight = ((y0 * width) + x1) * 4;
+            const bottomLeft = ((y1 * width) + x0) * 4;
+            const bottomRight = ((y1 * width) + x1) * 4;
+
+            for (let channel = 0; channel < 4; channel += 1) {
+                const top = ((data[topLeft + channel] || 0) * (1 - xMix)) + ((data[topRight + channel] || 0) * xMix);
+                const bottom = ((data[bottomLeft + channel] || 0) * (1 - xMix)) + ((data[bottomRight + channel] || 0) * xMix);
+                result[targetIndex + channel] = (top * (1 - yMix)) + (bottom * yMix);
+            }
+        }
+    }
+    return result;
+}
+
+function upsampleScalar(data, width, height, targetWidth, targetHeight) {
+    const result = new Float32Array(targetWidth * targetHeight);
+    for (let y = 0; y < targetHeight; y += 1) {
+        const sourceY = height === 1 || targetHeight === 1 ? 0 : (y * (height - 1)) / Math.max(1, targetHeight - 1);
+        const y0 = Math.floor(sourceY);
+        const y1 = Math.min(height - 1, y0 + 1);
+        const yMix = sourceY - y0;
+        for (let x = 0; x < targetWidth; x += 1) {
+            const sourceX = width === 1 || targetWidth === 1 ? 0 : (x * (width - 1)) / Math.max(1, targetWidth - 1);
+            const x0 = Math.floor(sourceX);
+            const x1 = Math.min(width - 1, x0 + 1);
+            const xMix = sourceX - x0;
+            const top = ((data[(y0 * width) + x0] || 0) * (1 - xMix)) + ((data[(y0 * width) + x1] || 0) * xMix);
+            const bottom = ((data[(y1 * width) + x0] || 0) * (1 - xMix)) + ((data[(y1 * width) + x1] || 0) * xMix);
+            result[(y * targetWidth) + x] = (top * (1 - yMix)) + (bottom * yMix);
+        }
+    }
+    return result;
+}
+
+function buildGaussianPyramidRgba(data, width, height, levels) {
+    const pyramid = [{ data, width, height }];
+    while (pyramid.length < levels) {
+        const previous = pyramid[pyramid.length - 1];
+        if (previous.width <= 1 && previous.height <= 1) break;
+        pyramid.push(downsampleRgba(previous.data, previous.width, previous.height));
+    }
+    return pyramid;
+}
+
+function buildGaussianPyramidScalar(data, width, height, levels) {
+    const pyramid = [{ data, width, height }];
+    while (pyramid.length < levels) {
+        const previous = pyramid[pyramid.length - 1];
+        if (previous.width <= 1 && previous.height <= 1) break;
+        pyramid.push(downsampleScalar(previous.data, previous.width, previous.height));
+    }
+    return pyramid;
+}
+
+function buildLaplacianPyramidRgba(gaussianPyramid) {
+    const pyramid = [];
+    for (let level = 0; level < gaussianPyramid.length - 1; level += 1) {
+        const current = gaussianPyramid[level];
+        const next = gaussianPyramid[level + 1];
+        const expanded = upsampleRgba(next.data, next.width, next.height, current.width, current.height);
+        const band = new Float32Array(current.data.length);
+        for (let index = 0; index < current.data.length; index += 1) {
+            band[index] = (current.data[index] || 0) - (expanded[index] || 0);
+        }
+        pyramid.push({
+            data: band,
+            width: current.width,
+            height: current.height
+        });
+    }
+    pyramid.push(gaussianPyramid[gaussianPyramid.length - 1]);
+    return pyramid;
+}
+
+function chooseMultiBandLevels(width, height) {
+    let levels = 1;
+    let minDimension = Math.min(width, height);
+    while (levels < MAX_MULTI_BAND_LEVELS && minDimension >= MIN_MULTI_BAND_DIMENSION) {
+        levels += 1;
+        minDimension = Math.floor(minDimension / 2);
+    }
+    return levels;
+}
+
+function blendMultiBandImages(baseData, layerData, mask, width, height) {
+    const levels = chooseMultiBandLevels(width, height);
+    const basePyramid = buildLaplacianPyramidRgba(buildGaussianPyramidRgba(imageDataToPremultipliedFloat(baseData), width, height, levels));
+    const layerPyramid = buildLaplacianPyramidRgba(buildGaussianPyramidRgba(imageDataToPremultipliedFloat(layerData), width, height, levels));
+    const maskPyramid = buildGaussianPyramidScalar(mask, width, height, levels);
+
+    const blended = basePyramid.map((level, index) => {
+        const maskLevel = maskPyramid[Math.min(index, maskPyramid.length - 1)];
+        const result = new Float32Array(level.data.length);
+        for (let pixelIndex = 0; pixelIndex < maskLevel.data.length; pixelIndex += 1) {
+            const blend = clamp(maskLevel.data[pixelIndex] || 0, 0, 1);
+            const baseOffset = pixelIndex * 4;
+            result[baseOffset] = ((basePyramid[index].data[baseOffset] || 0) * (1 - blend)) + ((layerPyramid[index].data[baseOffset] || 0) * blend);
+            result[baseOffset + 1] = ((basePyramid[index].data[baseOffset + 1] || 0) * (1 - blend)) + ((layerPyramid[index].data[baseOffset + 1] || 0) * blend);
+            result[baseOffset + 2] = ((basePyramid[index].data[baseOffset + 2] || 0) * (1 - blend)) + ((layerPyramid[index].data[baseOffset + 2] || 0) * blend);
+            result[baseOffset + 3] = ((basePyramid[index].data[baseOffset + 3] || 0) * (1 - blend)) + ((layerPyramid[index].data[baseOffset + 3] || 0) * blend);
+        }
+        return {
+            data: result,
+            width: level.width,
+            height: level.height
+        };
+    });
+
+    let reconstructed = blended[blended.length - 1];
+    for (let level = blended.length - 2; level >= 0; level -= 1) {
+        const expanded = upsampleRgba(reconstructed.data, reconstructed.width, reconstructed.height, blended[level].width, blended[level].height);
+        const result = new Float32Array(blended[level].data.length);
+        for (let index = 0; index < result.length; index += 1) {
+            result[index] = (blended[level].data[index] || 0) + (expanded[index] || 0);
+        }
+        reconstructed = {
+            data: result,
+            width: blended[level].width,
+            height: blended[level].height
+        };
+    }
+
+    const output = new Uint8ClampedArray(width * height * 4);
+    for (let index = 0; index < output.length; index += 4) {
+        const reconstructedAlpha = clamp(reconstructed.data[index + 3] || 0, 0, 255);
+        const coverageAlpha = composeCoverageAlpha(baseData[index + 3] || 0, layerData[index + 3] || 0);
+        const alpha = Math.max(reconstructedAlpha, coverageAlpha);
+        if (alpha <= 0.001) {
+            output[index] = 0;
+            output[index + 1] = 0;
+            output[index + 2] = 0;
+            output[index + 3] = 0;
+            continue;
+        }
+        const unpremultiply = 255 / alpha;
+        output[index] = clampByte((reconstructed.data[index] || 0) * unpremultiply);
+        output[index + 1] = clampByte((reconstructed.data[index + 1] || 0) * unpremultiply);
+        output[index + 2] = clampByte((reconstructed.data[index + 2] || 0) * unpremultiply);
+        output[index + 3] = clampByte(alpha);
+    }
+    return output;
+}
+
+function blendLayerIntoCompositeRegion(compositeCtx, layerCtx, region, blendMode, opacity = 1) {
+    if (!region.width || !region.height) return false;
+    const baseImage = compositeCtx.getImageData(region.minX, region.minY, region.width, region.height);
+    const layerImage = layerCtx.getImageData(region.minX, region.minY, region.width, region.height);
+    const baseData = baseImage.data;
+    const layerData = layerImage.data;
+    scaleImageAlpha(layerData, opacity);
+
+    const overlap = analyzeBlendOverlap(baseData, layerData, region.width, region.height);
+    if (!overlap.layerCount || !overlap.overlapCount) return false;
+
+    const selectionMask = buildSelectionMask(baseData, layerData, region.width, region.height, blendMode, overlap);
+    const gains = computeGainCompensation(baseData, layerData, overlap.overlapMask);
+    applyGainToLayerData(layerData, gains);
+
+    const blendedData = blendMultiBandImages(baseData, layerData, selectionMask, region.width, region.height);
+    const output = compositeCtx.createImageData(region.width, region.height);
+    output.data.set(blendedData);
+    compositeCtx.putImageData(output, region.minX, region.minY);
     return true;
 }
 
@@ -611,20 +975,14 @@ export class StitchEngine {
                         maxX: toCanvasPoint({ x: bounds.maxX, y: bounds.maxY }).x,
                         maxY: toCanvasPoint({ x: bounds.maxX, y: bounds.maxY }).y
                     };
-                    if (blendMode === 'seam') {
-                        const applied = applyContentAwareSeamMask(compositeCtx, layerCtx, canvasBounds);
-                        if (!applied) {
-                            const featherSize = Math.max(10, Math.min(canvasBounds.maxX - canvasBounds.minX, canvasBounds.maxY - canvasBounds.minY) * 0.16);
-                            applyRectFeatherMask(layerCtx, canvasBounds, featherSize);
-                        }
-                    } else {
-                        const featherSize = Math.max(8, Math.min(canvasBounds.maxX - canvasBounds.minX, canvasBounds.maxY - canvasBounds.minY) * 0.1);
-                        applyRectFeatherMask(layerCtx, canvasBounds, featherSize);
+                    const region = buildBlendRegion(canvasBounds, ctx.canvas.width, ctx.canvas.height);
+                    const blended = blendLayerIntoCompositeRegion(compositeCtx, layerCtx, region, blendMode, alpha);
+                    if (!blended) {
+                        compositeCtx.save();
+                        compositeCtx.globalAlpha = alpha;
+                        compositeCtx.drawImage(this.offscreenCanvas, 0, 0);
+                        compositeCtx.restore();
                     }
-                    compositeCtx.save();
-                    compositeCtx.globalAlpha = alpha;
-                    compositeCtx.drawImage(this.offscreenCanvas, 0, 0);
-                    compositeCtx.restore();
                 }
 
             });
@@ -868,20 +1226,14 @@ export class StitchEngine {
                         maxX: padding + (placementBounds.maxX - bounds.minX),
                         maxY: padding + (placementBounds.maxY - bounds.minY)
                     };
-                    if (blendMode === 'seam') {
-                        const applied = applyContentAwareSeamMask(compositeCtx, layerCtx, canvasBounds);
-                        if (!applied) {
-                            const featherSize = Math.max(10, Math.min(canvasBounds.maxX - canvasBounds.minX, canvasBounds.maxY - canvasBounds.minY) * 0.16);
-                            applyRectFeatherMask(layerCtx, canvasBounds, featherSize);
-                        }
-                    } else {
-                        const featherSize = Math.max(8, Math.min(canvasBounds.maxX - canvasBounds.minX, canvasBounds.maxY - canvasBounds.minY) * 0.1);
-                        applyRectFeatherMask(layerCtx, canvasBounds, featherSize);
+                    const region = buildBlendRegion(canvasBounds, width, height);
+                    const blended = blendLayerIntoCompositeRegion(compositeCtx, layerCtx, region, blendMode, alpha);
+                    if (!blended) {
+                        compositeCtx.save();
+                        compositeCtx.globalAlpha = alpha;
+                        compositeCtx.drawImage(this.offscreenCanvas, 0, 0);
+                        compositeCtx.restore();
                     }
-                    compositeCtx.save();
-                    compositeCtx.globalAlpha = alpha;
-                    compositeCtx.drawImage(this.offscreenCanvas, 0, 0);
-                    compositeCtx.restore();
                 }
             });
 

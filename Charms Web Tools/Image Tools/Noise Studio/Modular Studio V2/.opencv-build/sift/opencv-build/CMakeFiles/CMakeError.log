@@ -1,0 +1,249 @@
+Compilation failed:
+    source file: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp/src.cxx'
+    check option: ' -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections   -mfpmath=387'
+===== BUILD LOG =====
+Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+Run Build Command(s): C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/cmake/4.2.0-rc3_64bit/bin/cmake.exe -E env VERBOSE=1 "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/make.bat" -f Makefile cmTC_10d61/fast
+C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/mingw/7.1.0_64bit/bin/mingw32-make  -f CMakeFiles\cmTC_10d61.dir\build.make CMakeFiles/cmTC_10d61.dir/build
+mingw32-make[1]: Entering directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_10d61.dir/src.cxx.o
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\em++.bat -c "E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CMakeTmp\src.cxx"   -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"  -O3 -DNDEBUG -std=c++11    -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections   -mfpmath=387 -MD -MT CMakeFiles/cmTC_10d61.dir/src.cxx.o -MF CMakeFiles\cmTC_10d61.dir\src.cxx.o.d -o CMakeFiles\cmTC_10d61.dir\src.cxx.o -fPIC
+em++: warning: linker setting ignored during compilation: 'WASM' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'SINGLE_FILE' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'EXPORTED_FUNCTIONS' [-Wunused-command-line-argument]
+error: unknown FP unit '387'
+CMakeFiles\cmTC_10d61.dir\build.make:80: recipe for target 'CMakeFiles/cmTC_10d61.dir/src.cxx.o' failed
+mingw32-make[1]: *** [CMakeFiles/cmTC_10d61.dir/src.cxx.o] Error 1
+mingw32-make[1]: Leaving directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Makefile:133: recipe for target 'cmTC_10d61/fast' failed
+mingw32-make: *** [cmTC_10d61/fast] Error 2
+
+
+===== END =====
+
+Compilation failed:
+    source file: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp/src.c'
+    check option: ' -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections   -mfpmath=387'
+===== BUILD LOG =====
+Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+Run Build Command(s): C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/cmake/4.2.0-rc3_64bit/bin/cmake.exe -E env VERBOSE=1 "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/make.bat" -f Makefile cmTC_00c5c/fast
+C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/mingw/7.1.0_64bit/bin/mingw32-make  -f CMakeFiles\cmTC_00c5c.dir\build.make CMakeFiles/cmTC_00c5c.dir/build
+mingw32-make[1]: Entering directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_00c5c.dir/src.c.o
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\emcc.bat -c "E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CMakeTmp\src.c"   -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"  -O3 -DNDEBUG    -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections   -mfpmath=387 -MD -MT CMakeFiles/cmTC_00c5c.dir/src.c.o -MF CMakeFiles\cmTC_00c5c.dir\src.c.o.d -o CMakeFiles\cmTC_00c5c.dir\src.c.o -fPIC
+emcc: warning: linker setting ignored during compilation: 'WASM' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'SINGLE_FILE' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'EXPORTED_FUNCTIONS' [-Wunused-command-line-argument]
+error: unknown FP unit '387'
+CMakeFiles\cmTC_00c5c.dir\build.make:80: recipe for target 'CMakeFiles/cmTC_00c5c.dir/src.c.o' failed
+mingw32-make[1]: *** [CMakeFiles/cmTC_00c5c.dir/src.c.o] Error 1
+mingw32-make[1]: Leaving directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Makefile:133: recipe for target 'cmTC_00c5c/fast' failed
+mingw32-make: *** [cmTC_00c5c/fast] Error 2
+
+
+===== END =====
+
+Compilation failed:
+    source file: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp/src.cxx'
+    check option: ''
+===== BUILD LOG =====
+Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+Run Build Command(s): C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/cmake/4.2.0-rc3_64bit/bin/cmake.exe -E env VERBOSE=1 "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/make.bat" -f Makefile cmTC_04bb7/fast
+C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/mingw/7.1.0_64bit/bin/mingw32-make  -f CMakeFiles\cmTC_04bb7.dir\build.make CMakeFiles/cmTC_04bb7.dir/build
+mingw32-make[1]: Entering directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_04bb7.dir/src.cxx.o
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\em++.bat -c "E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CMakeTmp\src.cxx"   -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"  -O3 -DNDEBUG -std=c++11 -MD -MT CMakeFiles/cmTC_04bb7.dir/src.cxx.o -MF CMakeFiles\cmTC_04bb7.dir\src.cxx.o.d -o CMakeFiles\cmTC_04bb7.dir\src.cxx.o -fPIC
+em++: warning: linker setting ignored during compilation: 'WASM' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'SINGLE_FILE' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'EXPORTED_FUNCTIONS' [-Wunused-command-line-argument]
+Linking CXX executable cmTC_04bb7.js
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\cmake\4.2.0-rc3_64bit\bin\cmake.exe -E cmake_link_script CMakeFiles\cmTC_04bb7.dir\link.txt --verbose=1
+wasm-ld: error: unknown argument: --no-undefined
+em++: error: ''C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/upstream/bin\wasm-ld.exe' -o 'C:\Users\djhbi\AppData\Local\Temp\emscripten_temp_snqjmb8b\cmTC_04bb7.wasm' 'C:\Users\djhbi\AppData\Local\Temp\tmpodvg6j_hlibemscripten_js_symbols.so' --strip-debug --export=malloc --export=free --export=_emscripten_stack_alloc --export=__wasm_call_ctors --export=emscripten_stack_get_current --export=_emscripten_stack_restore --export-if-defined=__start_em_asm --export-if-defined=__stop_em_asm --export-if-defined=__start_em_lib_deps --export-if-defined=__stop_em_lib_deps --export-if-defined=__start_em_js --export-if-defined=__stop_em_js --export-table -z stack-size=65536 --no-growable-memory --initial-heap=16777216 --no-entry --no-stack-first --table-base=1 --global-base=1024 --no-undefined CMakeFiles/cmTC_04bb7.dir/src.cxx.o '-LC:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\lib\wasm32-emscripten' '-LC:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\src\lib' -lGL-getprocaddr -lal -lhtml5 -lstubs -lnoexit -lc -ldlmalloc -lcompiler_rt -lc++-noexcept -lc++abi-noexcept -lsockets -mllvm -combiner-global-alias-analysis=false -mllvm -enable-emscripten-sjlj -mllvm -disable-lsr' failed (returned 1)
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\em++.bat -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"  -O3 -DNDEBUG  -Wl,--no-undefined  @CMakeFiles\cmTC_04bb7.dir\objects1.rsp -o cmTC_04bb7.js
+CMakeFiles\cmTC_04bb7.dir\build.make:102: recipe for target 'cmTC_04bb7.js' failed
+mingw32-make[1]: *** [cmTC_04bb7.js] Error 1
+mingw32-make[1]: Leaving directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Makefile:133: recipe for target 'cmTC_04bb7/fast' failed
+mingw32-make: *** [cmTC_04bb7/fast] Error 2
+
+
+===== END =====
+
+Determining size of off64_t failed with the following output:
+Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+Run Build Command(s): C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/cmake/4.2.0-rc3_64bit/bin/cmake.exe -E env VERBOSE=1 "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/make.bat" -f Makefile cmTC_0091e/fast
+C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/mingw/7.1.0_64bit/bin/mingw32-make  -f CMakeFiles\cmTC_0091e.dir\build.make CMakeFiles/cmTC_0091e.dir/build
+mingw32-make[1]: Entering directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_0091e.dir/OFF64_T.c.o
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\emcc.bat -c "E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c"   -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"   -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wmissing-declarations -Wmissing-prototypes -Wstrict-prototypes -Wundef -Winit-self -Wpointer-arith -Wshadow -Wsign-promo -Wuninitialized -Winconsistent-missing-override -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections  -fvisibility=hidden -fvisibility-inlines-hidden  -O3 -DNDEBUG  -DNDEBUG -MD -MT CMakeFiles/cmTC_0091e.dir/OFF64_T.c.o -MF CMakeFiles\cmTC_0091e.dir\OFF64_T.c.o.d -o CMakeFiles\cmTC_0091e.dir\OFF64_T.c.o -fPIC
+emcc: warning: linker setting ignored during compilation: 'WASM' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'SINGLE_FILE' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'EXPORTED_FUNCTIONS' [-Wunused-command-line-argument]
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:25:12: error: use of undeclared identifier 'off64_t'; did you mean 'off_t'?
+   25 |   ('0' + ((SIZE / 10000)%10)),
+      |            ^~~~
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:23:22: note: expanded from macro 'SIZE'
+   23 | #define SIZE (sizeof(off64_t))
+      |                      ^~~~~~~
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot/include\bits/alltypes.h:217:16: note: 'off_t' declared here
+  217 | typedef _Int64 off_t;
+      |                ^
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:26:12: error: use of undeclared identifier 'off64_t'; did you mean 'off_t'?
+   26 |   ('0' + ((SIZE / 1000)%10)),
+      |            ^~~~
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:23:22: note: expanded from macro 'SIZE'
+   23 | #define SIZE (sizeof(off64_t))
+      |                      ^~~~~~~
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot/include\bits/alltypes.h:217:16: note: 'off_t' declared here
+  217 | typedef _Int64 off_t;
+      |                ^
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:27:12: error: use of undeclared identifier 'off64_t'; did you mean 'off_t'?
+   27 |   ('0' + ((SIZE / 100)%10)),
+      |            ^~~~
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:23:22: note: expanded from macro 'SIZE'
+   23 | #define SIZE (sizeof(off64_t))
+      |                      ^~~~~~~
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot/include\bits/alltypes.h:217:16: note: 'off_t' declared here
+  217 | typedef _Int64 off_t;
+      |                ^
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:28:12: error: use of undeclared identifier 'off64_t'; did you mean 'off_t'?
+   28 |   ('0' + ((SIZE / 10)%10)),
+      |            ^~~~
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:23:22: note: expanded from macro 'SIZE'
+   23 | #define SIZE (sizeof(off64_t))
+      |                      ^~~~~~~
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot/include\bits/alltypes.h:217:16: note: 'off_t' declared here
+  217 | typedef _Int64 off_t;
+      |                ^
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:29:12: error: use of undeclared identifier 'off64_t'; did you mean 'off_t'?
+   29 |   ('0' +  (SIZE    % 10)),
+      |            ^~~~
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CheckTypeSize\OFF64_T.c:23:22: note: expanded from macro 'SIZE'
+   23 | #define SIZE (sizeof(off64_t))
+      |                      ^~~~~~~
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot/include\bits/alltypes.h:217:16: note: 'off_t' declared here
+  217 | typedef _Int64 off_t;
+      |                ^
+5 errors generated.
+CMakeFiles\cmTC_0091e.dir\build.make:80: recipe for target 'CMakeFiles/cmTC_0091e.dir/OFF64_T.c.o' failed
+mingw32-make[1]: *** [CMakeFiles/cmTC_0091e.dir/OFF64_T.c.o] Error 1
+mingw32-make[1]: Leaving directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Makefile:133: recipe for target 'cmTC_0091e/fast' failed
+mingw32-make: *** [cmTC_0091e/fast] Error 2
+
+
+E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CheckTypeSize/OFF64_T.c:
+#include <sys/types.h>
+#include <stdint.h>
+#include <stddef.h>
+
+
+#undef KEY
+#if defined(__i386)
+# define KEY '_','_','i','3','8','6'
+#elif defined(__x86_64)
+# define KEY '_','_','x','8','6','_','6','4'
+#elif defined(__ppc__)
+# define KEY '_','_','p','p','c','_','_'
+#elif defined(__ppc64__)
+# define KEY '_','_','p','p','c','6','4','_','_'
+#elif defined(__aarch64__)
+# define KEY '_','_','a','a','r','c','h','6','4','_','_'
+#elif defined(__ARM_ARCH_7A__)
+# define KEY '_','_','A','R','M','_','A','R','C','H','_','7','A','_','_'
+#elif defined(__ARM_ARCH_7S__)
+# define KEY '_','_','A','R','M','_','A','R','C','H','_','7','S','_','_'
+#endif
+
+#define SIZE (sizeof(off64_t))
+char info_size[] =  {'I', 'N', 'F', 'O', ':', 's','i','z','e','[',
+  ('0' + ((SIZE / 10000)%10)),
+  ('0' + ((SIZE / 1000)%10)),
+  ('0' + ((SIZE / 100)%10)),
+  ('0' + ((SIZE / 10)%10)),
+  ('0' +  (SIZE    % 10)),
+  ']',
+#ifdef KEY
+  ' ','k','e','y','[', KEY, ']',
+#endif
+  '\0'};
+
+#ifdef __CLASSIC_C__
+int main(argc, argv) int argc; char *argv[];
+#else
+int main(int argc, char *argv[])
+#endif
+{
+  int require = 0;
+  require += info_size[argc];
+  (void)argv;
+  return require;
+}
+
+
+Build output check failed:
+    Regex: 'unknown .*option'
+    Output line: 'warning: unknown warning option '-Wno-stringop-overflow', did you mean '-Wno-shift-overflow'? [-Wunknown-warning-option]'
+Compilation failed:
+    source file: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp/src.cxx'
+    check option: ' -Wno-stringop-overflow'
+===== BUILD LOG =====
+Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+Run Build Command(s): C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/cmake/4.2.0-rc3_64bit/bin/cmake.exe -E env VERBOSE=1 "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/make.bat" -f Makefile cmTC_65914/fast
+C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/mingw/7.1.0_64bit/bin/mingw32-make  -f CMakeFiles\cmTC_65914.dir\build.make CMakeFiles/cmTC_65914.dir/build
+mingw32-make[1]: Entering directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_65914.dir/src.cxx.o
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\em++.bat -c "E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CMakeTmp\src.cxx"   -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"   -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wstrict-prototypes -Winit-self -Wpointer-arith -Wuninitialized -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections  -fvisibility=hidden -fvisibility-inlines-hidden -Wno-deprecated -Wno-missing-prototypes -Wno-missing-declarations -Wno-shadow -Wno-unused-parameter -Wno-unused-local-typedefs -Wno-sign-compare -Wno-sign-promo -Wno-undef -Wno-tautological-undefined-compare -Wno-ignored-qualifiers -Wno-extra -Wno-unused-function -Wno-unused-const-variable -Wno-shorten-64-to-32 -Wno-invalid-offsetof -Wno-enum-compare-switch -Wno-suggest-override -Wno-inconsistent-missing-override -Wno-implicit-fallthrough -Wno-array-bounds  -O3 -DNDEBUG  -DNDEBUG -std=c++11    -Wno-stringop-overflow -MD -MT CMakeFiles/cmTC_65914.dir/src.cxx.o -MF CMakeFiles\cmTC_65914.dir\src.cxx.o.d -o CMakeFiles\cmTC_65914.dir\src.cxx.o -fPIC
+em++: warning: linker setting ignored during compilation: 'WASM' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'SINGLE_FILE' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'EXPORTED_FUNCTIONS' [-Wunused-command-line-argument]
+warning: unknown warning option '-Wno-stringop-overflow'; did you mean '-Wno-shift-overflow'? [-Wunknown-warning-option]
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CMakeTmp\src.cxx:1:8: warning: unknown pragma ignored [-Wunknown-pragmas]
+    1 | #pragma
+      |        ^
+2 warnings generated.
+Linking CXX executable cmTC_65914.js
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\cmake\4.2.0-rc3_64bit\bin\cmake.exe -E cmake_link_script CMakeFiles\cmTC_65914.dir\link.txt --verbose=1
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\em++.bat -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"   -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wstrict-prototypes -Winit-self -Wpointer-arith -Wuninitialized -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections  -fvisibility=hidden -fvisibility-inlines-hidden -Wno-deprecated -Wno-missing-prototypes -Wno-missing-declarations -Wno-shadow -Wno-unused-parameter -Wno-unused-local-typedefs -Wno-sign-compare -Wno-sign-promo -Wno-undef -Wno-tautological-undefined-compare -Wno-ignored-qualifiers -Wno-extra -Wno-unused-function -Wno-unused-const-variable -Wno-shorten-64-to-32 -Wno-invalid-offsetof -Wno-enum-compare-switch -Wno-suggest-override -Wno-inconsistent-missing-override -Wno-implicit-fallthrough -Wno-array-bounds  -O3 -DNDEBUG  -DNDEBUG   -Wl,--gc-sections  @CMakeFiles\cmTC_65914.dir\objects1.rsp -o cmTC_65914.js
+mingw32-make[1]: Leaving directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+
+===== END =====
+
+Build output check failed:
+    Regex: 'unknown .*option'
+    Output line: 'warning: unknown warning option '-Wno-stringop-overread' [-Wunknown-warning-option]'
+Compilation failed:
+    source file: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp/src.cxx'
+    check option: ' -Wno-stringop-overread'
+===== BUILD LOG =====
+Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+Run Build Command(s): C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/cmake/4.2.0-rc3_64bit/bin/cmake.exe -E env VERBOSE=1 "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/make.bat" -f Makefile cmTC_fe824/fast
+C:/Users/djhbi/AppData/Local/Temp/codex-opencv-sift-build/emsdk-main/mingw/7.1.0_64bit/bin/mingw32-make  -f CMakeFiles\cmTC_fe824.dir\build.make CMakeFiles/cmTC_fe824.dir/build
+mingw32-make[1]: Entering directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+Building CXX object CMakeFiles/cmTC_fe824.dir/src.cxx.o
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\em++.bat -c "E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CMakeTmp\src.cxx"   -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"   -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wstrict-prototypes -Winit-self -Wpointer-arith -Wuninitialized -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections  -fvisibility=hidden -fvisibility-inlines-hidden -Wno-deprecated -Wno-missing-prototypes -Wno-missing-declarations -Wno-shadow -Wno-unused-parameter -Wno-unused-local-typedefs -Wno-sign-compare -Wno-sign-promo -Wno-undef -Wno-tautological-undefined-compare -Wno-ignored-qualifiers -Wno-extra -Wno-unused-function -Wno-unused-const-variable -Wno-shorten-64-to-32 -Wno-invalid-offsetof -Wno-enum-compare-switch -Wno-suggest-override -Wno-inconsistent-missing-override -Wno-implicit-fallthrough -Wno-array-bounds  -O3 -DNDEBUG  -DNDEBUG -std=c++11    -Wno-stringop-overread -MD -MT CMakeFiles/cmTC_fe824.dir/src.cxx.o -MF CMakeFiles\cmTC_fe824.dir\src.cxx.o.d -o CMakeFiles\cmTC_fe824.dir\src.cxx.o -fPIC
+em++: warning: linker setting ignored during compilation: 'WASM' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'SINGLE_FILE' [-Wunused-command-line-argument]
+em++: warning: linker setting ignored during compilation: 'EXPORTED_FUNCTIONS' [-Wunused-command-line-argument]
+warning: unknown warning option '-Wno-stringop-overread' [-Wunknown-warning-option]
+E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\.opencv-build\sift\opencv-build\CMakeFiles\CMakeTmp\src.cxx:1:8: warning: unknown pragma ignored [-Wunknown-pragmas]
+    1 | #pragma
+      |        ^
+2 warnings generated.
+Linking CXX executable cmTC_fe824.js
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\cmake\4.2.0-rc3_64bit\bin\cmake.exe -E cmake_link_script CMakeFiles\cmTC_fe824.dir\link.txt --verbose=1
+C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\em++.bat -s WASM=1 -s SINGLE_FILE=1 -s USE_PTHREADS=0 -s SINGLE_FILE=1 -s EXPORTED_FUNCTIONS="['_malloc', '_free']"   -fsigned-char -W -Wall -Wreturn-type -Wnon-virtual-dtor -Waddress -Wsequence-point -Wformat -Wformat-security -Wstrict-prototypes -Winit-self -Wpointer-arith -Wuninitialized -Wno-delete-non-virtual-dtor -Wno-unnamed-type-template-args -Wno-comment -Wno-deprecated-enum-enum-conversion -Wno-deprecated-anon-enum-enum-conversion -fdiagnostics-show-option -Qunused-arguments -ffunction-sections -fdata-sections  -fvisibility=hidden -fvisibility-inlines-hidden -Wno-deprecated -Wno-missing-prototypes -Wno-missing-declarations -Wno-shadow -Wno-unused-parameter -Wno-unused-local-typedefs -Wno-sign-compare -Wno-sign-promo -Wno-undef -Wno-tautological-undefined-compare -Wno-ignored-qualifiers -Wno-extra -Wno-unused-function -Wno-unused-const-variable -Wno-shorten-64-to-32 -Wno-invalid-offsetof -Wno-enum-compare-switch -Wno-suggest-override -Wno-inconsistent-missing-override -Wno-implicit-fallthrough -Wno-array-bounds  -O3 -DNDEBUG  -DNDEBUG   -Wl,--gc-sections  @CMakeFiles\cmTC_fe824.dir\objects1.rsp -o cmTC_fe824.js
+mingw32-make[1]: Leaving directory 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/.opencv-build/sift/opencv-build/CMakeFiles/CMakeTmp'
+
+
+===== END =====
+

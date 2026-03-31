@@ -1,0 +1,38 @@
+{
+  "name": "studio",
+  "version": "1.0.0",
+  "description": "Modular Noise Studio",
+  "main": "electron-main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder -w"
+  },
+  "keywords": [],
+  "author": "Antigravity",
+  "license": "ISC",
+  "type": "commonjs",
+  "build": {
+    "appId": "com.charms.studio",
+    "productName": "Studio",
+    "win": {
+      "icon": "ico.ico",
+      "target": [
+        "portable"
+      ]
+    },
+    "files": [
+      "**/*",
+      "!node_modules/**/*",
+      "!dist/**/*",
+      "!dist-verify*/**/*",
+      "node_modules/electron/**/*"
+    ],
+    "directories": {
+      "output": "dist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.1.0",
+    "electron-builder": "^26.8.1"
+  }
+}

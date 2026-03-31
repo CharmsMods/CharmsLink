@@ -14,13 +14,14 @@ If the code and this file disagree, the code is authoritative and this file shou
 
 ## 1. Product Model
 
-Modular Studio V2 is now a single-page app with three top-level sections:
+Modular Studio V2 is now a single-page app with four top-level sections:
 
 1. `Editor`
 2. `Library`
 3. `Stitch`
+4. `3D`
 
-All three sections live inside the same page and same JS runtime.
+All four sections live inside the same page and same JS runtime.
 
 Important historical note:
 
@@ -36,13 +37,18 @@ Current section responsibilities:
 
 - `Library`
   - Integrated project browser backed by IndexedDB.
-  - Can hold mixed project types from both `Editor` and `Stitch`.
+  - Can hold mixed project types from `Editor`, `Stitch`, and `3D`.
   - Owns Library import/export, tag catalog, selection workflows, secure bundle save/load, preview gallery, and detail inspection.
 
 - `Stitch`
   - A second engine with its own document model and UI.
   - Handles overlap-first multi-image stitching with candidate generation and manual correction.
   - Saves into the same Library as Editor projects.
+
+- `3D`
+  - Browser-based 3D scene workspace built on three.js.
+  - Supports embedded `.glb` / self-contained `.gltf` models, image planes, primitive meshes, and editable point / spot / directional lights.
+  - Saves full 3D scenes into the same Library as Editor and Stitch, including embedded asset data, materials, textures, camera state, render settings, and preview image.
 
 ## 2. Entry Points
 
@@ -71,6 +77,7 @@ Current section responsibilities:
 - Main bootstrap.
 - Creates the store.
 - Creates the Studio engine and the Stitch engine.
+- Owns the normalized 3D document actions and adapter-backed 3D Library persistence.
 - Owns IndexedDB helpers.
 - Owns app-level actions.
 - Owns the project adapter registry that lets the Library save/load mixed engine types.
@@ -86,6 +93,7 @@ Current section responsibilities:
   - Editor workspace
   - integrated Library panel
   - integrated Stitch workspace
+  - integrated 3D workspace
 
 ### `src/ui/libraryPanel.js`
 
@@ -105,7 +113,7 @@ Current section responsibilities:
 
 - `document.js`
   - Stitch document shape, normalization, placements, bounds, summaries, manual fallback candidate.
-  - Owns persisted Stitch settings including `photoBackend` and `warpDistribution`.
+  - Owns persisted Stitch settings including `photoBackend`, `featureDetector`, and `warpDistribution`.
 
 - `analysis.js`
   - Legacy JS/Canvas analysis path.
@@ -129,7 +137,7 @@ Current section responsibilities:
 - `opencv-worker.js`
   - Dedicated classic worker for photo analysis.
   - Loads vendored OpenCV.js/WASM locally.
-  - Runs ORB feature extraction, matching, homography solving, candidate graph traversal, and mesh refinement.
+  - Runs ORB / AKAZE feature extraction, matching, homography solving, candidate graph traversal, and mesh refinement.
 
 - `vendor/opencv/`
   - Vendored OpenCV.js runtime assets used by the photo worker.
@@ -137,6 +145,20 @@ Current section responsibilities:
 - `ui.js`
   - Stitch workspace UI.
   - Input list, analysis controls, canvas stage, alternatives strip, candidate gallery, selection controls.
+
+### `src/3d/`
+
+- `document.js`
+  - 3D document shape, normalization, scene-item ids, camera preset ids, serialization helpers, and Library summary helpers.
+  - Supports saved 3D models, image planes, primitive meshes, scene lights, per-item material settings, texture transforms, snap settings, preview metadata, and ephemeral render-job state.
+
+- `engine.js`
+  - Primary three.js / path-tracing engine.
+  - Owns model/image hydration from embedded data URLs, primitive mesh creation, scene sync, transform controls, camera sync, preview capture, path-tracing rebuilds, material application, snapping, and background PNG render jobs.
+  - Editor-only helpers and gizmos are excluded from the traced BVH, then drawn back as an overlay in path-trace mode.
+- `ui.js`
+  - 3D workspace with edit/fullscreen layouts plus a denser control scale than the earlier oversized overlay version.
+  - Owns the 3D import/save controls, primitive creation buttons, snapping controls, hierarchy, rename/duplicate inspector actions, material/texture controls, camera preset UI, render modal, and render-job status/abort flow.
 
 ### `src/io/projectAdapters.js`
 
@@ -167,11 +189,13 @@ Allowed values:
 - `'editor'`
 - `'library'`
 - `'stitch'`
+- `'3d'`
 
 `src/main.js` reads `?section=` on startup:
 
 - `?section=library` -> Library
 - `?section=stitch` -> Stitch
+- `?section=3d` -> 3D
 - anything else -> Editor
 
 `actions.setActiveSection(section)` syncs the URL with `history.replaceState(...)`.
@@ -195,6 +219,7 @@ Cleanup on non-Editor section switches:
 
 - `state.document`
 - `state.stitchDocument`
+- `state.threeDDocument`
 - `state.ui`
 - `state.notice`
 - `state.eyedropperTarget`
@@ -255,6 +280,7 @@ Important current Stitch setting families:
 - advanced
   - `analysisMaxDimension`
   - `useFullResolutionAnalysis`
+  - `featureDetector`
   - `maxFeatures`
   - `matchRatio`
   - `ransacIterations`
@@ -284,6 +310,92 @@ Important Stitch analysis fields:
 - `analysis.previews`
 
 `analysis.previews` is ephemeral. It is intentionally stripped before a Stitch project is serialized for Library persistence.
+
+### `state.threeDDocument`
+
+This is the 3D scene document.
+
+Important fields:
+
+- `version: 'mns/v2'`
+- `kind: '3d-document'`
+- `mode: '3d'`
+- `scene.items[]`
+- `scene.backgroundColor`
+- `scene.showGrid`
+- `scene.showAxes`
+- `selection.itemId`
+- `view.cameraMode`
+- `view.linkPlaneScale`
+- `view.snapTranslationStep`
+- `view.snapRotationDegrees`
+- `view.cameraPosition`
+- `view.cameraTarget`
+- `view.fov`
+- `view.near`
+- `view.far`
+- `view.presets[]`
+- `render.mode`
+- `render.samplesTarget`
+- `render.currentSamples`
+- `render.exposure`
+- `render.toneMapping`
+- `render.outputWidth`
+- `render.outputHeight`
+- `render.lastJobSamples`
+- `renderJob.active`
+- `renderJob.status`
+- `renderJob.requestedSamples`
+- `renderJob.currentSamples`
+- `renderJob.outputWidth`
+- `renderJob.outputHeight`
+- `renderJob.message`
+- `preview.imageData`
+- `preview.width`
+- `preview.height`
+
+Current saved 3D scene item types:
+
+- `model`
+  - stores embedded `asset.dataUrl`
+  - supports `format: 'glb' | 'gltf'`
+  - supports per-item `material`
+    - `preset: 'original' | 'matte' | 'metal' | 'glass' | 'emissive'`
+    - color / roughness / metalness / opacity
+    - emissive settings: emissiveColor / emissiveIntensity
+    - glass settings: ior / transmission / thickness / attenuationColor / attenuationDistance
+    - optional embedded texture with repeat / offset / rotation
+- `image-plane`
+  - stores embedded image `asset.dataUrl`
+  - stores original `asset.width` and `asset.height`
+  - initial plane geometry preserves source aspect ratio
+- `primitive`
+  - stores `asset.format: 'primitive'`
+  - stores `asset.primitiveType: 'cube' | 'sphere' | 'cone' | 'cylinder'`
+  - supports the same saved material/texture settings as normal model items
+- `light`
+  - stores `lightType: 'directional' | 'point' | 'spot'`
+  - stores color/intensity/shadow parameters
+  - directional and spot lights can optionally store `targetItemId` to keep aiming at a chosen scene item
+
+Important runtime-only 3D behavior:
+
+- `renderJob` is store state, not durable project payload.
+- Background render jobs continue while the user switches between Editor / Library / Stitch / 3D.
+- While a background 3D render is active, the 3D viewport and 3D controls are intentionally locked except for `Abort`, so the render snapshot cannot be mutated mid-sample.
+- 3D render progress is pushed into local 3D UI first and only checkpoints shared state, so the rest of the app remains usable while a render is running.
+- Camera navigation supports both `orbit` and `fly` modes.
+- Fly mode uses viewport focus plus right-drag look and `W A S D Q E` movement.
+- Orbit mode supports `F` to frame the currently selected object.
+- Viewport render mode shortcuts now include keyboard `1` = raster and `2` = path trace.
+- Plane-handle scaling can lock the two active axes together via `view.linkPlaneScale`.
+- Transform snapping supports invisible-grid translation snapping plus rotation snapping via `view.snapTranslationStep` and `view.snapRotationDegrees`.
+- Path tracing now has a warmup/loading overlay so the first compile/switch does not look like a frozen viewport.
+- Background PNG renders now open through a single in-app modal for samples + width + height, and show explicit preparation / compile / encode messages before sampling starts.
+- Editor-only viewport objects are marked non-shadow-casting so gizmos/helpers do not contaminate raster lighting.
+- The 3D workspace now has two local UI layouts:
+  - `edit`: windowed viewport plus scrollable side panels
+  - `fullscreen`: minimal viewport HUD with most UI hidden
 
 ### `state.ui`
 
@@ -359,16 +471,17 @@ The screenshot backend (`src/stitch/analysis.js`) still does:
 The photo backend (`src/stitch/opencv-worker.js`) now does:
 
 1. grayscale prep at analysis resolution or full resolution
-2. ORB feature extraction
+2. ORB feature extraction with AKAZE fallback / override support
 3. BF KNN descriptor matching with Lowe-ratio and mutual filtering
 4. RANSAC homography solving with overlap/inlier/reprojection rejection
 5. graph traversal to compose image-to-anchor homographies
 6. homography-derived `perspective` candidates
 7. dense overlap support seeding across the shared region, not just sparse match inliers
-8. edge-aware optical-flow mesh refinement for `mesh` candidates
-9. adaptive mesh sizing based on support density and residual disagreement
-10. ranked candidate scoring with `rank`, `confidence`, `modelType`, and `blendMode`
-11. manual fallback candidate if overlap is weak or missing
+8. a seam-focused two-image mesh profile that allocates more support near the overlap corridor
+9. edge-aware optical-flow mesh refinement for `mesh` candidates, including a heavier two-stage forward/backward-validated flow pass for two-image photo seams
+10. adaptive mesh sizing based on support density and residual disagreement
+11. ranked candidate scoring with `rank`, `confidence`, `modelType`, and `blendMode`
+12. manual fallback candidate if overlap is weak or missing
 
 Important implementation detail:
 
@@ -379,13 +492,23 @@ Important implementation detail:
   - `warpDistribution: 'anchored'`
     - keeps more deformation on the deeper/non-anchor side
 - the photo mesh solver now seeds many more local support points from overlap detail/edge regions instead of relying only on the original inlier matches
+- when exactly two photo inputs are being solved into a mesh, support seeding now deliberately favors the seam corridor instead of treating the whole overlap equally
 - low-detail / blank-space regions are now deprioritized or skipped during dense support seeding so empty areas do not steer the mesh
 - local mesh corrections are now thresholded twice:
   - implausibly large prepared-space optical-flow shifts are rejected
   - surviving world-space local residuals are capped to a small per-image warp budget
+- two-image photo mesh refinement now uses a coarse-to-fine Lucas-Kanade pass plus forward-backward validation before residuals reach the mesh
 - adaptive mesh density is now chosen per solved image from support count and residual disagreement, rather than always using one fixed grid size
 - mesh residuals are intentionally regularized so unsupported outer edges stay closer to rectangular instead of letting a local seam pull the whole far edge apart
+- that regularization is now less aggressive inside supported seam regions for two-image meshes, while unsupported outer regions stay more strongly pinned
 - large local corrections are no longer rewarded just for being large; the mesh now prefers small believable cleanup corrections over aggressive stretches
+- the Laplacian blend path now preserves combined source coverage alpha at overlap boundaries so narrow top/bottom seams do not fade out into background-colored lines
+- automatic AKAZE fallback is now capped and non-fatal: Stitch keeps a usable ORB solve if the stronger retry is skipped or fails
+- the Stitch settings and photo worker now recognize a `sift` feature-detector mode, and the vendored `src/vendor/opencv/opencv.js` bundle is now SIFT-enabled so explicit SIFT selection and auto escalation both work at runtime
+- the repo includes `tools/generate_opencv_sift_config.py` plus `tools/build_opencv_sift.ps1` to regenerate that SIFT-enabled single-file OpenCV.js bundle
+- the PowerShell build script also patches OpenCV's JS CMake input to remove the deprecated `DEMANGLE_SUPPORT` linker flag, which newer Emscripten toolchains reject during the final JS link step
+- the custom OpenCV.js bundle exposes a promise-like `cv` during worker boot, so `src/stitch/opencv-worker.js` now explicitly swaps in the resolved runtime module before analysis begins; without that, ORB/AKAZE/SIFT appear missing or non-constructible in the browser worker even though the bundle contains them
+- browser-side SIFT on this OpenCV.js build has a practical WASM ceiling well below many phone-photo full-res inputs, so Stitch now caps SIFT extraction to stable internal analysis sizes (roughly 2400px longest side, with smaller retries if needed), then maps those keypoints back into the original prepared-image coordinates before the rest of the photo pipeline runs
 
 If the browser supports Workers:
 
@@ -418,6 +541,8 @@ Current higher-level Stitch settings:
   - `'anchored' | 'balanced'`
 - `settings.blendMode`
   - `'auto' | 'alpha' | 'feather' | 'seam'`
+- `settings.featureDetector`
+  - `'auto' | 'orb' | 'akaze'`
 - `settings.photoBackend`
   - currently `'opencv-wasm'`
 
@@ -427,6 +552,7 @@ Current new-document defaults are intentionally photo-heavy:
 - `warpMode: 'mesh'`
 - `meshDensity: 'high'`
 - `warpDistribution: 'balanced'`
+- `featureDetector: 'auto'`
 - `analysisMaxDimension: 2048`
 - `maxFeatures: 4000`
 - `ransacIterations: 5000`
@@ -520,8 +646,9 @@ Current Stitch help system:
 - photo-like sets can emit `perspective` and `mesh` candidates ahead of rigid ones
 - `mesh` candidates can now share deformation across both images when `warpDistribution` is `balanced`
 - photo mesh candidates try to keep unsupported outer edges closer to a sane rectangle instead of letting local overlap correction blow out the whole far edge
-- `blendMode: 'seam'` is now content-aware in the renderer/export path; it no longer behaves like only a stronger rectangular feather
-- `blendMode: 'auto'` keeps screenshot candidates crisp and gives photo-like candidates softer blends
+- non-alpha photo blends now use gain compensation plus multi-band compositing in the renderer/export path
+- `blendMode: 'seam'` now uses a content-aware seam mask inside that multi-band blend instead of only a stronger rectangular feather
+- `blendMode: 'auto'` keeps screenshot candidates crisp and gives photo-like candidates softer overlap-aware blends
 
 ### Important Stitch save/load behavior
 
@@ -539,6 +666,7 @@ Current adapters:
 
 - `studio`
 - `stitch`
+- `3d`
 
 Each adapter is responsible for:
 
@@ -579,10 +707,10 @@ A saved project record now effectively contains:
 - `blob`
   - rendered preview PNG blob
 - `payload`
-  - either Studio or Stitch project payload
+  - Studio, Stitch, or 3D project payload
 - `tags`
 - `projectType`
-  - `'studio'` or `'stitch'`
+  - `'studio'`, `'stitch'`, or `'3d'`
 - `hoverSource`
   - source image metadata used by Library compare hover
 - `sourceWidth`
@@ -613,6 +741,13 @@ For Stitch Library projects:
 - `sourceAreaOverride` stores aggregate total input area across all inputs
 
 The Library sort UI uses that override so Stitch projects sort meaningfully by original input size.
+
+### Compare Source rule for 3D
+
+For 3D Library projects:
+
+- `hoverSource` is intentionally `null`
+- the Library card uses the saved scene preview image instead of an original-source hover compare
 
 ## 10. Current Project Payloads
 
@@ -660,6 +795,60 @@ Used for Stitch projects:
 Important rule:
 
 - Stitch serialization strips `analysis.previews` because those are runtime object URLs/data URLs, not durable project state.
+
+### 3D project payload
+
+Used for 3D scene projects:
+
+```json
+{
+  "version": "mns/v2",
+  "kind": "3d-document",
+  "mode": "3d",
+  "scene": {
+    "items": [],
+    "backgroundColor": "#202020",
+    "showGrid": true,
+    "showAxes": true
+  },
+  "selection": {
+    "itemId": null
+  },
+  "view": {
+    "cameraMode": "orbit",
+    "linkPlaneScale": true,
+    "snapTranslationStep": 0,
+    "snapRotationDegrees": 0,
+    "cameraPosition": [6, 4, 8],
+    "cameraTarget": [0, 0, 0],
+    "fov": 50,
+    "near": 0.1,
+    "far": 2000,
+    "presets": []
+  },
+  "render": {
+    "mode": "raster",
+    "samplesTarget": 256,
+    "currentSamples": 0,
+    "exposure": 1,
+    "toneMapping": "aces",
+    "outputWidth": 1920,
+    "outputHeight": 1080,
+    "lastJobSamples": 256
+  },
+  "preview": {
+    "imageData": "",
+    "width": 0,
+    "height": 0,
+    "updatedAt": 0
+  }
+}
+```
+
+Important 3D save/load rule:
+
+- 3D scenes now persist embedded model data, embedded image planes, primitive items, per-item materials, texture transforms, camera presets, light target assignments, snap settings, and preview metadata directly in the payload.
+- `renderJob` is intentionally excluded from serialized payloads.
 
 ### Library-export metadata fields
 
@@ -712,6 +901,7 @@ It now tracks separate origins for:
 
 - `studio`
 - `stitch`
+- `3d`
 
 That means:
 
@@ -870,6 +1060,15 @@ Library detail view now behaves differently for different project types.
 
 It does not try to fake a Studio layer stack for Stitch projects.
 
+### 3D detail view
+
+- project summary
+- preview dimensions
+- model / plane / primitive / light counts
+- scene item list
+- render settings summary
+- camera summary
+
 ## 15. Studio Layer Sub-Preview Framework
 
 The Layer tab sub-preview canvas has already been reworked into a provider system.
@@ -900,8 +1099,11 @@ If a future AI needs to understand the app quickly, start with:
 3. `src/ui/libraryPanel.js`
 4. `src/stitch/document.js`
 5. `src/stitch/engine.js`
-6. `src/stitch/opencv-worker.js`
-7. `src/io/projectAdapters.js`
+6. `src/3d/document.js`
+7. `src/3d/ui.js`
+8. `src/3d/engine.js`
+9. `src/stitch/opencv-worker.js`
+10. `src/io/projectAdapters.js`
 
 Then branch into:
 
@@ -936,6 +1138,8 @@ Current behavior depends on:
 
 For Stitch, hover compare intentionally uses the first input image, not a synthetic composite source.
 
+For 3D, hover compare is intentionally absent; use the saved preview render instead.
+
 ### Object URLs exist in two places
 
 - Library gallery preview blobs
@@ -962,13 +1166,55 @@ When touching app shell or Library logic, check:
 3. Stitch draft survives returning from Editor or Library.
 4. Saving a Stitch project creates a normal Library card.
 5. Loading a Stitch Library card switches to `Stitch`.
-6. Library hover compare still works for both Studio and Stitch.
-7. Plain bundle export/import preserves both project types.
-8. Secure bundle export/import preserves both project types.
-9. ZIP export still writes one JSON per project.
-10. Studio state save/load still behaves as before.
+6. Saving a 3D scene creates a normal Library card with a preview image.
+7. Loading a 3D Library card switches to `3D` and restores meshes/lights/camera.
+8. Library hover compare still works for Studio/Stitch and stays intentionally disabled for 3D.
+9. Plain bundle export/import preserves all three project types.
+10. Secure bundle export/import preserves all three project types.
+11. ZIP export still writes one JSON per project.
+12. Studio state save/load still behaves as before.
 
-## 19. Summary
+## 19. Electron Bundling and Standalone App
+
+The project now supports being bundled into a standalone Windows application (`.exe`) via Electron.
+
+### App Configuration
+
+- **Name**: Studio
+- **Main Process**: `electron-main.js`
+- **Build Tool**: `electron-builder`
+- **Output**: `dist/Studio 1.0.0.exe` (Portable)
+
+### Build Workflow
+
+- `npm start`: Launches the Electron window for testing (faster than building).
+- `npm run dist`: Compiles the project into the final `.exe`.
+
+Current verification note:
+
+- Packaging was re-verified on March 30, 2026 with:
+  - `.\node_modules\.bin\electron-builder.cmd -w --config.directories.output=dist/verify-final-2`
+  - output included `dist/verify-final-2/Studio 1.0.0.exe`
+- `package.json` now excludes `dist-verify*/**/*` from Electron payloads so verification folders are not recursively bundled back into later builds.
+
+### Mandatory Path Rule
+
+All assets (scripts, styles, images) **MUST** be referenced using **relative paths** in `index.html` and JS files.
+
+- **Correct**: `<script src="src/main.js"></script>`
+- **Incorrect**: `<script src="/src/main.js"></script>`
+
+This ensures the app works identically across:
+
+1. **GitHub Pages** (served via HTTP)
+2. **Local Browser** (served via Local Host or opened as a file)
+3. **Electron** (loaded via the `file://` protocol)
+
+### Security and CORS
+
+By default, Electron runs with standard browser security. If the app needs to bypass CORS for specific external APIs, `webPreferences.webSecurity` can be disabled in `electron-main.js`. Currently, it is enabled for maximum security.
+
+## 20. Summary
 
 The app is no longer just "Noise Studio plus an integrated Library".
 
@@ -977,5 +1223,7 @@ It is now:
 - the original modular Studio editor
 - an integrated mixed-project Library
 - a second engine called Stitch
+- a browser/Electron 3D scene editor with embedded model/image persistence, camera presets, material controls, and background path-traced PNG export
+- a standalone Electron-powered desktop application
 
-The key architectural shift is that the Library is now engine-aware through adapters, while the app keeps Studio and Stitch as separate live drafts inside one page.
+The key architectural shift is that the Library is now engine-aware through adapters, while the app keeps Studio, Stitch, and 3D as separate live drafts inside one page, all while maintaining universal compatibility through strict relative pathing.

@@ -1,0 +1,45 @@
+3rdparty/zlib/CMakeFiles/zlib.dir/inftrees.c.o: \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\opencv-4.x\3rdparty\zlib\inftrees.c \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\opencv-4.x\3rdparty\zlib\zutil.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\opencv-4.x\3rdparty\zlib\zlib.h \
+  E:\WEBSITE\CharmsLink\CharmsLink\Charms\ Web\ Tools\Image\ Tools\Noise\ Studio\Modular\ Studio\ V2\.opencv-build\sift\opencv-build\3rdparty\zlib\zconf.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\stddef.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\stddef.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stddef_header_macro.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stddef_ptrdiff_t.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stddef_size_t.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stddef_wchar_t.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stddef_null.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stddef_max_align_t.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stddef_offsetof.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\limits.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\limits.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\features.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\bits\alltypes.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\bits\limits.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\sys\types.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\endian.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\endian.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\sys\select.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\compat\stdarg.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\stdarg.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\stdarg.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stdarg_header_macro.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stdarg___gnuc_va_list.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stdarg_va_list.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stdarg_va_arg.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stdarg___va_copy.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\__stdarg_va_copy.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\unistd.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\wasi\api.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\lib\clang\23\include\stdint.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\stdint.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\bits\stdint.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\bits\posix.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\compat\string.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\string.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\strings.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\compat\stdlib.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\stdlib.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\emsdk-main\upstream\emscripten\cache\sysroot\include\alloca.h \
+  C:\Users\djhbi\AppData\Local\Temp\codex-opencv-sift-build\opencv-4.x\3rdparty\zlib\inftrees.h

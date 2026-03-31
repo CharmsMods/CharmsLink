@@ -19,6 +19,15 @@ import {
 } from './stitch/document.js';
 import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
+import {
+    createEmptyThreeDDocument,
+    createThreeDCameraPresetId,
+    createThreeDSceneItemId,
+    isThreeDDocumentPayload,
+    normalizeThreeDDocument,
+    serializeThreeDDocument,
+    summarizeThreeDDocument
+} from './3d/document.js';
 
 const DB_NAME = 'ModularStudioDB';
 const DB_VERSION = 2;
@@ -125,6 +134,17 @@ function stripLibraryMetadata(payload) {
     delete cloned._libraryHoverSource;
     delete cloned._librarySourceArea;
     delete cloned._librarySourceCount;
+    if (isThreeDDocumentPayload(cloned)) {
+        if (cloned.preview && typeof cloned.preview === 'object') {
+            delete cloned.preview.width;
+            delete cloned.preview.height;
+            delete cloned.preview.imageData;
+            delete cloned.preview.updatedAt;
+        }
+        if (cloned.render && typeof cloned.render === 'object') {
+            delete cloned.render.currentSamples;
+        }
+    }
     return cloned;
 }
 
@@ -215,6 +235,84 @@ function getSuggestedStitchProjectName(documentState, nameOverride = null) {
     return stripProjectExtension(nameOverride || fallback) || 'Stitch Project';
 }
 
+function getSuggestedThreeDProjectName(documentState, nameOverride = null) {
+    const normalized = normalizeThreeDDocument(documentState);
+    const firstAsset = normalized.scene.items.find((item) => item.kind !== 'light');
+    const fallback = firstAsset?.name || '3D Scene';
+    return stripProjectExtension(nameOverride || fallback) || '3D Scene';
+}
+
+const THREE_D_PRIMITIVE_LABELS = {
+    cube: 'Cube',
+    sphere: 'Sphere',
+    cone: 'Cone',
+    cylinder: 'Cylinder'
+};
+
+function createDefaultThreeDMaterial(overrides = {}) {
+    return {
+        preset: 'matte',
+        color: '#ffffff',
+        roughness: 0.65,
+        metalness: 0,
+        opacity: 1,
+        emissiveColor: '#ffffff',
+        emissiveIntensity: 0,
+        ior: 1.5,
+        transmission: 1,
+        thickness: 0.35,
+        attenuationColor: '#ffffff',
+        attenuationDistance: 1.5,
+        texture: null,
+        ...overrides
+    };
+}
+
+function createUniqueThreeDItemName(baseName, items = []) {
+    const desired = String(baseName || 'Item').trim() || 'Item';
+    const existingNames = new Set((items || []).map((item) => String(item?.name || '').trim().toLowerCase()).filter(Boolean));
+    if (!existingNames.has(desired.toLowerCase())) return desired;
+    let suffix = 2;
+    while (existingNames.has(`${desired} ${suffix}`.toLowerCase())) {
+        suffix += 1;
+    }
+    return `${desired} ${suffix}`;
+}
+
+function createDuplicateThreeDItemName(baseName, items = []) {
+    const desired = `${String(baseName || 'Item').trim() || 'Item'} Copy`;
+    const existingNames = new Set((items || []).map((item) => String(item?.name || '').trim().toLowerCase()).filter(Boolean));
+    if (!existingNames.has(desired.toLowerCase())) return desired;
+    let suffix = 2;
+    while (existingNames.has(`${desired} ${suffix}`.toLowerCase())) {
+        suffix += 1;
+    }
+    return `${desired} ${suffix}`;
+}
+
+function createThreeDPrimitiveItem(primitiveType = 'cube') {
+    const normalizedType = Object.prototype.hasOwnProperty.call(THREE_D_PRIMITIVE_LABELS, primitiveType)
+        ? primitiveType
+        : 'cube';
+    const label = THREE_D_PRIMITIVE_LABELS[normalizedType] || 'Primitive';
+    return {
+        id: createThreeDSceneItemId(normalizedType),
+        kind: 'primitive',
+        name: label,
+        visible: true,
+        locked: false,
+        position: [0, 0, 0],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        asset: {
+            format: 'primitive',
+            primitiveType: normalizedType,
+            name: label
+        },
+        material: createDefaultThreeDMaterial()
+    };
+}
+
 function buildLibraryPayload(documentState) {
     return {
         version: 'mns/v2',
@@ -234,6 +332,10 @@ function buildStitchLibraryPayload(documentState) {
     return stripEphemeralStitchState(documentState);
 }
 
+function buildThreeDLibraryPayload(documentState) {
+    return serializeThreeDDocument(normalizeThreeDDocument(documentState));
+}
+
 function normalizeLegacyDocumentPayload(payload) {
     if (!payload || typeof payload !== 'object') return payload;
     if (payload.version === 2 || payload.version === '2') {
@@ -248,6 +350,8 @@ function normalizeLegacyDocumentPayload(payload) {
 }
 
 function inferProjectTypeFromPayload(payload, fallbackType = null) {
+    if (fallbackType === '3d') return '3d';
+    if (isThreeDDocumentPayload(payload)) return '3d';
     if (fallbackType === 'stitch') return 'stitch';
     if (payload?.kind === 'stitch-document' || payload?.mode === 'stitch') return 'stitch';
     return 'studio';
@@ -265,7 +369,8 @@ function extractLibraryProjectMeta(rawPayload) {
 
 const activeLibraryOrigins = {
     studio: { id: null, name: null },
-    stitch: { id: null, name: null }
+    stitch: { id: null, name: null },
+    '3d': { id: null, name: null }
 };
 
 function getActiveLibraryOrigin(projectType) {
@@ -282,6 +387,7 @@ function clearActiveLibraryOrigin(projectType = null) {
     if (!projectType) {
         setActiveLibraryOrigin('studio', null, null);
         setActiveLibraryOrigin('stitch', null, null);
+        setActiveLibraryOrigin('3d', null, null);
         return;
     }
     setActiveLibraryOrigin(projectType, null, null);
@@ -312,6 +418,11 @@ function loadImageFromDataUrl(dataUrl) {
         img.onerror = reject;
         img.src = dataUrl;
     });
+}
+
+async function dataUrlToBlob(dataUrl) {
+    const response = await fetch(dataUrl);
+    return response.blob();
 }
 
 function normalizeLibraryHoverSource(source) {
@@ -487,7 +598,7 @@ function createEmptyBatchState() {
 function getInitialActiveSection() {
     try {
         const section = new URL(window.location.href).searchParams.get('section');
-        if (section === 'library' || section === 'stitch') return section;
+        if (section === 'library' || section === 'stitch' || section === '3d') return section;
         return 'editor';
     } catch (_error) {
         return 'editor';
@@ -499,6 +610,7 @@ function syncSectionUrl(section) {
         const url = new URL(window.location.href);
         if (section === 'library') url.searchParams.set('section', 'library');
         else if (section === 'stitch') url.searchParams.set('section', 'stitch');
+        else if (section === '3d') url.searchParams.set('section', '3d');
         else url.searchParams.delete('section');
         window.history.replaceState(null, '', url);
     } catch (_error) {
@@ -522,6 +634,7 @@ function createInitialState() {
             batch: createEmptyBatchState()
         },
         stitchDocument: createEmptyStitchDocument('light'),
+        threeDDocument: createEmptyThreeDDocument(),
         ui: {
             activeSection: getInitialActiveSection(),
             compareOpen: false,
@@ -736,6 +849,22 @@ window.addEventListener('DOMContentLoaded', async () => {
         store.setState((state) => ({ ...state, stitchDocument: next }), meta);
     }
 
+    function updateThreeDDocument(mutator, meta = { render: false }) {
+        const previous = store.getState().threeDDocument;
+        const next = normalizeThreeDDocument(mutator(previous));
+        store.setState((state) => ({ ...state, threeDDocument: next }), meta);
+    }
+
+    function isThreeDRenderJobActive() {
+        return !!store.getState().threeDDocument?.renderJob?.active;
+    }
+
+    function ensureThreeDSceneUnlocked(actionLabel = 'editing the 3D scene') {
+        if (!isThreeDRenderJobActive()) return true;
+        setNotice(`Abort the active 3D render before ${actionLabel}.`, 'warning', 6000);
+        return false;
+    }
+
     function updateInstance(instanceId, updater, meta = { render: true }) {
         updateDocument((document) => ({
             ...document,
@@ -809,7 +938,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function commitActiveSection(section) {
-        const nextSection = section === 'library' ? 'library' : section === 'stitch' ? 'stitch' : 'editor';
+        const nextSection = section === 'library' ? 'library' : section === 'stitch' ? 'stitch' : section === '3d' ? '3d' : 'editor';
         if (nextSection !== 'editor') stopPlayback();
         syncSectionUrl(nextSection);
         store.setState((state) => ({
@@ -837,6 +966,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     let projectAdapters = null;
 
     function getProjectTypeForSection(section) {
+        if (section === '3d') return '3d';
         return section === 'stitch' ? 'stitch' : 'studio';
     }
 
@@ -867,6 +997,63 @@ window.addEventListener('DOMContentLoaded', async () => {
         const normalized = normalizeStitchDocument(documentState);
         if (!normalized.candidates.length) return {};
         return stitchEngine.buildCandidatePreviewMap(normalized);
+    }
+
+    async function createThreeDModelItemsFromFiles(files) {
+        const items = [];
+        for (const file of files || []) {
+            const extension = String(file?.name || '').split('.').pop()?.toLowerCase() || '';
+            if (extension !== 'glb' && extension !== 'gltf') continue;
+            const dataUrl = await fileToDataUrl(file);
+            items.push({
+                id: createThreeDSceneItemId('model'),
+                kind: 'model',
+                name: stripProjectExtension(file.name) || 'Model',
+                visible: true,
+                locked: false,
+                position: [0, 0, 0],
+                rotation: [0, 0, 0],
+                scale: [1, 1, 1],
+                asset: {
+                    format: extension,
+                    name: file.name,
+                    mimeType: file.type || '',
+                    dataUrl
+                }
+            });
+        }
+        return items;
+    }
+
+    async function createThreeDImagePlaneItemsFromFiles(files) {
+        const items = [];
+        for (const file of files || []) {
+            if (!String(file?.type || '').startsWith('image/')) continue;
+            const dataUrl = await fileToDataUrl(file);
+            const image = await loadImageFromDataUrl(dataUrl);
+            items.push({
+                id: createThreeDSceneItemId('image-plane'),
+                kind: 'image-plane',
+                name: stripProjectExtension(file.name) || 'Image Plane',
+                visible: true,
+                locked: false,
+                position: [0, 0, 0],
+                rotation: [0, 0, 0],
+                scale: [1, 1, 1],
+                asset: {
+                    format: 'image',
+                    name: file.name,
+                    mimeType: file.type || '',
+                    dataUrl,
+                    width: image.naturalWidth || image.width || 1,
+                    height: image.naturalHeight || image.height || 1
+                },
+                material: createDefaultThreeDMaterial({
+                    roughness: 1
+                })
+            });
+        }
+        return items;
     }
 
     async function getMatchingLibraryEntries(payload, projectType = null) {
@@ -1612,6 +1799,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             const preferExisting = !!options.preferExisting;
             const state = store.getState();
             const projectType = options.projectType || getProjectTypeForSection(state.ui.activeSection);
+            if (projectType === '3d' && isThreeDRenderJobActive()) {
+                setNotice('Abort the active 3D render before saving this scene to the Library.', 'warning', 6000);
+                return null;
+            }
             const adapter = projectAdapters?.getAdapter(projectType);
             if (!adapter) {
                 setNotice('This project type cannot be saved to the Library yet.', 'error', 7000);
@@ -2281,6 +2472,467 @@ window.addEventListener('DOMContentLoaded', async () => {
                     layerStack: document.layerStack.map((instance) => instance.instanceId === current.instanceId ? { ...instance, params: { ...instance.params, tiltShiftCenterX: x, tiltShiftCenterY: y } } : instance)
                 }));
             }
+        },
+        async newThreeDProject() {
+            if (!ensureThreeDSceneUnlocked('starting a new 3D scene')) return;
+            if (!await ensureProjectCanBeReplaced('3d', 'starting a new 3D scene')) return;
+            updateThreeDDocument(() => createEmptyThreeDDocument());
+            clearActiveLibraryOrigin('3d');
+            commitActiveSection('3d');
+            setNotice('Started a new 3D scene.', 'success');
+        },
+        async importThreeDModelFiles(files) {
+            if (!ensureThreeDSceneUnlocked('importing more 3D models')) return;
+            const items = await createThreeDModelItemsFromFiles(files);
+            if (!items.length) {
+                throw new Error('Choose one or more `.glb` or self-contained `.gltf` files.');
+            }
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const existingAssets = normalized.scene.items.filter((item) => item.kind !== 'light').length;
+                const placedItems = items.map((item, index) => ({
+                    ...item,
+                    position: [(existingAssets + index) * 2.4, 0, 0]
+                }));
+                const nextItems = [...normalized.scene.items, ...placedItems];
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: nextItems
+                    },
+                    selection: {
+                        itemId: placedItems[placedItems.length - 1]?.id || normalized.selection.itemId || null
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+            commitActiveSection('3d');
+        },
+        async importThreeDImageFiles(files) {
+            if (!ensureThreeDSceneUnlocked('adding image planes')) return;
+            const items = await createThreeDImagePlaneItemsFromFiles(files);
+            if (!items.length) {
+                throw new Error('Choose one or more image files to turn into planes.');
+            }
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const existingAssets = normalized.scene.items.filter((item) => item.kind !== 'light').length;
+                const placedItems = items.map((item, index) => ({
+                    ...item,
+                    position: [(existingAssets + index) * 2.4, 0, 0]
+                }));
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: [...normalized.scene.items, ...placedItems]
+                    },
+                    selection: {
+                        itemId: placedItems[placedItems.length - 1]?.id || normalized.selection.itemId || null
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+            commitActiveSection('3d');
+        },
+        setThreeDSelection(itemId) {
+            if (!ensureThreeDSceneUnlocked('changing the selected 3D item')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                selection: {
+                    ...document.selection,
+                    itemId: itemId || null
+                }
+            }));
+        },
+        updateThreeDSceneSettings(patch = {}) {
+            if (!ensureThreeDSceneUnlocked('changing 3D scene settings')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    ...patch
+                }
+            }));
+        },
+        updateThreeDRenderSettings(patch = {}) {
+            if (!ensureThreeDSceneUnlocked('changing 3D render settings')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                render: {
+                    ...document.render,
+                    ...patch,
+                    currentSamples: 0
+                }
+            }));
+        },
+        updateThreeDView(patch = {}) {
+            if (!ensureThreeDSceneUnlocked('moving the 3D camera')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                view: {
+                    ...document.view,
+                    ...patch
+                }
+            }));
+        },
+        resetThreeDCamera() {
+            if (!ensureThreeDSceneUnlocked('resetting the 3D camera')) return;
+            const defaults = createEmptyThreeDDocument().view;
+            updateThreeDDocument((document) => ({
+                ...document,
+                view: {
+                    ...document.view,
+                    cameraPosition: [...defaults.cameraPosition],
+                    cameraTarget: [...defaults.cameraTarget],
+                    fov: defaults.fov,
+                    near: defaults.near,
+                    far: defaults.far
+                }
+            }));
+        },
+        saveThreeDCameraPreset(name, snapshot = null) {
+            const presetName = String(name || '').trim() || `Camera ${store.getState().threeDDocument.view.presets.length + 1}`;
+            updateThreeDDocument((document) => {
+                const source = snapshot || document.view;
+                const preset = {
+                    id: createThreeDCameraPresetId(),
+                    name: presetName,
+                    cameraPosition: [...(source.cameraPosition || document.view.cameraPosition)],
+                    cameraTarget: [...(source.cameraTarget || document.view.cameraTarget)],
+                    fov: Number(source.fov || document.view.fov || 50)
+                };
+                return {
+                    ...document,
+                    view: {
+                        ...document.view,
+                        presets: [...document.view.presets, preset]
+                    }
+                };
+            });
+        },
+        applyThreeDCameraPreset(presetId) {
+            if (!ensureThreeDSceneUnlocked('jumping to a saved camera')) return;
+            if (!presetId) return;
+            updateThreeDDocument((document) => {
+                const preset = document.view.presets.find((entry) => entry.id === presetId);
+                if (!preset) return document;
+                return {
+                    ...document,
+                    view: {
+                        ...document.view,
+                        cameraPosition: [...preset.cameraPosition],
+                        cameraTarget: [...preset.cameraTarget],
+                        fov: preset.fov
+                    }
+                };
+            });
+        },
+        deleteThreeDCameraPreset(presetId) {
+            if (!presetId) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                view: {
+                    ...document.view,
+                    presets: document.view.presets.filter((entry) => entry.id !== presetId)
+                }
+            }));
+        },
+        addThreeDLight(lightType = 'directional') {
+            if (!ensureThreeDSceneUnlocked('adding a light')) return;
+            const lightName = lightType === 'point'
+                ? 'Point Light'
+                : lightType === 'spot'
+                    ? 'Spot Light'
+                    : 'Directional Light';
+            const lightPosition = lightType === 'directional'
+                ? [5, 8, 5]
+                : lightType === 'spot'
+                    ? [0, 8, 4]
+                    : [0, 5, 0];
+            const lightItem = {
+                id: createThreeDSceneItemId('light'),
+                kind: 'light',
+                name: lightName,
+                visible: true,
+                locked: false,
+                position: lightPosition,
+                rotation: [0, 0, 0],
+                scale: [1, 1, 1],
+                light: {
+                    lightType,
+                    color: '#ffffff',
+                    intensity: lightType === 'directional' ? 1.5 : 2,
+                    distance: 50,
+                    angle: Math.PI / 6,
+                    penumbra: 0.35,
+                    decay: 1,
+                    castShadow: true
+                }
+            };
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: [...document.scene.items, lightItem]
+                },
+                selection: {
+                    itemId: lightItem.id
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+            commitActiveSection('3d');
+        },
+        addThreeDPrimitive(primitiveType = 'cube') {
+            if (!ensureThreeDSceneUnlocked('adding a primitive')) return;
+            const primitiveItem = createThreeDPrimitiveItem(primitiveType);
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const existingAssets = normalized.scene.items.filter((item) => item.kind !== 'light').length;
+                const nextName = createUniqueThreeDItemName(primitiveItem.name, normalized.scene.items);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: [
+                            ...normalized.scene.items,
+                            {
+                                ...primitiveItem,
+                                name: nextName,
+                                asset: {
+                                    ...primitiveItem.asset,
+                                    name: nextName
+                                },
+                                position: [existingAssets * 2.2, 0, 0]
+                            }
+                        ]
+                    },
+                    selection: {
+                        itemId: primitiveItem.id
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+            commitActiveSection('3d');
+        },
+        updateThreeDItemTransform(itemId, patch = {}) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('editing transforms')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: document.scene.items.map((item) => item.id === itemId
+                        ? {
+                            ...item,
+                            ...(patch.position ? { position: [...patch.position] } : {}),
+                            ...(patch.rotation ? { rotation: [...patch.rotation] } : {}),
+                            ...(patch.scale ? { scale: [...patch.scale] } : {})
+                        }
+                        : item)
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+        },
+        resetThreeDItemTransform(itemId) {
+            actions.updateThreeDItemTransform(itemId, {
+                position: [0, 0, 0],
+                rotation: [0, 0, 0],
+                scale: [1, 1, 1]
+            });
+        },
+        duplicateThreeDItem(itemId) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('duplicating a 3D item')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const source = normalized.scene.items.find((item) => item.id === itemId);
+                if (!source) return normalized;
+                const offsetStep = Math.max(Number(normalized.view.snapTranslationStep || 0), 0.75);
+                const duplicate = JSON.parse(JSON.stringify(source));
+                duplicate.id = createThreeDSceneItemId(source.kind === 'light' ? 'light' : source.kind || 'item');
+                duplicate.name = createDuplicateThreeDItemName(source.name, normalized.scene.items);
+                duplicate.position = [
+                    Number(source.position?.[0] || 0) + offsetStep,
+                    Number(source.position?.[1] || 0),
+                    Number(source.position?.[2] || 0) + offsetStep
+                ];
+                if (duplicate.kind !== 'light' && duplicate.asset?.format === 'primitive') {
+                    duplicate.asset.name = duplicate.name;
+                }
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: [...normalized.scene.items, duplicate]
+                    },
+                    selection: {
+                        itemId: duplicate.id
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+            commitActiveSection('3d');
+        },
+        renameThreeDItem(itemId, name) {
+            const trimmedName = String(name || '').trim();
+            if (!itemId || !trimmedName) return;
+            if (!ensureThreeDSceneUnlocked('renaming a 3D item')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: document.scene.items.map((item) => item.id === itemId
+                        ? {
+                            ...item,
+                            name: trimmedName
+                        }
+                        : item)
+                }
+            }));
+        },
+        deleteThreeDItem(itemId) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('deleting a 3D item')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: document.scene.items
+                        .filter((item) => item.id !== itemId)
+                        .map((item) => item.kind === 'light' && item.light?.targetItemId === itemId
+                            ? {
+                                ...item,
+                                light: {
+                                    ...item.light,
+                                    targetItemId: null
+                                }
+                            }
+                            : item)
+                },
+                selection: {
+                    itemId: document.selection.itemId === itemId ? null : document.selection.itemId
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+        },
+        updateThreeDMaterial(itemId, patch = {}) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('changing materials')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: document.scene.items.map((item) => item.id === itemId && item.kind !== 'light'
+                        ? {
+                            ...item,
+                            material: {
+                                ...item.material,
+                                ...patch,
+                                texture: patch.texture === undefined
+                                    ? item.material?.texture || null
+                                    : patch.texture
+                                        ? {
+                                            ...(item.material?.texture || {}),
+                                            ...patch.texture
+                                        }
+                                        : null
+                            }
+                        }
+                        : item)
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+        },
+        async setThreeDMaterialTexture(itemId, file) {
+            if (!itemId || !file) return;
+            if (!ensureThreeDSceneUnlocked('uploading a texture')) return;
+            if (!String(file.type || '').startsWith('image/')) {
+                throw new Error('Choose an image file to use as a texture.');
+            }
+            const dataUrl = await fileToDataUrl(file);
+            actions.updateThreeDMaterial(itemId, {
+                texture: {
+                    name: file.name,
+                    mimeType: file.type || '',
+                    dataUrl,
+                    repeat: [1, 1],
+                    offset: [0, 0],
+                    rotation: 0
+                }
+            });
+        },
+        clearThreeDMaterialTexture(itemId) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('removing a texture')) return;
+            actions.updateThreeDMaterial(itemId, { texture: null });
+        },
+        updateThreeDLight(itemId, patch = {}) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('editing lights')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    items: document.scene.items.map((item) => item.id === itemId && item.kind === 'light'
+                        ? {
+                            ...item,
+                            light: {
+                                ...item.light,
+                                ...patch
+                            }
+                        }
+                        : item)
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+        },
+        setThreeDRenderJob(patch = {}, meta = { render: false }) {
+            updateThreeDDocument((document) => ({
+                ...document,
+                renderJob: {
+                    ...document.renderJob,
+                    ...patch
+                }
+            }), meta);
+        },
+        resetThreeDRenderJob(patch = {}, meta = { render: false }) {
+            const defaults = createEmptyThreeDDocument().renderJob;
+            updateThreeDDocument((document) => ({
+                ...document,
+                renderJob: {
+                    ...defaults,
+                    ...patch
+                }
+            }), meta);
         }
     };
 
@@ -2455,6 +3107,100 @@ window.addEventListener('DOMContentLoaded', async () => {
                 setNotice(`Loaded "${libraryName || 'project'}" from Library.`, 'success');
                 return true;
             }
+        },
+        {
+            type: '3d',
+            label: '3D Scene',
+            getCurrentDocument(state) {
+                return state.threeDDocument;
+            },
+            isEmpty(document) {
+                return !document?.scene?.items?.length;
+            },
+            canSave(document) {
+                return !!document?.scene?.items?.length;
+            },
+            emptyNotice: 'Add at least one 3D asset to the scene before saving to the Library.',
+            suggestName(document, nameOverride = null) {
+                return getSuggestedThreeDProjectName(document, nameOverride);
+            },
+            serializeDocument(document) {
+                return buildThreeDLibraryPayload(document);
+            },
+            validatePayload(rawPayload) {
+                return normalizeThreeDDocument(stripLibraryMetadata(normalizeLegacyDocumentPayload(rawPayload)));
+            },
+            async captureDocument(document) {
+                const normalized = normalizeThreeDDocument(document);
+                let preview = null;
+                try {
+                    preview = await view?.captureThreeDPreview?.();
+                } catch (_error) {
+                    preview = null;
+                }
+                const payload = this.serializeDocument({
+                    ...normalized,
+                    preview: preview
+                        ? {
+                            imageData: preview.dataUrl,
+                            width: preview.width,
+                            height: preview.height,
+                            updatedAt: Date.now()
+                        }
+                        : normalized.preview
+                });
+                const blob = preview?.blob || (payload.preview?.imageData ? await dataUrlToBlob(payload.preview.imageData) : await new Promise((resolve) => {
+                    const canvas = globalThis.document.createElement('canvas');
+                    canvas.width = 320;
+                    canvas.height = 200;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = payload.scene.backgroundColor || '#202020';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.fillStyle = '#f4f4f4';
+                    ctx.font = '20px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('3D Scene', canvas.width / 2, canvas.height / 2);
+                    canvas.toBlob(resolve, 'image/png');
+                }));
+                const summary = summarizeThreeDDocument(payload);
+                return {
+                    payload,
+                    blob,
+                    summary
+                };
+            },
+            async prepareImportedProject(rawPayload) {
+                const payload = this.validatePayload(rawPayload);
+                const blob = payload.preview?.imageData
+                    ? await dataUrlToBlob(payload.preview.imageData)
+                    : await new Promise((resolve) => {
+                        const canvas = globalThis.document.createElement('canvas');
+                        canvas.width = 320;
+                        canvas.height = 200;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = payload.scene.backgroundColor || '#202020';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.fillStyle = '#f4f4f4';
+                        ctx.font = '20px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('3D Scene', canvas.width / 2, canvas.height / 2);
+                        canvas.toBlob(resolve, 'image/png');
+                    });
+                return {
+                    payload,
+                    blob,
+                    summary: summarizeThreeDDocument(payload)
+                };
+            },
+            async restorePayload(rawPayload, libraryId = null, libraryName = null) {
+                if (!ensureThreeDSceneUnlocked(`loading "${libraryName || 'this 3D Library project'}"`)) return false;
+                const validated = this.validatePayload(rawPayload);
+                store.setState((current) => ({ ...current, threeDDocument: validated }), { render: false });
+                setActiveLibraryOrigin('3d', libraryId, libraryName);
+                commitActiveSection('3d');
+                setNotice(`Loaded "${libraryName || 'project'}" from Library.`, 'success');
+                return true;
+            }
         }
     ]);
 
@@ -2478,7 +3224,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             ? 'Browse saved projects in the Library, or switch to Editor to start a new one.'
             : store.getState().ui.activeSection === 'stitch'
                 ? 'Add two or more images in Stitch to start building a composite.'
-                : 'Load an image to start editing.',
+                : store.getState().ui.activeSection === '3d'
+                    ? 'Load .glb models or add image planes to start building a 3D scene.'
+                    : 'Load an image to start editing.',
         'info',
         6500
     );
