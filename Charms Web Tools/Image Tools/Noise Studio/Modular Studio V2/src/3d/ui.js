@@ -29,11 +29,19 @@ function getSelectedMaterial(state) {
 }
 
 function isMaterialItem(item) {
-    return item?.kind === 'model' || item?.kind === 'primitive';
+    return item?.kind === 'model' || item?.kind === 'primitive' || item?.kind === 'image-plane';
 }
 
 function isSliceCompatibleItem(item) {
     return item?.kind === 'model' || item?.kind === 'primitive';
+}
+
+function isTextItem(item) {
+    return item?.kind === 'text';
+}
+
+function isShapeItem(item) {
+    return item?.kind === 'shape-2d';
 }
 
 function formatRenderSize(job) {
@@ -48,6 +56,10 @@ function describeItemKind(item) {
             ? 'image plane'
             : item.kind === 'primitive'
                 ? item.asset?.primitiveType || 'primitive'
+                : item.kind === 'text'
+                    ? `${item.text?.mode === 'extruded' ? '3d' : 'flat'} text`
+                    : item.kind === 'shape-2d'
+                        ? `${item.shape2d?.type || 'shape'} 2d`
                 : item.asset?.format || 'model';
     const cutCount = Number(item?.booleanCuts?.length || 0);
     return cutCount > 0 ? `${baseLabel}, ${cutCount} cut${cutCount === 1 ? '' : 's'}` : baseLabel;
@@ -66,6 +78,12 @@ function buildEngineSyncKey(documentState) {
         view: documentState?.view
             ? {
                 cameraMode: documentState.view.cameraMode,
+                projection: documentState.view.projection,
+                navigationMode: documentState.view.navigationMode,
+                lockedView: documentState.view.lockedView,
+                lockedRotation: documentState.view.lockedRotation,
+                orthoZoom: documentState.view.orthoZoom,
+                wheelMode: documentState.view.wheelMode,
                 linkPlaneScale: documentState.view.linkPlaneScale,
                 snapTranslationStep: documentState.view.snapTranslationStep,
                 snapRotationDegrees: documentState.view.snapRotationDegrees,
@@ -76,6 +94,7 @@ function buildEngineSyncKey(documentState) {
                 far: documentState.view.far
             }
             : null,
+        assets: documentState?.assets || null,
         render: documentState?.render
             ? {
                 mode: documentState.render.mode,
@@ -97,8 +116,7 @@ function buildEngineSyncKey(documentState) {
 const PANEL_TABS = [
     { id: 'outliner', label: 'Outliner' },
     { id: 'add', label: 'Add' },
-    { id: 'object', label: 'Object' },
-    { id: 'material', label: 'Material' },
+    { id: 'selection', label: 'Selection' },
     { id: 'scene', label: 'Scene' },
     { id: 'render', label: 'Render' },
     { id: 'views', label: 'Views' }
@@ -106,10 +124,9 @@ const PANEL_TABS = [
 
 const PANEL_TAB_META = {
     outliner: { title: 'Outliner', subtitle: 'Scene items, visibility, and locking' },
-    add: { title: 'Add', subtitle: 'Import models, image planes, lights, and primitives' },
-    object: { title: 'Object', subtitle: 'Selection, transforms, and slicing tools' },
-    material: { title: 'Material', subtitle: 'Surface, texture, and shading controls' },
-    scene: { title: 'Scene', subtitle: 'Background, camera, and navigation options' },
+    add: { title: 'Add', subtitle: 'Import assets and add text, shapes, lights, and primitives' },
+    selection: { title: 'Selection', subtitle: 'Focused editing for the selected item' },
+    scene: { title: 'Scene', subtitle: 'World light, background, and camera options' },
     render: { title: 'Render', subtitle: 'Viewport mode, quality, and export' },
     views: { title: 'Views', subtitle: 'Camera presets and framing shortcuts' }
 };
@@ -119,7 +136,7 @@ const DEFAULT_WORKSPACE = {
     panelTab: 'outliner',
     taskTabs: {
         layout: { leftTab: 'outliner', rightTab: 'scene' },
-        model: { leftTab: 'add', rightTab: 'object' },
+        model: { leftTab: 'add', rightTab: 'selection' },
         render: { leftTab: 'views', rightTab: 'render' }
     }
 };
@@ -128,13 +145,15 @@ function getWorkspaceState(documentState) {
     const workspace = documentState?.workspace || DEFAULT_WORKSPACE;
     const taskView = workspace.taskView || DEFAULT_WORKSPACE.taskView;
     const fallbackPanelTab = taskView === 'model'
-        ? 'object'
+        ? 'selection'
         : taskView === 'render'
             ? 'render'
             : 'outliner';
     return {
         taskView,
-        panelTab: workspace.panelTab || fallbackPanelTab
+        panelTab: workspace.panelTab === 'object' || workspace.panelTab === 'material'
+            ? 'selection'
+            : (workspace.panelTab || fallbackPanelTab)
     };
 }
 
@@ -144,7 +163,7 @@ function describeWorkspacePanel(side, tabId) {
 
 function inferTaskViewFromPanel(panelTab) {
     if (panelTab === 'render') return 'render';
-    if (panelTab === 'add' || panelTab === 'object' || panelTab === 'material') return 'model';
+    if (panelTab === 'add' || panelTab === 'selection') return 'model';
     return 'layout';
 }
 
@@ -158,6 +177,8 @@ function describeHierarchyBadge(item) {
             : item.asset?.primitiveType === 'cone'
                 ? 'Cone'
                 : 'Cube';
+    if (item?.kind === 'text') return 'Text';
+    if (item?.kind === 'shape-2d') return item.shape2d?.type === 'circle' ? 'Circle' : 'Square';
     return item?.asset?.format === 'gltf' ? 'GLTF' : 'GLB';
 }
 
@@ -304,7 +325,7 @@ export function createThreeDWorkspace(actions, store) {
                                 <input type="number" min="0" max="360" step="1" class="control-number" data-threed-role="snap-rotation-degrees">
                             </label>
                         </div>
-                        <div style="font-size:11px; line-height:1.45; opacity:0.72;">Fly mode: click the viewport, then use right-drag to look and <code>W A S D Q E</code> to move. Hold <code>Shift</code> to boost speed.</div>
+                            <div style="font-size:11px; line-height:1.45; opacity:0.72;">Fly mode: click the viewport, then use right-drag to look and <code>W A S D Q E</code> to move. Hold <code>Shift</code> to boost speed.</div>
                         <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
                             <button type="button" class="primary-button" data-threed-action="render-scene">Render PNG</button>
                             <button type="button" class="toolbar-button" data-threed-action="abort-render">Abort</button>
@@ -524,6 +545,8 @@ export function createThreeDWorkspace(actions, store) {
         </div>
         <input type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json" data-threed-role="model-input" multiple hidden>
         <input type="file" accept="image/*" data-threed-role="image-input" multiple hidden>
+        <input type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2" data-threed-role="font-input" multiple hidden>
+        <input type="file" accept=".hdr" data-threed-role="hdri-input" hidden>
         <input type="file" accept="image/*" data-threed-role="texture-input" hidden>
     `;
 
@@ -531,6 +554,8 @@ export function createThreeDWorkspace(actions, store) {
         canvasContainer: root.querySelector('.threed-canvas-container'),
         modelInput: root.querySelector('[data-threed-role="model-input"]'),
         imageInput: root.querySelector('[data-threed-role="image-input"]'),
+        fontInput: root.querySelector('[data-threed-role="font-input"]'),
+        hdriInput: root.querySelector('[data-threed-role="hdri-input"]'),
         textureInput: root.querySelector('[data-threed-role="texture-input"]'),
         hierarchy: root.querySelector('[data-threed-role="hierarchy"]'),
         cameraPresets: root.querySelector('[data-threed-role="camera-presets"]'),
@@ -663,7 +688,7 @@ export function createThreeDWorkspace(actions, store) {
 
         const style = document.createElement('style');
         style.textContent = `
-            .threed-shell { --threed-bg:#000000; --threed-panel:#000000; --threed-panel-alt:#050505; --threed-border:#b8b2a3; --threed-border-soft:rgba(184,178,163,0.28); --threed-accent:rgba(184,178,163,0.14); --threed-text:#ffffff; --threed-muted:#b8b2a3; width:100%; height:100%; min-width:0; min-height:0; display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); gap:8px; padding:8px; background:var(--threed-bg); color:var(--threed-text); font-size:11px; line-height:1.24; overflow:hidden; }
+            .threed-shell { --threed-bg:#000000; --threed-panel:#000000; --threed-panel-alt:#050505; --threed-border:#b8b2a3; --threed-border-soft:rgba(184,178,163,0.28); --threed-accent:rgba(184,178,163,0.14); --threed-text:#ffffff; --threed-muted:#b8b2a3; position:relative; width:100%; height:100%; min-width:0; min-height:0; display:grid; grid-template-columns:minmax(220px, 280px) minmax(0, 1fr); gap:8px; padding:8px; background:var(--threed-bg); color:var(--threed-text); font-size:11px; line-height:1.24; overflow:hidden; }
             .threed-shell button, .threed-shell input, .threed-shell select, .threed-render-dialog button, .threed-render-dialog input, .threed-render-dialog select { font-size:11px !important; }
             .threed-shell .control-number, .threed-shell .custom-select, .threed-shell input[type="text"], .threed-shell input[type="number"], .threed-render-dialog .control-number { min-height:22px; padding:2px 6px !important; border-radius:4px; background:#000000; color:var(--threed-text); border:1px solid var(--threed-border); }
             .threed-shell .primary-button, .threed-shell .secondary-button, .threed-shell .toolbar-button, .threed-render-dialog .primary-button, .threed-render-dialog .toolbar-button { min-height:22px; padding:2px 7px !important; border-radius:4px; background:#000000; color:var(--threed-text); border:1px solid var(--threed-border); }
@@ -709,6 +734,11 @@ export function createThreeDWorkspace(actions, store) {
             .threed-mini-bar .toolbar-button, .threed-mini-bar .secondary-button { min-height:20px; padding:0 6px !important; border-radius:3px; }
             .threed-overlay-chip { display:inline-flex; align-items:center; gap:4px; min-height:20px; padding:0 6px; border:1px solid var(--threed-border-soft); background:rgba(0,0,0,0.92); color:var(--threed-text); font-size:10px; white-space:nowrap; }
             .threed-overlay-chip.is-muted { color:var(--threed-muted); }
+            .threed-context-menu-host { position:absolute; inset:0; z-index:18; pointer-events:none; }
+            .threed-context-menu { position:absolute; min-width:180px; max-width:240px; display:flex; flex-direction:column; gap:2px; padding:4px; border:1px solid var(--threed-border); background:#000000; box-shadow:0 18px 38px rgba(0,0,0,0.38); pointer-events:auto; }
+            .threed-context-menu button { width:100%; min-height:22px; padding:0 8px; display:flex; align-items:center; justify-content:space-between; gap:8px; border:1px solid transparent; background:transparent; color:var(--threed-text); text-align:left; }
+            .threed-context-menu button:hover { background:var(--threed-accent); border-color:var(--threed-border-soft); }
+            .threed-context-menu span:last-child { color:var(--threed-muted); }
             .threed-status-pill { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
             .threed-pathtrace-loading { position:absolute; inset:0; z-index:6; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(8,10,14,0.62); pointer-events:none; }
             .threed-pathtrace-loading.is-active { display:flex; }
@@ -756,8 +786,7 @@ export function createThreeDWorkspace(actions, store) {
 
         const outlinerPanel = createPanel('outliner');
         const addPanel = createPanel('add');
-        const objectPanel = createPanel('object');
-        const materialPanel = createPanel('material');
+        const selectionPanel = createPanel('selection');
         const scenePanel = createPanel('scene');
         const renderPanel = createPanel('render');
         const viewsPanel = createPanel('views');
@@ -780,25 +809,297 @@ export function createThreeDWorkspace(actions, store) {
             addPanel.body.appendChild(foldout.element);
         }
 
+        const addCanvasItems = document.createElement('div');
+        addCanvasItems.className = 'threed-button-row threed-button-row-2';
+        addCanvasItems.innerHTML = `
+            <button type="button" class="secondary-button" data-threed-action="add-text">Add Text</button>
+            <button type="button" class="secondary-button" data-threed-action="upload-fonts">Upload Fonts</button>
+            <button type="button" class="secondary-button" data-threed-action="add-shape" data-shape-type="square">Add Square</button>
+            <button type="button" class="secondary-button" data-threed-action="add-shape" data-shape-type="circle">Add Circle</button>
+        `;
+        addPanel.body.appendChild(addCanvasItems);
+
         if (inspectorBody) {
-            objectPanel.body.appendChild(inspectorBody);
+            selectionPanel.body.appendChild(inspectorBody);
         }
         if (refs.materialFields) {
             compactNode(refs.materialFields);
-            materialPanel.body.appendChild(refs.materialFields);
+            const materialFoldout = createFoldout('Material');
+            materialFoldout.body.appendChild(refs.materialFields);
+            selectionPanel.body.appendChild(materialFoldout.element);
         }
+
+        const textFields = document.createElement('div');
+        textFields.dataset.threedRole = 'text-fields';
+        textFields.style.display = 'none';
+        textFields.style.flexDirection = 'column';
+        textFields.style.gap = '10px';
+        textFields.innerHTML = `
+            <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:10px; display:flex; flex-direction:column; gap:10px;">
+                <label style="display:flex; flex-direction:column; gap:6px;">
+                    <span>Text Content</span>
+                    <textarea class="control-number" rows="4" data-threed-role="text-content"></textarea>
+                </label>
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Mode</span>
+                        <select class="custom-select" data-threed-role="text-mode">
+                            <option value="flat">Flat</option>
+                            <option value="extruded">Extruded</option>
+                        </select>
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Font Source</span>
+                        <select class="custom-select" data-threed-role="text-font-source-type">
+                            <option value="system">System</option>
+                            <option value="upload">Upload</option>
+                        </select>
+                    </label>
+                </div>
+                <label data-threed-role="text-font-family-field" style="display:flex; flex-direction:column; gap:6px;">
+                    <span>Font Family</span>
+                    <input type="text" class="control-number" data-threed-role="text-font-family" placeholder="Arial">
+                </label>
+                <label data-threed-role="text-font-upload-field" style="display:none; flex-direction:column; gap:6px;">
+                    <span>Uploaded Font</span>
+                    <div style="display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px;">
+                        <select class="custom-select" data-threed-role="text-font-asset"></select>
+                        <button type="button" class="toolbar-button" data-threed-action="upload-fonts">Upload</button>
+                    </div>
+                </label>
+                <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
+                    <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <span>Color</span>
+                        <input type="color" data-threed-role="text-color">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Opacity</span>
+                        <input type="range" min="0.01" max="1" step="0.01" data-threed-role="text-opacity">
+                    </label>
+                </div>
+                <label class="check-row">
+                    <input type="checkbox" data-threed-role="text-glow-enabled">
+                    <span>Glow</span>
+                </label>
+                <div data-threed-role="text-glow-fields" style="display:none; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
+                    <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <span>Glow Color</span>
+                        <input type="color" data-threed-role="text-glow-color">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Glow Intensity</span>
+                        <input type="range" min="0" max="50" step="0.1" data-threed-role="text-glow-intensity">
+                    </label>
+                </div>
+                <div data-threed-role="text-extrude-fields" style="display:none; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Depth</span>
+                        <input type="number" min="0.01" max="10" step="0.01" class="control-number" data-threed-role="text-depth">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Bevel Size</span>
+                        <input type="number" min="0" max="2" step="0.01" class="control-number" data-threed-role="text-bevel-size">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Bevel Thickness</span>
+                        <input type="number" min="0" max="2" step="0.01" class="control-number" data-threed-role="text-bevel-thickness">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Bevel Segments</span>
+                        <input type="number" min="1" max="32" step="1" class="control-number" data-threed-role="text-bevel-segments">
+                    </label>
+                </div>
+                <div>
+                    <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+                        <strong>Character Flips</strong>
+                        <span style="font-size:10px; color:#b8b2a3;">Per character</span>
+                    </div>
+                    <div data-threed-role="text-character-overrides" style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"></div>
+                </div>
+            </div>
+        `;
+        refs.textFields = textFields;
+        refs.textContent = textFields.querySelector('[data-threed-role="text-content"]');
+        refs.textMode = textFields.querySelector('[data-threed-role="text-mode"]');
+        refs.textFontSourceType = textFields.querySelector('[data-threed-role="text-font-source-type"]');
+        refs.textFontFamilyField = textFields.querySelector('[data-threed-role="text-font-family-field"]');
+        refs.textFontFamily = textFields.querySelector('[data-threed-role="text-font-family"]');
+        refs.textFontUploadField = textFields.querySelector('[data-threed-role="text-font-upload-field"]');
+        refs.textFontAsset = textFields.querySelector('[data-threed-role="text-font-asset"]');
+        refs.textColor = textFields.querySelector('[data-threed-role="text-color"]');
+        refs.textOpacity = textFields.querySelector('[data-threed-role="text-opacity"]');
+        refs.textGlowEnabled = textFields.querySelector('[data-threed-role="text-glow-enabled"]');
+        refs.textGlowFields = textFields.querySelector('[data-threed-role="text-glow-fields"]');
+        refs.textGlowColor = textFields.querySelector('[data-threed-role="text-glow-color"]');
+        refs.textGlowIntensity = textFields.querySelector('[data-threed-role="text-glow-intensity"]');
+        refs.textExtrudeFields = textFields.querySelector('[data-threed-role="text-extrude-fields"]');
+        refs.textDepth = textFields.querySelector('[data-threed-role="text-depth"]');
+        refs.textBevelSize = textFields.querySelector('[data-threed-role="text-bevel-size"]');
+        refs.textBevelThickness = textFields.querySelector('[data-threed-role="text-bevel-thickness"]');
+        refs.textBevelSegments = textFields.querySelector('[data-threed-role="text-bevel-segments"]');
+        refs.textCharacterOverrides = textFields.querySelector('[data-threed-role="text-character-overrides"]');
+        selectionPanel.body.appendChild(textFields);
+
+        const shapeFields = document.createElement('div');
+        shapeFields.dataset.threedRole = 'shape-fields';
+        shapeFields.style.display = 'none';
+        shapeFields.style.flexDirection = 'column';
+        shapeFields.style.gap = '10px';
+        shapeFields.innerHTML = `
+            <div style="border-top:1px solid rgba(255,255,255,0.08); padding-top:10px; display:flex; flex-direction:column; gap:10px;">
+                <label style="display:flex; flex-direction:column; gap:6px;">
+                    <span>Shape</span>
+                    <select class="custom-select" data-threed-role="shape-type">
+                        <option value="square">Square</option>
+                        <option value="circle">Circle</option>
+                    </select>
+                </label>
+                <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                    <span>Color</span>
+                    <input type="color" data-threed-role="shape-color">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:6px;">
+                    <span>Opacity</span>
+                    <input type="range" min="0.01" max="1" step="0.01" data-threed-role="shape-opacity">
+                </label>
+                <label class="check-row">
+                    <input type="checkbox" data-threed-role="shape-glow-enabled">
+                    <span>Glow</span>
+                </label>
+                <div data-threed-role="shape-glow-fields" style="display:none; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
+                    <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                        <span>Glow Color</span>
+                        <input type="color" data-threed-role="shape-glow-color">
+                    </label>
+                    <label style="display:flex; flex-direction:column; gap:6px;">
+                        <span>Glow Intensity</span>
+                        <input type="range" min="0" max="50" step="0.1" data-threed-role="shape-glow-intensity">
+                    </label>
+                </div>
+            </div>
+        `;
+        refs.shapeFields = shapeFields;
+        refs.shapeType = shapeFields.querySelector('[data-threed-role="shape-type"]');
+        refs.shapeColor = shapeFields.querySelector('[data-threed-role="shape-color"]');
+        refs.shapeOpacity = shapeFields.querySelector('[data-threed-role="shape-opacity"]');
+        refs.shapeGlowEnabled = shapeFields.querySelector('[data-threed-role="shape-glow-enabled"]');
+        refs.shapeGlowFields = shapeFields.querySelector('[data-threed-role="shape-glow-fields"]');
+        refs.shapeGlowColor = shapeFields.querySelector('[data-threed-role="shape-glow-color"]');
+        refs.shapeGlowIntensity = shapeFields.querySelector('[data-threed-role="shape-glow-intensity"]');
+        selectionPanel.body.appendChild(shapeFields);
 
         const sceneCameraFoldout = createFoldout('Camera');
         const sceneNavigationFoldout = createFoldout('Navigation');
+        const sceneWorldFoldout = createFoldout('World Light', true);
         [backgroundField, showGridRow, showAxesRow].filter(Boolean).forEach((node) => scenePanel.body.appendChild(node));
-        [cameraFovField, cameraModeField].filter(Boolean).forEach((node) => sceneCameraFoldout.body.appendChild(node));
+        const cameraModeExtras = document.createElement('div');
+        cameraModeExtras.className = 'threed-stack';
+        cameraModeExtras.innerHTML = `
+            <label style="display:flex; flex-direction:column; gap:6px;">
+                <span>Projection</span>
+                <select class="custom-select" data-threed-role="camera-projection">
+                    <option value="perspective">Perspective</option>
+                    <option value="orthographic">Orthographic</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:6px;">
+                <span>Navigation</span>
+                <select class="custom-select" data-threed-role="navigation-mode">
+                    <option value="free">Free</option>
+                    <option value="canvas">Canvas</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:6px;">
+                <span>Locked View</span>
+                <select class="custom-select" data-threed-role="locked-view">
+                    <option value="front">Front</option>
+                    <option value="back">Back</option>
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                    <option value="top">Top</option>
+                    <option value="bottom">Bottom</option>
+                    <option value="current">Current</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:6px;">
+                <span>Wheel Mode</span>
+                <select class="custom-select" data-threed-role="wheel-mode">
+                    <option value="travel">Travel</option>
+                    <option value="zoom">Zoom</option>
+                </select>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:6px;">
+                <span>Ortho Zoom</span>
+                <input type="number" min="0.05" max="100" step="0.05" class="control-number" data-threed-role="ortho-zoom">
+            </label>
+        `;
+        refs.cameraProjection = cameraModeExtras.querySelector('[data-threed-role="camera-projection"]');
+        refs.navigationMode = cameraModeExtras.querySelector('[data-threed-role="navigation-mode"]');
+        refs.lockedView = cameraModeExtras.querySelector('[data-threed-role="locked-view"]');
+        refs.wheelMode = cameraModeExtras.querySelector('[data-threed-role="wheel-mode"]');
+        refs.orthoZoom = cameraModeExtras.querySelector('[data-threed-role="ortho-zoom"]');
+        [cameraFovField, cameraModeField, cameraModeExtras].filter(Boolean).forEach((node) => sceneCameraFoldout.body.appendChild(node));
         [linkPlaneScaleRow, snapGrid, flyInfo].filter(Boolean).forEach((node) => sceneNavigationFoldout.body.appendChild(node));
+        sceneWorldFoldout.body.innerHTML = `
+            <label class="check-row">
+                <input type="checkbox" data-threed-role="world-light-enabled">
+                <span>Enable World Light</span>
+            </label>
+            <label style="display:flex; flex-direction:column; gap:6px;">
+                <span>Mode</span>
+                <select class="custom-select" data-threed-role="world-light-mode">
+                    <option value="solid">Solid</option>
+                    <option value="gradient">Gradient</option>
+                    <option value="hdri">HDRI</option>
+                </select>
+            </label>
+            <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px;">
+                <label style="display:flex; flex-direction:column; gap:6px;">
+                    <span>Intensity</span>
+                    <input type="range" min="0" max="20" step="0.05" data-threed-role="world-light-intensity">
+                </label>
+                <label style="display:flex; flex-direction:column; gap:6px;">
+                    <span>Rotation</span>
+                    <input type="number" class="control-number" min="-720" max="720" step="1" data-threed-role="world-light-rotation">
+                </label>
+            </div>
+            <div style="display:grid; grid-template-columns:minmax(0, 1fr); gap:8px;">
+                <label class="check-row">
+                    <input type="checkbox" data-threed-role="world-light-background-visible">
+                    <span>Show Background</span>
+                </label>
+            </div>
+            <label data-threed-role="world-light-color-field" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                <span>Color</span>
+                <input type="color" data-threed-role="world-light-color">
+            </label>
+            <div data-threed-role="world-light-gradient-field" style="display:none; flex-direction:column; gap:8px;">
+                <div data-threed-role="world-light-gradient-stops" style="display:flex; flex-direction:column; gap:6px;"></div>
+                <button type="button" class="toolbar-button" data-threed-action="add-world-gradient-stop">Add Stop</button>
+            </div>
+            <div data-threed-role="world-light-hdri-field" style="display:none; flex-direction:column; gap:8px;">
+                <select class="custom-select" data-threed-role="world-light-hdri-asset"></select>
+                <button type="button" class="toolbar-button" data-threed-action="upload-hdri">Upload HDRI</button>
+            </div>
+        `;
+        refs.worldLightEnabled = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-enabled"]');
+        refs.worldLightMode = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-mode"]');
+        refs.worldLightIntensity = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-intensity"]');
+        refs.worldLightRotation = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-rotation"]');
+        refs.worldLightBackgroundVisible = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-background-visible"]');
+        refs.worldLightColorField = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-color-field"]');
+        refs.worldLightColor = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-color"]');
+        refs.worldLightGradientField = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-gradient-field"]');
+        refs.worldLightGradientStops = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-gradient-stops"]');
+        refs.worldLightHdriField = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-hdri-field"]');
+        refs.worldLightHdriAsset = sceneWorldFoldout.body.querySelector('[data-threed-role="world-light-hdri-asset"]');
         if (sceneCameraFoldout.body.childElementCount) {
             scenePanel.body.appendChild(sceneCameraFoldout.element);
         }
         if (sceneNavigationFoldout.body.childElementCount) {
             scenePanel.body.appendChild(sceneNavigationFoldout.element);
         }
+        scenePanel.body.appendChild(sceneWorldFoldout.element);
 
         const renderBasics = document.createElement('div');
         renderBasics.className = 'threed-stack';
@@ -865,8 +1166,7 @@ export function createThreeDWorkspace(actions, store) {
         [
             outlinerPanel,
             addPanel,
-            objectPanel,
-            materialPanel,
+            selectionPanel,
             scenePanel,
             renderPanel,
             viewsPanel
@@ -879,6 +1179,9 @@ export function createThreeDWorkspace(actions, store) {
         const renderPreviewHost = document.createElement('div');
         renderPreviewHost.className = 'threed-render-preview-host';
         renderPreviewHost.dataset.threedRole = 'render-preview-host';
+        const contextMenuHost = document.createElement('div');
+        contextMenuHost.className = 'threed-context-menu-host';
+        contextMenuHost.dataset.threedRole = 'context-menu-host';
         const viewportTopLeft = document.createElement('div');
         viewportTopLeft.className = 'threed-overlay-corner threed-overlay-top-left';
         viewportTopLeft.innerHTML = `
@@ -931,6 +1234,7 @@ export function createThreeDWorkspace(actions, store) {
         viewportStage.appendChild(pathTraceLoading);
 
         shell.appendChild(viewportPanel);
+        shell.appendChild(contextMenuHost);
         root.appendChild(shell);
         overlayShell.remove();
     }
@@ -945,6 +1249,7 @@ export function createThreeDWorkspace(actions, store) {
     refs.statusStats = root.querySelector('[data-threed-role="status-stats"]');
     refs.headerSampleCount = root.querySelector('[data-threed-role="header-sample-count"]');
     refs.renderPreviewHost = root.querySelector('[data-threed-role="render-preview-host"]');
+    refs.contextMenuHost = root.querySelector('[data-threed-role="context-menu-host"]');
     refs.compactSampleCount = root.querySelector('[data-threed-role="compact-sample-count"]') || refs.headerSampleCount;
     refs.compactRenderModeLabel = root.querySelector('[data-threed-role="compact-render-mode-label"]');
     refs.pathTraceLoading = root.querySelector('[data-threed-role="pathtrace-loading"]');
@@ -961,6 +1266,9 @@ export function createThreeDWorkspace(actions, store) {
     let renderDialogOpen = false;
     let renderPreviewCanvas = null;
     let sliceCutterId = '';
+    let contextMenuPath = [];
+    let contextMenuAnchor = null;
+    let surfaceAttachTextId = null;
 
     const transformInputs = {
         position: [0, 1, 2].map((index) => root.querySelector(`[data-threed-role="position-${index}"]`)),
@@ -1123,7 +1431,7 @@ export function createThreeDWorkspace(actions, store) {
             return;
         }
         refs.hierarchy.innerHTML = items.map((item) => `
-            <div class="threed-outliner-item ${state.threeDDocument.selection.itemId === item.id ? 'is-active' : ''}">
+            <div class="threed-outliner-item ${state.threeDDocument.selection.itemId === item.id ? 'is-active' : ''}" data-threed-item-id="${item.id}">
                 <button type="button" class="threed-outliner-main" data-threed-action="select-item" data-item-id="${item.id}">
                     <span class="threed-kind-badge">${escapeHtml(describeHierarchyBadge(item))}</span>
                     <span class="threed-outliner-copy">
@@ -1205,6 +1513,229 @@ export function createThreeDWorkspace(actions, store) {
             <option value="${item.id}">${escapeHtml(item.name)}</option>
         `).join('');
         refs.sliceCutter.value = sliceCutterId;
+    }
+
+    function renderTextFontOptions(state, selected) {
+        if (!refs.textFontAsset) return;
+        const fonts = state.threeDDocument?.assets?.fonts || [];
+        if (!fonts.length) {
+            refs.textFontAsset.innerHTML = '<option value="">Upload a font first</option>';
+            refs.textFontAsset.value = '';
+            return;
+        }
+        refs.textFontAsset.innerHTML = fonts.map((asset) => `
+            <option value="${asset.id}">${escapeHtml(asset.name)}</option>
+        `).join('');
+        refs.textFontAsset.value = selected?.text?.fontSource?.assetId && fonts.some((asset) => asset.id === selected.text.fontSource.assetId)
+            ? selected.text.fontSource.assetId
+            : fonts[0].id;
+    }
+
+    function renderWorldLightOptions(documentState) {
+        if (!refs.worldLightHdriAsset) return;
+        const hdris = documentState?.assets?.hdris || [];
+        refs.worldLightHdriAsset.innerHTML = hdris.length
+            ? hdris.map((asset) => `<option value="${asset.id}">${escapeHtml(asset.name)}</option>`).join('')
+            : '<option value="">Upload an HDRI first</option>';
+        const activeId = documentState?.scene?.worldLight?.hdriAssetId || '';
+        refs.worldLightHdriAsset.value = hdris.some((asset) => asset.id === activeId) ? activeId : (hdris[0]?.id || '');
+        const stops = documentState?.scene?.worldLight?.gradientStops || [];
+        refs.worldLightGradientStops.innerHTML = stops.map((stop, index) => `
+            <div style="display:grid; grid-template-columns:minmax(0, 1fr) auto auto; gap:8px; align-items:center;">
+                <input type="number" min="0" max="1" step="0.01" class="control-number" data-threed-role="gradient-stop-position" data-stop-index="${index}" value="${formatNumber(stop.position, 2)}">
+                <input type="color" data-threed-role="gradient-stop-color" data-stop-index="${index}" value="${stop.color}">
+                <button type="button" class="toolbar-button" data-threed-action="remove-world-gradient-stop" data-stop-index="${index}">Del</button>
+            </div>
+        `).join('');
+    }
+
+    function renderTextCharacterOverrides(selected) {
+        if (!refs.textCharacterOverrides) return;
+        const characters = Array.from(selected?.text?.content || '');
+        if (!characters.length) {
+            refs.textCharacterOverrides.innerHTML = '<div class="empty-inline">No characters to edit.</div>';
+            return;
+        }
+        const overrideMap = new Map((selected?.text?.characterOverrides || []).map((entry) => [Number(entry.index), entry]));
+        refs.textCharacterOverrides.innerHTML = characters.map((character, index) => {
+            const override = overrideMap.get(index) || { flipX: false, flipY: false };
+            const label = character === '\n' ? '\\n' : character === ' ' ? 'space' : character;
+            return `
+                <label style="display:grid; grid-template-columns:minmax(0, 1fr) auto auto; gap:8px; align-items:center;">
+                    <span>${escapeHtml(label)}</span>
+                    <span style="display:flex; align-items:center; gap:4px;"><input type="checkbox" data-threed-role="text-char-flip-x" data-char-index="${index}" ${override.flipX ? 'checked' : ''}> H</span>
+                    <span style="display:flex; align-items:center; gap:4px;"><input type="checkbox" data-threed-role="text-char-flip-y" data-char-index="${index}" ${override.flipY ? 'checked' : ''}> V</span>
+                </label>
+            `;
+        }).join('');
+    }
+
+    function getUploadedFontAssets() {
+        return store.getState().threeDDocument?.assets?.fonts || [];
+    }
+
+    function clearSurfaceAttachMode(showMessage = false) {
+        if (!surfaceAttachTextId) return;
+        surfaceAttachTextId = null;
+        if (showMessage) {
+            setStatus('Surface attach cancelled.', 'info');
+        }
+    }
+
+    function setSelectedTextMode(mode, itemId = null) {
+        const state = store.getState();
+        const selected = (state.threeDDocument?.scene?.items || []).find((item) => item.id === (itemId || state.threeDDocument?.selection?.itemId)) || null;
+        if (!isTextItem(selected)) return;
+        if (mode === 'extruded') {
+            const hasUploadedFont = selected.text?.fontSource?.type === 'upload' && !!selected.text?.fontSource?.assetId;
+            if (!hasUploadedFont) {
+                setInputValue(refs.textMode, selected.text?.mode || 'flat');
+                setStatus('Extruded text requires an uploaded font. Pick one in the Selection panel first.', 'warning');
+                return;
+            }
+        }
+        actions.updateThreeDText?.(selected.id, { mode: mode === 'extruded' ? 'extruded' : 'flat' });
+    }
+
+    function updateWorldLightGradientStop(stopIndex, patch = {}) {
+        if (!Number.isFinite(stopIndex)) return;
+        const stops = [...(store.getState().threeDDocument?.scene?.worldLight?.gradientStops || [])];
+        if (!stops[stopIndex]) return;
+        stops[stopIndex] = {
+            ...stops[stopIndex],
+            ...patch
+        };
+        actions.updateThreeDWorldLight?.({ gradientStops: stops });
+    }
+
+    function updateTextCharacterOverride(characterIndex, patch = {}) {
+        const selected = getSelectedItem(store.getState());
+        if (!isTextItem(selected) || !Number.isFinite(characterIndex)) return;
+        const overrides = [...(selected.text?.characterOverrides || [])];
+        const overrideIndex = overrides.findIndex((entry) => Number(entry.index) === characterIndex);
+        const current = overrideIndex >= 0
+            ? { ...overrides[overrideIndex] }
+            : { index: characterIndex, flipX: false, flipY: false };
+        const next = {
+            ...current,
+            ...patch,
+            index: characterIndex
+        };
+        const keepOverride = !!next.flipX || !!next.flipY;
+        if (keepOverride && overrideIndex >= 0) {
+            overrides.splice(overrideIndex, 1, next);
+        } else if (keepOverride) {
+            overrides.push(next);
+        } else if (overrideIndex >= 0) {
+            overrides.splice(overrideIndex, 1);
+        }
+        actions.updateThreeDText?.(selected.id, {
+            characterOverrides: overrides
+                .map((entry) => ({ index: Number(entry.index), flipX: !!entry.flipX, flipY: !!entry.flipY }))
+                .sort((a, b) => a.index - b.index)
+        });
+    }
+
+    function openContextMenuAt(event, itemId) {
+        if (!itemId || !refs.contextMenuHost || !refs.canvasContainer) {
+            closeContextMenu();
+            return;
+        }
+        const rect = refs.shell?.getBoundingClientRect() || refs.contextMenuHost.getBoundingClientRect();
+        const hostRect = refs.contextMenuHost.getBoundingClientRect();
+        const maxX = Math.max(8, hostRect.width - 196);
+        const maxY = Math.max(8, hostRect.height - 160);
+        contextMenuAnchor = {
+            x: clamp(event.clientX - rect.left, 8, maxX),
+            y: clamp(event.clientY - rect.top, 8, maxY),
+            itemId
+        };
+        contextMenuPath = [];
+        renderContextMenus(store.getState());
+    }
+
+    function closeContextMenu() {
+        contextMenuPath = [];
+        contextMenuAnchor = null;
+        if (refs.contextMenuHost) {
+            refs.contextMenuHost.innerHTML = '';
+        }
+    }
+
+    function getContextMenuEntries(state, item) {
+        if (!item) return [];
+        const entries = [
+            { id: 'duplicate', label: 'Duplicate' },
+            { id: 'rename', label: 'Rename' },
+            { id: item.visible !== false ? 'hide' : 'show', label: item.visible !== false ? 'Hide' : 'Show' },
+            { id: item.locked ? 'unlock' : 'lock', label: item.locked ? 'Unlock' : 'Lock' },
+            { id: 'reset-transform', label: 'Reset Transform' },
+            { id: 'delete', label: 'Delete' }
+        ];
+        if (isMaterialItem(item)) {
+            entries.push({
+                id: 'material-preset',
+                label: 'Material',
+                submenu: [
+                    { id: 'mat-original', label: 'Original' },
+                    { id: 'mat-matte', label: 'Matte' },
+                    { id: 'mat-metal', label: 'Metal' },
+                    { id: 'mat-glass', label: 'Glass' },
+                    { id: 'mat-emissive', label: 'Emissive' }
+                ]
+            });
+        }
+        if (isTextItem(item)) {
+            entries.push({
+                id: 'text-actions',
+                label: 'Text',
+                submenu: [
+                    { id: 'text-flat', label: 'Flat Mode' },
+                    { id: 'text-extruded', label: 'Extruded Mode' },
+                    { id: item.text?.attachment ? 'text-detach' : 'text-attach', label: item.text?.attachment ? 'Detach Surface' : 'Attach To Surface' }
+                ]
+            });
+        }
+        if (isShapeItem(item)) {
+            entries.push({
+                id: 'shape-actions',
+                label: 'Shape',
+                submenu: [
+                    { id: 'shape-square', label: 'Square' },
+                    { id: 'shape-circle', label: 'Circle' }
+                ]
+            });
+        }
+        if (isSliceCompatibleItem(item)) {
+            entries.push({
+                id: 'slice-actions',
+                label: 'Cuts',
+                submenu: [
+                    { id: 'cuts-reset', label: 'Reset Cuts' }
+                ]
+            });
+        }
+        return entries;
+    }
+
+    function renderContextMenus(state) {
+        if (!refs.contextMenuHost || !contextMenuAnchor?.itemId) {
+            closeContextMenu();
+            return;
+        }
+        const item = state.threeDDocument?.scene?.items?.find((entry) => entry.id === contextMenuAnchor.itemId) || null;
+        if (!item) {
+            closeContextMenu();
+            return;
+        }
+        const rootEntries = getContextMenuEntries(state, item);
+        const submenuEntries = rootEntries.find((entry) => entry.id === contextMenuPath[0])?.submenu || null;
+        refs.contextMenuHost.innerHTML = `
+            <div class="threed-context-menu" style="left:${contextMenuAnchor.x}px; top:${contextMenuAnchor.y}px;">
+                ${rootEntries.map((entry) => `<button type="button" data-threed-action="context-menu-entry" data-menu-entry="${entry.id}"><span>${escapeHtml(entry.label)}</span>${entry.submenu ? '<span>&gt;</span>' : ''}</button>`).join('')}
+            </div>
+            ${submenuEntries ? `<div class="threed-context-menu" style="left:${contextMenuAnchor.x + 188}px; top:${contextMenuAnchor.y}px;">${submenuEntries.map((entry) => `<button type="button" data-threed-action="context-menu-entry" data-menu-entry="${entry.id}"><span>${escapeHtml(entry.label)}</span></button>`).join('')}</div>` : ''}
+        `;
     }
 
     function applyTransformInput(group, axisIndex, rawValue) {
@@ -1305,6 +1836,9 @@ export function createThreeDWorkspace(actions, store) {
         const actionNode = event.target.closest('[data-threed-action]');
         if (!actionNode) return;
         const action = actionNode.dataset.threedAction;
+        if (action !== 'context-menu-entry') {
+            closeContextMenu();
+        }
         if (action === 'ui-mode') {
             uiMode = actionNode.dataset.uiMode === 'fullscreen' ? 'fullscreen' : 'edit';
             applyUiMode();
@@ -1328,8 +1862,28 @@ export function createThreeDWorkspace(actions, store) {
             actions.addThreeDLight(actionNode.dataset.lightType || 'directional');
         } else if (action === 'add-primitive') {
             actions.addThreeDPrimitive?.(actionNode.dataset.primitiveType || 'cube');
+        } else if (action === 'add-text') {
+            actions.addThreeDText?.();
+        } else if (action === 'add-shape') {
+            actions.addThreeDShape?.(actionNode.dataset.shapeType || 'square');
+        } else if (action === 'upload-fonts') {
+            refs.fontInput.click();
+        } else if (action === 'upload-hdri') {
+            refs.hdriInput.click();
+        } else if (action === 'add-world-gradient-stop') {
+            const stops = [...(store.getState().threeDDocument?.scene?.worldLight?.gradientStops || [])];
+            stops.push({ position: 0.5, color: '#ffffff' });
+            actions.updateThreeDWorldLight?.({ gradientStops: stops });
+        } else if (action === 'remove-world-gradient-stop') {
+            const stopIndex = Number(actionNode.dataset.stopIndex);
+            const stops = [...(store.getState().threeDDocument?.scene?.worldLight?.gradientStops || [])];
+            if (Number.isFinite(stopIndex)) {
+                stops.splice(stopIndex, 1);
+                actions.updateThreeDWorldLight?.({ gradientStops: stops.length ? stops : [{ position: 0, color: '#ffffff' }, { position: 1, color: '#222222' }] });
+            }
         } else if (action === 'select-item') {
             previewTransform = null;
+            clearSurfaceAttachMode();
             actions.setThreeDSelection(actionNode.dataset.itemId || null);
         } else if (action === 'toggle-item-visibility') {
             actions.toggleThreeDItemVisibility?.(actionNode.dataset.itemId || null);
@@ -1412,8 +1966,131 @@ export function createThreeDWorkspace(actions, store) {
             if (isMaterialItem(selected)) {
                 actions.clearThreeDMaterialTexture(selected.id);
             }
+        } else if (action === 'context-menu-entry') {
+            const entry = actionNode.dataset.menuEntry || '';
+            const state = store.getState();
+            const item = state.threeDDocument?.scene?.items?.find((entryItem) => entryItem.id === contextMenuAnchor?.itemId) || null;
+            if (!item) {
+                closeContextMenu();
+                return;
+            }
+            if (entry === 'material-preset' || entry === 'text-actions' || entry === 'shape-actions' || entry === 'slice-actions') {
+                contextMenuPath = contextMenuPath[0] === entry ? [] : [entry];
+                renderContextMenus(state);
+                return;
+            }
+            closeContextMenu();
+            if (entry === 'duplicate') actions.duplicateThreeDItem?.(item.id);
+            else if (entry === 'rename') {
+                const name = window.prompt('Rename item:', item.name);
+                if (name != null) actions.renameThreeDItem?.(item.id, name);
+            } else if (entry === 'hide' || entry === 'show') actions.toggleThreeDItemVisibility?.(item.id);
+            else if (entry === 'lock' || entry === 'unlock') actions.toggleThreeDItemLock?.(item.id);
+            else if (entry === 'reset-transform') actions.resetThreeDItemTransform?.(item.id);
+            else if (entry === 'delete') actions.deleteThreeDItem?.(item.id);
+            else if (entry === 'mat-original') actions.updateThreeDMaterial?.(item.id, { preset: 'original' });
+            else if (entry === 'mat-matte') actions.updateThreeDMaterial?.(item.id, { preset: 'matte' });
+            else if (entry === 'mat-metal') actions.updateThreeDMaterial?.(item.id, { preset: 'metal' });
+            else if (entry === 'mat-glass') actions.updateThreeDMaterial?.(item.id, { preset: 'glass' });
+            else if (entry === 'mat-emissive') actions.updateThreeDMaterial?.(item.id, { preset: 'emissive' });
+            else if (entry === 'text-flat') setSelectedTextMode('flat', item.id);
+            else if (entry === 'text-extruded') setSelectedTextMode('extruded', item.id);
+            else if (entry === 'text-attach') {
+                surfaceAttachTextId = item.id;
+                setStatus(`Click a model or primitive surface to attach "${item.name}".`, 'info');
+            } else if (entry === 'text-detach') actions.detachThreeDTextSurface?.(item.id);
+            else if (entry === 'shape-square') actions.updateThreeDShape?.(item.id, { type: 'square' });
+            else if (entry === 'shape-circle') actions.updateThreeDShape?.(item.id, { type: 'circle' });
+            else if (entry === 'cuts-reset') actions.resetThreeDItemBooleanSlices?.(item.id);
         }
     });
+
+    root.addEventListener('input', (event) => {
+        const role = event.target?.dataset?.threedRole || '';
+        if (role === 'gradient-stop-color') {
+            updateWorldLightGradientStop(
+                Number(event.target.dataset.stopIndex),
+                { color: event.target.value || '#ffffff' }
+            );
+        }
+    });
+
+    root.addEventListener('change', (event) => {
+        const role = event.target?.dataset?.threedRole || '';
+        if (role === 'gradient-stop-position') {
+            updateWorldLightGradientStop(
+                Number(event.target.dataset.stopIndex),
+                { position: clamp(Number(event.target.value) || 0, 0, 1) }
+            );
+        } else if (role === 'text-char-flip-x' || role === 'text-char-flip-y') {
+            const index = Number(event.target.dataset.charIndex);
+            const row = event.target.closest('label');
+            const flipX = !!row?.querySelector('[data-threed-role="text-char-flip-x"]')?.checked;
+            const flipY = !!row?.querySelector('[data-threed-role="text-char-flip-y"]')?.checked;
+            updateTextCharacterOverride(index, { flipX, flipY });
+        }
+    });
+
+    refs.canvasContainer.addEventListener('contextmenu', (event) => {
+        if (!active) return;
+        event.preventDefault();
+        const documentState = store.getState().threeDDocument;
+        if (documentState?.view?.cameraMode === 'fly') {
+            closeContextMenu();
+            return;
+        }
+        if (surfaceAttachTextId || documentState?.renderJob?.active) {
+            closeContextMenu();
+            return;
+        }
+        const liveEngine = hydrateEngine();
+        const itemId = liveEngine.pickItemAtClientPoint(event.clientX, event.clientY, { includeHelpers: true });
+        const selectedId = documentState?.selection?.itemId || null;
+        if (!itemId || itemId !== selectedId) {
+            closeContextMenu();
+            return;
+        }
+        openContextMenuAt(event, itemId);
+    });
+
+    refs.hierarchy.addEventListener('contextmenu', (event) => {
+        const itemNode = event.target.closest('[data-threed-item-id]');
+        if (!itemNode) return;
+        event.preventDefault();
+        const itemId = itemNode.dataset.threedItemId || '';
+        if (!itemId) {
+            closeContextMenu();
+            return;
+        }
+        previewTransform = null;
+        if (store.getState().threeDDocument?.selection?.itemId !== itemId) {
+            actions.setThreeDSelection(itemId);
+        }
+        openContextMenuAt(event, itemId);
+    });
+
+    refs.canvasContainer.addEventListener('pointerdown', (event) => {
+        if (!surfaceAttachTextId || event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeContextMenu();
+        const liveEngine = hydrateEngine();
+        const hit = liveEngine.pickSurfaceAtClientPoint(event.clientX, event.clientY);
+        if (!hit) {
+            setStatus('Click a model or primitive surface to attach the selected text.', 'warning');
+            return;
+        }
+        const textItem = store.getState().threeDDocument?.scene?.items?.find((item) => item.id === surfaceAttachTextId) || null;
+        actions.attachThreeDTextToSurface?.(surfaceAttachTextId, hit);
+        surfaceAttachTextId = null;
+        setStatus(`Attached "${textItem?.name || 'Text'}" to the selected surface.`, 'success');
+    }, true);
+
+    window.addEventListener('pointerdown', (event) => {
+        if (!contextMenuAnchor) return;
+        if (refs.contextMenuHost?.contains(event.target)) return;
+        closeContextMenu();
+    }, true);
 
     refs.modelInput.addEventListener('change', async (event) => {
         const files = Array.from(event.target.files || []);
@@ -1438,6 +2115,32 @@ export function createThreeDWorkspace(actions, store) {
         } catch (error) {
             console.error(error);
             setStatus(error?.message || 'Could not create those image planes.', 'error');
+        }
+    });
+
+    refs.fontInput.addEventListener('change', async (event) => {
+        const files = Array.from(event.target.files || []);
+        event.target.value = '';
+        if (!files.length) return;
+        try {
+            await actions.importThreeDFontFiles?.(files);
+            setStatus(`Imported ${files.length} font file${files.length === 1 ? '' : 's'}.`, 'success');
+        } catch (error) {
+            console.error(error);
+            setStatus(error?.message || 'Could not import those fonts.', 'error');
+        }
+    });
+
+    refs.hdriInput.addEventListener('change', async (event) => {
+        const file = event.target.files?.[0] || null;
+        event.target.value = '';
+        if (!file) return;
+        try {
+            await actions.importThreeDHdriFile?.(file);
+            setStatus(`Loaded HDRI "${file.name}" into the world light.`, 'success');
+        } catch (error) {
+            console.error(error);
+            setStatus(error?.message || 'Could not import that HDRI.', 'error');
         }
     });
 
@@ -1509,6 +2212,21 @@ export function createThreeDWorkspace(actions, store) {
     });
     refs.cameraMode.addEventListener('change', (event) => {
         actions.updateThreeDView({ cameraMode: event.target.value === 'fly' ? 'fly' : 'orbit' });
+    });
+    refs.cameraProjection?.addEventListener('change', (event) => {
+        actions.configureThreeDCanvasView?.({ projection: event.target.value === 'orthographic' ? 'orthographic' : 'perspective' }, engine?.getCameraSnapshot?.());
+    });
+    refs.navigationMode?.addEventListener('change', (event) => {
+        actions.configureThreeDCanvasView?.({ navigationMode: event.target.value === 'canvas' ? 'canvas' : 'free' }, engine?.getCameraSnapshot?.());
+    });
+    refs.lockedView?.addEventListener('change', (event) => {
+        actions.configureThreeDCanvasView?.({ lockedView: event.target.value || 'front', navigationMode: 'canvas' }, engine?.getCameraSnapshot?.());
+    });
+    refs.wheelMode?.addEventListener('change', (event) => {
+        actions.configureThreeDCanvasView?.({ wheelMode: event.target.value === 'zoom' ? 'zoom' : 'travel' }, engine?.getCameraSnapshot?.());
+    });
+    refs.orthoZoom?.addEventListener('change', (event) => {
+        actions.configureThreeDCanvasView?.({ orthoZoom: Math.max(0.05, Number(event.target.value) || 1) }, engine?.getCameraSnapshot?.());
     });
     refs.linkPlaneScale.addEventListener('change', (event) => {
         actions.updateThreeDView({ linkPlaneScale: !!event.target.checked });
@@ -1632,6 +2350,123 @@ export function createThreeDWorkspace(actions, store) {
             actions.updateThreeDMaterial(selected.id, { attenuationDistance: Number(event.target.value) || 1.5 });
         }
     });
+    refs.textContent?.addEventListener('change', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { content: event.target.value });
+    });
+    refs.textMode?.addEventListener('change', (event) => {
+        setSelectedTextMode(event.target.value === 'extruded' ? 'extruded' : 'flat');
+    });
+    refs.textFontSourceType?.addEventListener('change', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (!isTextItem(selected)) return;
+        const nextType = event.target.value === 'upload' ? 'upload' : 'system';
+        if (nextType === 'upload' && !getUploadedFontAssets().length) {
+            setStatus('Upload a font first, then switch this text item to an uploaded font.', 'warning');
+            setInputValue(refs.textFontSourceType, selected.text?.fontSource?.type || 'system');
+            return;
+        }
+        actions.updateThreeDText?.(selected.id, {
+            fontSource: nextType === 'upload'
+                ? { type: 'upload', assetId: refs.textFontAsset?.value || null, family: '' }
+                : { type: 'system', assetId: null, family: refs.textFontFamily?.value || 'Arial' }
+        });
+    });
+    refs.textFontFamily?.addEventListener('change', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { fontSource: { type: 'system', family: event.target.value || 'Arial', assetId: null } });
+    });
+    refs.textFontAsset?.addEventListener('change', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { fontSource: { type: 'upload', assetId: event.target.value || null, family: '' } });
+    });
+    refs.textColor?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { color: event.target.value });
+    });
+    refs.textOpacity?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { opacity: Number(event.target.value) || 1 });
+    });
+    refs.textGlowEnabled?.addEventListener('change', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { glow: { enabled: !!event.target.checked } });
+    });
+    refs.textGlowColor?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { glow: { color: event.target.value } });
+    });
+    refs.textGlowIntensity?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isTextItem(selected)) actions.updateThreeDText?.(selected.id, { glow: { intensity: Number(event.target.value) || 0 } });
+    });
+    [refs.textDepth, refs.textBevelSize, refs.textBevelThickness, refs.textBevelSegments].forEach((input) => {
+        input?.addEventListener('change', () => {
+            const selected = getSelectedItem(store.getState());
+            if (isTextItem(selected)) {
+                actions.updateThreeDText?.(selected.id, {
+                    extrude: {
+                        depth: Number(refs.textDepth?.value) || 0.2,
+                        bevelSize: Number(refs.textBevelSize?.value) || 0,
+                        bevelThickness: Number(refs.textBevelThickness?.value) || 0,
+                        bevelSegments: Number(refs.textBevelSegments?.value) || 1
+                    }
+                });
+            }
+        });
+    });
+    refs.shapeType?.addEventListener('change', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isShapeItem(selected)) actions.updateThreeDShape?.(selected.id, { type: event.target.value === 'circle' ? 'circle' : 'square' });
+    });
+    refs.shapeColor?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isShapeItem(selected)) actions.updateThreeDShape?.(selected.id, { color: event.target.value });
+    });
+    refs.shapeOpacity?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isShapeItem(selected)) actions.updateThreeDShape?.(selected.id, { opacity: Number(event.target.value) || 1 });
+    });
+    refs.shapeGlowEnabled?.addEventListener('change', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isShapeItem(selected)) actions.updateThreeDShape?.(selected.id, { glow: { enabled: !!event.target.checked } });
+    });
+    refs.shapeGlowColor?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isShapeItem(selected)) actions.updateThreeDShape?.(selected.id, { glow: { color: event.target.value } });
+    });
+    refs.shapeGlowIntensity?.addEventListener('input', (event) => {
+        const selected = getSelectedItem(store.getState());
+        if (isShapeItem(selected)) actions.updateThreeDShape?.(selected.id, { glow: { intensity: Number(event.target.value) || 0 } });
+    });
+    refs.worldLightEnabled?.addEventListener('change', (event) => {
+        actions.updateThreeDWorldLight?.({ enabled: !!event.target.checked });
+    });
+    refs.worldLightMode?.addEventListener('change', (event) => {
+        const nextMode = event.target.value || 'solid';
+        if (nextMode === 'hdri' && !(store.getState().threeDDocument?.assets?.hdris || []).length) {
+            setStatus('Upload an HDRI first, then switch the world light to HDRI mode.', 'warning');
+            setInputValue(refs.worldLightMode, store.getState().threeDDocument?.scene?.worldLight?.mode || 'solid');
+            return;
+        }
+        actions.updateThreeDWorldLight?.({ mode: nextMode });
+    });
+    refs.worldLightIntensity?.addEventListener('input', (event) => {
+        actions.updateThreeDWorldLight?.({ intensity: Number(event.target.value) || 0 });
+    });
+    refs.worldLightRotation?.addEventListener('change', (event) => {
+        const degrees = Number(event.target.value) || 0;
+        actions.updateThreeDWorldLight?.({ rotation: degrees * (Math.PI / 180) });
+    });
+    refs.worldLightBackgroundVisible?.addEventListener('change', (event) => {
+        actions.updateThreeDWorldLight?.({ backgroundVisible: !!event.target.checked });
+    });
+    refs.worldLightColor?.addEventListener('input', (event) => {
+        actions.updateThreeDWorldLight?.({ color: event.target.value });
+    });
+    refs.worldLightHdriAsset?.addEventListener('change', (event) => {
+        actions.updateThreeDWorldLight?.({ hdriAssetId: event.target.value || null, mode: 'hdri', enabled: true });
+    });
     refs.textureRepeatX.addEventListener('change', (event) => {
         const selected = getSelectedItem(store.getState());
         const material = getSelectedMaterial(store.getState());
@@ -1693,6 +2528,18 @@ export function createThreeDWorkspace(actions, store) {
             return;
         }
         if (!active) return;
+        if (key === 'escape') {
+            if (contextMenuAnchor) {
+                event.preventDefault();
+                closeContextMenu();
+                return;
+            }
+            if (surfaceAttachTextId) {
+                event.preventDefault();
+                clearSurfaceAttachMode(true);
+                return;
+            }
+        }
         if (store.getState().threeDDocument?.renderJob?.active) return;
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
         if (event.repeat || event.defaultPrevented || event.isComposing) return;
@@ -1715,6 +2562,7 @@ export function createThreeDWorkspace(actions, store) {
         engine = new ThreeDEngine(refs.canvasContainer);
         engine.onSelectionChanged = (itemId) => {
             previewTransform = null;
+            closeContextMenu();
             actions.setThreeDSelection(itemId);
         };
         engine.onTransformPreview = (payload) => {
@@ -1795,6 +2643,8 @@ export function createThreeDWorkspace(actions, store) {
         deactivate() {
             active = false;
             closeRenderDialog();
+            closeContextMenu();
+            clearSurfaceAttachMode();
         },
         render(state) {
             const document = state.threeDDocument;
@@ -1817,6 +2667,23 @@ export function createThreeDWorkspace(actions, store) {
             refs.toneMapping.value = document.render.toneMapping || 'aces';
             setInputValue(refs.cameraFov, document.view.fov || 50);
             refs.cameraMode.value = document.view.cameraMode || 'orbit';
+            refs.cameraProjection.value = document.view.projection || 'perspective';
+            refs.navigationMode.value = document.view.navigationMode || 'free';
+            refs.lockedView.value = document.view.lockedView || 'front';
+            refs.wheelMode.value = document.view.wheelMode || 'travel';
+            setInputValue(refs.orthoZoom, formatNumber(document.view.orthoZoom ?? 1, 3));
+            const lockedViewField = refs.lockedView?.closest('label');
+            const wheelModeField = refs.wheelMode?.closest('label');
+            const orthoZoomField = refs.orthoZoom?.closest('label');
+            if (lockedViewField) {
+                lockedViewField.style.display = document.view.navigationMode === 'canvas' ? 'flex' : 'none';
+            }
+            if (wheelModeField) {
+                wheelModeField.style.display = document.view.navigationMode === 'canvas' ? 'flex' : 'none';
+            }
+            if (orthoZoomField) {
+                orthoZoomField.style.display = document.view.projection === 'orthographic' ? 'flex' : 'none';
+            }
             refs.linkPlaneScale.checked = document.view.linkPlaneScale !== false;
             setInputValue(refs.snapTranslationStep, document.view.snapTranslationStep ?? 0);
             setInputValue(refs.snapRotationDegrees, document.view.snapRotationDegrees ?? 0);
@@ -1844,6 +2711,9 @@ export function createThreeDWorkspace(actions, store) {
             const renderLocked = !!document.renderJob?.active;
             const selectionLocked = !!selected?.locked;
             const lightSupportsTarget = selected?.kind === 'light' && ['directional', 'spot'].includes(selected.light?.lightType);
+            if (surfaceAttachTextId && !document.scene.items.some((item) => item.id === surfaceAttachTextId && item.kind === 'text')) {
+                surfaceAttachTextId = null;
+            }
             if (renderLocked && renderDialogOpen) {
                 closeRenderDialog();
             }
@@ -1891,17 +2761,77 @@ export function createThreeDWorkspace(actions, store) {
                 setInputValue(refs.textureRotation, selectedMaterial?.texture?.rotation ?? 0);
             }
 
+            const selectedIsText = isTextItem(selected);
+            refs.textFields.style.display = selectedIsText ? 'flex' : 'none';
+            if (selectedIsText) {
+                setInputValue(refs.textContent, selected.text?.content || 'Text');
+                refs.textMode.value = selected.text?.mode || 'flat';
+                refs.textFontSourceType.value = selected.text?.fontSource?.type || 'system';
+                refs.textFontFamilyField.style.display = refs.textFontSourceType.value === 'system' ? 'flex' : 'none';
+                refs.textFontUploadField.style.display = refs.textFontSourceType.value === 'upload' ? 'flex' : 'none';
+                refs.textGlowFields.style.display = selected.text?.glow?.enabled ? 'flex' : 'none';
+                refs.textExtrudeFields.style.display = selected.text?.mode === 'extruded' ? 'flex' : 'none';
+                setInputValue(refs.textFontFamily, selected.text?.fontSource?.family || 'Arial');
+                renderTextFontOptions(state, selected);
+                refs.textColor.value = selected.text?.color || '#ffffff';
+                setInputValue(refs.textOpacity, selected.text?.opacity ?? 1);
+                refs.textGlowEnabled.checked = !!selected.text?.glow?.enabled;
+                refs.textGlowColor.value = selected.text?.glow?.color || selected.text?.color || '#ffffff';
+                setInputValue(refs.textGlowIntensity, selected.text?.glow?.intensity ?? 4);
+                setInputValue(refs.textDepth, selected.text?.extrude?.depth ?? 0.2);
+                setInputValue(refs.textBevelSize, selected.text?.extrude?.bevelSize ?? 0.02);
+                setInputValue(refs.textBevelThickness, selected.text?.extrude?.bevelThickness ?? 0.02);
+                setInputValue(refs.textBevelSegments, selected.text?.extrude?.bevelSegments ?? 2);
+                renderTextCharacterOverrides(selected);
+            } else {
+                refs.textFontFamilyField.style.display = 'none';
+                refs.textFontUploadField.style.display = 'none';
+                refs.textGlowFields.style.display = 'none';
+                refs.textExtrudeFields.style.display = 'none';
+            }
+
+            const selectedIsShape = isShapeItem(selected);
+            refs.shapeFields.style.display = selectedIsShape ? 'flex' : 'none';
+            if (selectedIsShape) {
+                refs.shapeType.value = selected.shape2d?.type || 'square';
+                refs.shapeColor.value = selected.shape2d?.color || '#ffffff';
+                setInputValue(refs.shapeOpacity, selected.shape2d?.opacity ?? 1);
+                refs.shapeGlowEnabled.checked = !!selected.shape2d?.glow?.enabled;
+                refs.shapeGlowFields.style.display = selected.shape2d?.glow?.enabled ? 'flex' : 'none';
+                refs.shapeGlowColor.value = selected.shape2d?.glow?.color || selected.shape2d?.color || '#ffffff';
+                setInputValue(refs.shapeGlowIntensity, selected.shape2d?.glow?.intensity ?? 4);
+            } else {
+                refs.shapeGlowFields.style.display = 'none';
+            }
+
+            const worldLight = document.scene.worldLight || {};
+            refs.worldLightEnabled.checked = !!worldLight.enabled;
+            refs.worldLightMode.value = worldLight.mode || 'solid';
+            setInputValue(refs.worldLightIntensity, worldLight.intensity ?? 1);
+            setInputValue(refs.worldLightRotation, formatNumber((Number(worldLight.rotation) || 0) * (180 / Math.PI), 1));
+            refs.worldLightBackgroundVisible.checked = worldLight.backgroundVisible !== false;
+            refs.worldLightColor.value = worldLight.color || '#f7f4eb';
+            refs.worldLightColorField.style.display = worldLight.mode === 'solid' ? 'flex' : 'none';
+            refs.worldLightGradientField.style.display = worldLight.mode === 'gradient' ? 'flex' : 'none';
+            refs.worldLightHdriField.style.display = worldLight.mode === 'hdri' ? 'flex' : 'none';
+            renderWorldLightOptions(document);
+
             renderHierarchy(state);
             renderCameraPresets(state);
             syncTransformFields(state);
+            renderContextMenus(state);
 
             if (refs.statusHints) {
-                refs.statusHints.textContent = document.view.cameraMode === 'fly'
-                    ? '1/2/3 | RMB look | W A S D Q E | Shift'
-                    : '1/2/3 | F frame | Orbit drag | Wheel';
+                refs.statusHints.textContent = document.view.navigationMode === 'canvas'
+                    ? (document.view.projection === 'orthographic'
+                        ? '1/2/3 | Canvas pan | Wheel zoom | Alt+Wheel depth'
+                        : '1/2/3 | Canvas pan | Wheel depth | F frame')
+                    : document.view.cameraMode === 'fly'
+                        ? '1/2/3 | RMB look | W A S D Q E | Shift'
+                        : '1/2/3 | F frame | Orbit drag | Wheel';
             }
             if (refs.statusStats) {
-                refs.statusStats.textContent = `${document.scene.items.length} items | ${selected ? `${selected.name}${selectionLocked ? ' (locked)' : ''}` : 'No selection'} | ${formatRenderModeLabel(document.render.mode)} | ${sampleCount} spp`;
+                refs.statusStats.textContent = `${document.scene.items.length} items | ${selected ? `${selected.name}${selectionLocked ? ' (locked)' : ''}` : (surfaceAttachTextId ? 'Pick a surface' : 'No selection')} | ${formatRenderModeLabel(document.render.mode)} | ${sampleCount} spp`;
             }
 
             const selectedIsLight = selected?.kind === 'light';
@@ -1962,6 +2892,45 @@ export function createThreeDWorkspace(actions, store) {
             refs.textureRepeatX.disabled = renderLocked || selectionLocked || !selectedIsMaterial || !selectedMaterial?.texture;
             refs.textureRepeatY.disabled = renderLocked || selectionLocked || !selectedIsMaterial || !selectedMaterial?.texture;
             refs.textureRotation.disabled = renderLocked || selectionLocked || !selectedIsMaterial || !selectedMaterial?.texture;
+            refs.cameraMode.disabled = renderLocked || document.view.navigationMode === 'canvas';
+            refs.cameraProjection.disabled = renderLocked;
+            refs.navigationMode.disabled = renderLocked;
+            refs.lockedView.disabled = renderLocked || document.view.navigationMode !== 'canvas';
+            refs.wheelMode.disabled = renderLocked || document.view.navigationMode !== 'canvas';
+            refs.orthoZoom.disabled = renderLocked || document.view.projection !== 'orthographic';
+            refs.textContent.disabled = renderLocked || selectionLocked || !selectedIsText;
+            refs.textMode.disabled = renderLocked || selectionLocked || !selectedIsText;
+            refs.textFontSourceType.disabled = renderLocked || selectionLocked || !selectedIsText;
+            refs.textFontFamily.disabled = renderLocked || selectionLocked || !selectedIsText || refs.textFontSourceType.value !== 'system';
+            refs.textFontAsset.disabled = renderLocked || selectionLocked || !selectedIsText || refs.textFontSourceType.value !== 'upload';
+            refs.textColor.disabled = renderLocked || selectionLocked || !selectedIsText;
+            refs.textOpacity.disabled = renderLocked || selectionLocked || !selectedIsText;
+            refs.textGlowEnabled.disabled = renderLocked || selectionLocked || !selectedIsText;
+            refs.textGlowColor.disabled = renderLocked || selectionLocked || !selectedIsText || !selected?.text?.glow?.enabled;
+            refs.textGlowIntensity.disabled = renderLocked || selectionLocked || !selectedIsText || !selected?.text?.glow?.enabled;
+            refs.textDepth.disabled = renderLocked || selectionLocked || !selectedIsText || selected?.text?.mode !== 'extruded';
+            refs.textBevelSize.disabled = renderLocked || selectionLocked || !selectedIsText || selected?.text?.mode !== 'extruded';
+            refs.textBevelThickness.disabled = renderLocked || selectionLocked || !selectedIsText || selected?.text?.mode !== 'extruded';
+            refs.textBevelSegments.disabled = renderLocked || selectionLocked || !selectedIsText || selected?.text?.mode !== 'extruded';
+            refs.textCharacterOverrides.querySelectorAll('input').forEach((node) => {
+                node.disabled = renderLocked || selectionLocked || !selectedIsText;
+            });
+            refs.shapeType.disabled = renderLocked || selectionLocked || !selectedIsShape;
+            refs.shapeColor.disabled = renderLocked || selectionLocked || !selectedIsShape;
+            refs.shapeOpacity.disabled = renderLocked || selectionLocked || !selectedIsShape;
+            refs.shapeGlowEnabled.disabled = renderLocked || selectionLocked || !selectedIsShape;
+            refs.shapeGlowColor.disabled = renderLocked || selectionLocked || !selectedIsShape || !selected?.shape2d?.glow?.enabled;
+            refs.shapeGlowIntensity.disabled = renderLocked || selectionLocked || !selectedIsShape || !selected?.shape2d?.glow?.enabled;
+            refs.worldLightEnabled.disabled = renderLocked;
+            refs.worldLightMode.disabled = renderLocked;
+            refs.worldLightIntensity.disabled = renderLocked;
+            refs.worldLightRotation.disabled = renderLocked;
+            refs.worldLightBackgroundVisible.disabled = renderLocked;
+            refs.worldLightColor.disabled = renderLocked || worldLight.mode !== 'solid';
+            refs.worldLightHdriAsset.disabled = renderLocked || worldLight.mode !== 'hdri' || !(document.assets?.hdris || []).length;
+            refs.worldLightGradientStops.querySelectorAll('input, button').forEach((node) => {
+                node.disabled = renderLocked || worldLight.mode !== 'gradient';
+            });
 
             if (statusTone !== 'error') {
                 if (document.renderJob?.active) {
@@ -1973,8 +2942,10 @@ export function createThreeDWorkspace(actions, store) {
                     setStatus(document.renderJob.message || 'Render complete. PNG exported.', 'success');
                 } else if (document.renderJob?.status === 'aborted') {
                     setStatus(document.renderJob.message || 'Render aborted.', 'warning');
-                } else if (document.view.cameraMode === 'fly') {
+                } else if (document.view.navigationMode !== 'canvas' && document.view.cameraMode === 'fly') {
                     setStatus('Fly camera active. Click the viewport, then use right-drag to look and W A S D Q E to move.', 'info');
+                } else if (surfaceAttachTextId) {
+                    setStatus('Surface attach is active. Click a model or primitive surface, or press Escape to cancel.', 'info');
                 } else if (!document.scene.items.length) {
                     setStatus('Load models or add image planes to start building a 3D scene.');
                 } else if (document.render.mode === 'pathtrace') {

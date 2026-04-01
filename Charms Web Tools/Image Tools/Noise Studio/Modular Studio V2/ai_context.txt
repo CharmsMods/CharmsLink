@@ -152,19 +152,22 @@ Current section responsibilities:
 
 - `document.js`
   - 3D document shape, normalization, scene-item ids, camera preset ids, serialization helpers, and Library summary helpers.
-  - Supports saved 3D models, image planes, primitive meshes, scene lights, per-item material settings, texture transforms, persistent boolean-cut snapshots for solid items, snap settings, preview metadata, and ephemeral render-job state.
+  - Supports saved 3D models, image planes, primitive meshes, scene lights, flat/extruded text items, 2D shape items, uploaded font assets, uploaded HDRI assets, per-item material settings, texture transforms, persistent boolean-cut snapshots for solid items, world-light state, canvas-camera state, snap settings, preview metadata, and ephemeral render-job state.
 
 - `engine.js`
   - Primary three.js / path-tracing engine.
-  - Owns model/image hydration from embedded data URLs, primitive mesh creation, scene sync, transform controls, camera sync, preview capture, path-tracing rebuilds, material application, persistent boolean subtraction, snapping, and background PNG render jobs.
+  - Owns model/image/text/shape hydration from embedded data URLs, uploaded-font parsing, primitive mesh creation, world-light environment generation, scene sync, transform controls, camera sync, preview capture, path-tracing rebuilds, material application, persistent boolean subtraction, snapping, and background PNG render jobs.
   - Now also owns persistent path-tracer quality settings such as bounce counts, glossy firefly filtering, and the optional built-in beauty-pass denoise step used by the viewport and PNG renders.
   - Final PNG renders now take over the visible viewport with their own render canvas so the app is not drawing both the editor viewport and the final render scene at the same time.
   - Editor-only helpers and gizmos are excluded from the traced BVH, then drawn back as an overlay in path-trace mode.
 - `ui.js`
   - 3D workspace with an `edit` / `fullscreen` UI mode pair, built around one scrollable left dock plus a viewport-first HUD instead of the earlier split-side-panel overlay.
   - The current 3D shell uses a near-monochrome palette: pure black surfaces, white text, and a light warm grey accent with only a slight gold tint.
-  - Owns the 3D import/save controls, primitive creation buttons, snapping controls, hierarchy, rename/duplicate inspector actions, material/texture controls, boolean slice/reset controls, camera preset UI, render modal, and render-job status/abort flow.
+  - Owns the 3D import/save controls, primitive creation buttons, text/shape creation, uploaded font / HDRI import, snapping controls, hierarchy, selection editing, material/texture controls, world-light controls, boolean slice/reset controls, camera preset UI, render modal, and render-job status/abort flow.
   - Renderer controls now include `Raster`, `Path Trace`, and `Mesh` view modes, path-tracing bounce counts, glossy firefly filtering, optional denoise tuning, and keyboard mode switching on `1` / `2` / `3`.
+  - Viewport object quick actions now live in a right-click context-menu system with one submenu layer, outside-click dismissal, `Escape` dismissal, and text surface-attach mode.
+  - In the viewport, that context menu only opens when right-clicking the already-selected object.
+  - In the outliner, right-clicking a row opens the same object context menu for that item.
 
 ### `src/io/projectAdapters.js`
 
@@ -328,12 +331,21 @@ Important fields:
 - `version: 'mns/v2'`
 - `kind: '3d-document'`
 - `mode: '3d'`
+- `assets.fonts[]`
+- `assets.hdris[]`
 - `scene.items[]`
 - `scene.backgroundColor`
 - `scene.showGrid`
 - `scene.showAxes`
+- `scene.worldLight`
 - `selection.itemId`
 - `view.cameraMode`
+- `view.projection`
+- `view.navigationMode`
+- `view.lockedView`
+- `view.lockedRotation`
+- `view.orthoZoom`
+- `view.wheelMode`
 - `view.linkPlaneScale`
 - `view.snapTranslationStep`
 - `view.snapRotationDegrees`
@@ -368,6 +380,8 @@ Important fields:
 - `preview.imageData`
 - `preview.width`
 - `preview.height`
+- `workspace.panelTab`
+- `workspace.taskView`
 
 Current saved 3D scene item types:
 
@@ -388,10 +402,29 @@ Current saved 3D scene item types:
   - stores `asset.format: 'primitive'`
   - stores `asset.primitiveType: 'cube' | 'sphere' | 'cone' | 'cylinder'`
   - supports the same saved material/texture settings as normal model items
+- `text`
+  - stores `text.content`
+  - stores `text.mode: 'flat' | 'extruded'`
+  - stores `text.fontSource.type: 'system' | 'upload'`
+  - stores either `text.fontSource.family` or `text.fontSource.assetId`
+  - stores `text.color`, `text.opacity`, emissive-style `text.glow`, sparse `text.characterOverrides`, extrude/bevel settings, and optional `text.attachment`
+- `shape-2d`
+  - stores `shape2d.type: 'square' | 'circle'`
+  - stores `shape2d.color`, `shape2d.opacity`, and emissive-style `shape2d.glow`
 - `light`
   - stores `lightType: 'directional' | 'point' | 'spot'`
   - stores color/intensity/shadow parameters
   - directional and spot lights can optionally store `targetItemId` to keep aiming at a chosen scene item
+
+Important saved 3D asset buckets:
+
+- `assets.fonts[]`
+  - embedded uploaded `.ttf` / `.otf` / `.woff` / `.woff2`
+  - flat text can use either uploaded fonts or browser/system families
+  - extruded text must use an uploaded font asset
+- `assets.hdris[]`
+  - embedded uploaded `.hdr`
+  - used by `scene.worldLight.mode === 'hdri'`
 
 Important runtime-only 3D behavior:
 
@@ -401,6 +434,12 @@ Important runtime-only 3D behavior:
 - 3D render progress is pushed into local 3D UI first and only checkpoints shared state, so the rest of the app remains usable while a render is running.
 - Camera navigation supports both `orbit` and `fly` modes.
 - Fly mode uses viewport focus plus right-drag look and `W A S D Q E` movement.
+- View navigation also supports a canvas-style mode with:
+  - `view.navigationMode: 'canvas'`
+  - `view.projection: 'perspective' | 'orthographic'`
+  - locked view presets `front | back | left | right | top | bottom | current`
+  - rotation frozen while panning remains enabled
+  - wheel behavior driven by `view.wheelMode`, with orthographic `Alt + Wheel` depth travel
 - Orbit mode supports `F` to frame the currently selected object.
 - Viewport render mode shortcuts now include keyboard `1` = raster, `2` = path trace, and `3` = mesh.
 - Plane-handle scaling can lock the two active axes together via `view.linkPlaneScale`.
@@ -411,6 +450,17 @@ Important runtime-only 3D behavior:
 - Background PNG renders can now optionally run a final built-in beauty-pass denoise step before the PNG is encoded.
 - Editor-only viewport objects are marked non-shadow-casting so gizmos/helpers do not contaminate raster lighting.
 - Solid model / primitive items can now store persistent boolean subtraction snapshots captured from other objects, and `Reset Cuts` restores the original uncut target.
+- Selected text items can enter a temporary surface-attach mode from the viewport context menu, then ray-attach onto model / primitive surfaces and stay attached as the target moves.
+- `scene.worldLight` now supports:
+  - `enabled`
+  - `mode: 'solid' | 'gradient' | 'hdri'`
+  - `intensity`
+  - `backgroundVisible`
+  - `rotation`
+  - `color`
+  - unlimited `gradientStops`
+  - `hdriAssetId`
+- World light feeds both raster and path-traced lighting/background so scenes no longer need to fall back to a black void.
 - Duplicating 3D items now normalizes copy families into `Name (2)`, `Name (3)`, etc., so repeated duplication does not keep stacking extra `Copy` words.
 - Live viewport path-trace samples now survive switching away from the `3D` app section and back, as long as the 3D document did not change while it was hidden.
 - The 3D workspace now has two local UI layouts:

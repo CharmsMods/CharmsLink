@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
@@ -8,6 +9,9 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-
 import { DenoiseMaterial, WebGLPathTracer } from 'three-gpu-pathtracer';
 import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 import { normalizeThreeDDocument } from './document.js';
+import { createGradientEnvironmentTexture, createSolidEnvironmentTexture } from './environment.js';
+import { createExtrudedTextObject, createFlatTextObject } from './text.js';
+import { alignCameraToLockedView, getLockedViewForward, resolveAttachmentTransform } from './viewMath.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -315,6 +319,7 @@ export class ThreeDEngine {
         this.container = container;
         this.destroyed = false;
         this.loader = new GLTFLoader();
+        this.hdriLoader = new RGBELoader();
         this.geometryLoader = new THREE.BufferGeometryLoader();
         this.textureLoader = new THREE.TextureLoader();
         this.booleanEvaluator = new Evaluator();
@@ -328,6 +333,7 @@ export class ThreeDEngine {
         this.itemStateSignatures = new Map();
         this.editorObjects = new Set();
         this.textureCache = new Map();
+        this.hdriCache = new Map();
         this.renderMode = 'raster';
         this.targetSamples = 256;
         this.activeDocument = normalizeThreeDDocument(null);
@@ -338,6 +344,8 @@ export class ThreeDEngine {
         this._backgroundRenderJob = null;
         this._transformScaleStart = null;
         this._cameraMode = this.activeDocument.view.cameraMode;
+        this._projectionMode = this.activeDocument.view.projection;
+        this._navigationMode = this.activeDocument.view.navigationMode;
         this._flyLookActive = false;
         this._flyPointerId = null;
         this._flyPointerX = 0;
@@ -351,19 +359,23 @@ export class ThreeDEngine {
         this._pathTraceWarmupPending = false;
         this._pathTraceLoadingActive = false;
         this._pathTraceLoadingMessage = 'Preparing path tracer...';
+        this._worldEnvironmentSignature = '';
+        this._worldBackgroundTexture = null;
+        this._worldLightingTexture = null;
         this.clock = new THREE.Clock();
 
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(this.activeDocument.scene.backgroundColor);
 
-        this.camera = new THREE.PerspectiveCamera(
+        this.perspectiveCamera = new THREE.PerspectiveCamera(
             this.activeDocument.view.fov,
             this.getAspect(),
             this.activeDocument.view.near,
             this.activeDocument.view.far
         );
-        this.camera.position.fromArray(this.activeDocument.view.cameraPosition);
-        this.camera.lookAt(new THREE.Vector3(...this.activeDocument.view.cameraTarget));
+        this.orthographicCamera = new THREE.OrthographicCamera(-5, 5, 5, -5, this.activeDocument.view.near, this.activeDocument.view.far);
+        this.camera = this.perspectiveCamera;
+        this.syncCameraObjectsFromView(this.activeDocument.view);
 
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
@@ -427,6 +439,7 @@ export class ThreeDEngine {
         this.mouse = new THREE.Vector2();
         this.renderer.domElement.addEventListener('pointerdown', (event) => this.onPointerDown(event));
         this.renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
+        this.renderer.domElement.addEventListener('wheel', (event) => this.onMouseWheel(event), { passive: false });
         this.handleWindowPointerMove = (event) => this.onWindowPointerMove(event);
         this.handleWindowPointerUp = (event) => this.onWindowPointerUp(event);
         this.handleWindowKeyDown = (event) => this.onWindowKeyDown(event);
@@ -497,6 +510,66 @@ export class ThreeDEngine {
         return this.container.clientWidth / Math.max(1, this.container.clientHeight);
     }
 
+    updateOrthographicProjection(zoom = this.activeDocument.view.orthoZoom || 1) {
+        const aspect = this.getAspect() || 1;
+        const halfHeight = 5;
+        const halfWidth = halfHeight * aspect;
+        this.orthographicCamera.left = -halfWidth;
+        this.orthographicCamera.right = halfWidth;
+        this.orthographicCamera.top = halfHeight;
+        this.orthographicCamera.bottom = -halfHeight;
+        this.orthographicCamera.zoom = Math.max(0.05, Number(zoom) || 1);
+        this.orthographicCamera.updateProjectionMatrix();
+    }
+
+    syncCameraObjectsFromView(view = {}) {
+        const cameraPosition = new THREE.Vector3(...(view.cameraPosition || [6, 4, 8]));
+        const cameraTarget = new THREE.Vector3(...(view.cameraTarget || [0, 0, 0]));
+
+        [this.perspectiveCamera, this.orthographicCamera].forEach((camera) => {
+            camera.position.copy(cameraPosition);
+            camera.near = Number(view.near || 0.1);
+            camera.far = Number(view.far || 2000);
+            camera.lookAt(cameraTarget);
+            camera.updateProjectionMatrix();
+        });
+
+        this.perspectiveCamera.fov = Number(view.fov || 50);
+        this.perspectiveCamera.aspect = this.getAspect();
+        this.perspectiveCamera.updateProjectionMatrix();
+        this.updateOrthographicProjection(view.orthoZoom || 1);
+        this.controls?.target.copy(cameraTarget);
+    }
+
+    setActiveProjection(projection = 'perspective') {
+        const nextProjection = projection === 'orthographic' ? 'orthographic' : 'perspective';
+        this._projectionMode = nextProjection;
+        this.camera = nextProjection === 'orthographic' ? this.orthographicCamera : this.perspectiveCamera;
+        if (this.controls) {
+            this.controls.object = this.camera;
+        }
+        if (this.transformControl) {
+            this.transformControl.camera = this.camera;
+        }
+    }
+
+    applyNavigationBindings() {
+        if (!this.controls) return;
+        this.controls.enableRotate = this._navigationMode !== 'canvas' && this._cameraMode === 'orbit';
+        this.controls.enablePan = true;
+        this.controls.enableZoom = true;
+        this.controls.screenSpacePanning = this._navigationMode === 'canvas';
+        if (this._navigationMode === 'canvas') {
+            this.controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+            this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+            this.controls.mouseButtons.RIGHT = null;
+        } else {
+            this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+            this.controls.mouseButtons.MIDDLE = THREE.MOUSE.DOLLY;
+            this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
+        }
+    }
+
     withEditorObjectsHidden(callback) {
         const changedObjects = [];
         this.editorObjects.forEach((object) => {
@@ -529,6 +602,81 @@ export class ThreeDEngine {
         this.withPathTracerExclusions(() => this.pathTracer.updateLights());
     }
 
+    getRaycastIntersection(clientX, clientY, { includeHelpers = true } = {}) {
+        const rect = this.renderer.domElement.getBoundingClientRect();
+        this.mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+        this.mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+        this.raycaster.setFromCamera(this.mouse, this.camera);
+        const objects = includeHelpers
+            ? [...this.sceneObjects.values(), ...this.itemHelpers.values()]
+            : [...this.sceneObjects.values()];
+        const intersections = this.raycaster.intersectObjects(objects, true);
+        return intersections[0] || null;
+    }
+
+    pickItemAtClientPoint(clientX, clientY, options = {}) {
+        const hit = this.getRaycastIntersection(clientX, clientY, options);
+        return hit ? extractItemId(hit.object) : null;
+    }
+
+    pickSurfaceAtClientPoint(clientX, clientY) {
+        const hit = this.getRaycastIntersection(clientX, clientY, { includeHelpers: false });
+        if (!hit) return null;
+        const itemId = extractItemId(hit.object);
+        const item = this.activeDocument.scene.items.find((entry) => entry.id === itemId) || null;
+        if (!item || (item.kind !== 'model' && item.kind !== 'primitive')) return null;
+        const face = hit.face || null;
+        const normal = face
+            ? face.normal.clone().transformDirection(hit.object.matrixWorld).normalize()
+            : new THREE.Vector3(0, 0, 1);
+        const tangent = new THREE.Vector3(1, 0, 0).transformDirection(hit.object.matrixWorld).normalize();
+        return {
+            targetItemId: itemId,
+            point: hit.point.toArray(),
+            normal: normal.toArray(),
+            tangent: tangent.toArray(),
+            offset: 0.01
+        };
+    }
+
+    onMouseWheel(event) {
+        if (this._editLocked || this._navigationMode !== 'canvas') return;
+        const wheelMode = this.activeDocument.view?.wheelMode === 'zoom' ? 'zoom' : 'travel';
+        const projection = this._projectionMode === 'orthographic' ? 'orthographic' : 'perspective';
+        const travelRequested = projection === 'orthographic'
+            ? (event.altKey || wheelMode === 'travel')
+            : wheelMode === 'travel';
+
+        const forward = getLockedViewForward(
+            this.activeDocument.view.lockedView,
+            this.activeDocument.view.lockedRotation,
+            this.activeDocument.view
+        );
+
+        if (travelRequested) {
+            const distance = Number(event.deltaY || 0) * (projection === 'orthographic' ? 0.01 : 0.012);
+            this.camera.position.addScaledVector(forward, distance);
+            this.controls.target.addScaledVector(forward, distance);
+            this.syncCameraObjectsFromView({
+                ...this.activeDocument.view,
+                cameraPosition: this.camera.position.toArray(),
+                cameraTarget: this.controls.target.toArray(),
+                orthoZoom: this.orthographicCamera.zoom
+            });
+            this.commitCameraState();
+            event.preventDefault();
+            return;
+        }
+
+        if (projection === 'orthographic') {
+            const zoomFactor = Math.exp(-Number(event.deltaY || 0) * 0.0015);
+            const nextZoom = Math.min(100, Math.max(0.05, this.orthographicCamera.zoom * zoomFactor));
+            this.updateOrthographicProjection(nextZoom);
+            this.commitCameraState();
+            event.preventDefault();
+        }
+    }
+
     onPointerDown(event) {
         this.renderer.domElement.focus?.();
         if (event.button === 2) {
@@ -538,17 +686,7 @@ export class ThreeDEngine {
             return;
         }
         if (event.button !== 0 || this.transformControl.dragging || this._editLocked) return;
-        const rect = this.renderer.domElement.getBoundingClientRect();
-        this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-        this.raycaster.setFromCamera(this.mouse, this.camera);
-        const objects = [
-            ...this.sceneObjects.values(),
-            ...this.itemHelpers.values()
-        ];
-        const intersects = this.raycaster.intersectObjects(objects, true);
-        const hitId = intersects.length ? extractItemId(intersects[0].object) : null;
+        const hitId = this.pickItemAtClientPoint(event.clientX, event.clientY, { includeHelpers: true });
         this.onSelectionChanged?.(hitId);
     }
 
@@ -709,6 +847,7 @@ export class ThreeDEngine {
 
     buildCameraSignature() {
         return [
+            this._projectionMode,
             this.camera.position.x.toFixed(4),
             this.camera.position.y.toFixed(4),
             this.camera.position.z.toFixed(4),
@@ -716,7 +855,8 @@ export class ThreeDEngine {
             this.camera.quaternion.y.toFixed(4),
             this.camera.quaternion.z.toFixed(4),
             this.camera.quaternion.w.toFixed(4),
-            this.camera.fov.toFixed(3),
+            this.perspectiveCamera.fov.toFixed(3),
+            this.orthographicCamera.zoom.toFixed(4),
             this.camera.aspect.toFixed(4)
         ].join('|');
     }
@@ -775,8 +915,9 @@ export class ThreeDEngine {
         if (width < 2 || height < 2) {
             return;
         }
-        this.camera.aspect = width / height;
-        this.camera.updateProjectionMatrix();
+        this.perspectiveCamera.aspect = width / height;
+        this.perspectiveCamera.updateProjectionMatrix();
+        this.updateOrthographicProjection(this.activeDocument.view.orthoZoom || 1);
         this.renderer.setSize(width, height);
         this.pathTracer.updateCamera();
     }
@@ -822,10 +963,14 @@ export class ThreeDEngine {
 
     applySceneSettings(document) {
         const previousRenderMode = this.renderMode;
-        this.scene.background = new THREE.Color(document.scene.backgroundColor);
         this.gridHelper.visible = !!document.scene.showGrid;
         this.axesHelper.visible = !!document.scene.showAxes;
         this._cameraMode = document.view.cameraMode === 'fly' ? 'fly' : 'orbit';
+        this._projectionMode = document.view.projection === 'orthographic' ? 'orthographic' : 'perspective';
+        this._navigationMode = document.view.navigationMode === 'canvas' ? 'canvas' : 'free';
+        if (this._navigationMode === 'canvas') {
+            this._cameraMode = 'orbit';
+        }
         this.transformControl.translationSnap = document.view.snapTranslationStep > 0
             ? Number(document.view.snapTranslationStep)
             : null;
@@ -833,13 +978,23 @@ export class ThreeDEngine {
             ? THREE.MathUtils.degToRad(Number(document.view.snapRotationDegrees))
             : null;
 
-        this.camera.fov = document.view.fov;
-        this.camera.near = document.view.near;
-        this.camera.far = document.view.far;
-        this.camera.position.fromArray(document.view.cameraPosition);
-        this.controls.target.fromArray(document.view.cameraTarget);
+        let nextView = document.view;
+        if (this._navigationMode === 'canvas') {
+            const aligned = alignCameraToLockedView(document.view);
+            nextView = {
+                ...document.view,
+                cameraPosition: aligned.cameraPosition,
+                cameraTarget: aligned.cameraTarget,
+                lockedRotation: document.view.lockedView === 'current'
+                    ? aligned.lockedRotation
+                    : document.view.lockedRotation
+            };
+        }
+
+        this.syncCameraObjectsFromView(nextView);
+        this.setActiveProjection(nextView.projection);
+        this.applyNavigationBindings();
         this.syncFlyStateFromCamera(this.controls.target.clone());
-        this.camera.lookAt(this.controls.target);
         this.controls.enabled = this._cameraMode === 'orbit' && !this._editLocked && !this.transformControl.dragging;
         this.transformControl.enabled = !this._editLocked && !this.transformControl.object?.userData?.locked;
         if (this._cameraMode === 'orbit') {
@@ -847,10 +1002,10 @@ export class ThreeDEngine {
         } else {
             this.applyFlyOrientation();
         }
-        this.camera.updateProjectionMatrix();
 
         this.renderer.toneMapping = TONE_MAPPING_MAP[document.render.toneMapping] || THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = document.render.exposure;
+        this.updateWorldEnvironment(document);
         const qualityChanged = configurePathTracerQuality(this.pathTracer, document.render);
         this.renderMode = document.render.mode;
         this.targetSamples = document.render.samplesTarget;
@@ -869,9 +1024,108 @@ export class ThreeDEngine {
 
     updatePreviewLighting() {
         const hasVisibleSceneLight = this.activeDocument.scene.items.some((item) => item.kind === 'light' && item.visible !== false);
+        const hasWorldLight = !!this.activeDocument.scene?.worldLight?.enabled;
         const showPreviewLights = this.renderMode === 'raster' && !hasVisibleSceneLight;
-        this.ambientLight.visible = showPreviewLights;
-        this.keyLight.visible = showPreviewLights;
+        this.ambientLight.visible = showPreviewLights && !hasWorldLight;
+        this.keyLight.visible = showPreviewLights && !hasWorldLight;
+    }
+
+    disposeWorldTexture(texture) {
+        if (texture?.userData?.threeDOwnedTexture) {
+            texture.dispose?.();
+        }
+    }
+
+    async getHdriTexture(asset) {
+        if (!asset?.dataUrl) throw new Error('The HDRI asset is missing embedded data.');
+        if (!this.hdriCache.has(asset.dataUrl)) {
+            this.hdriCache.set(asset.dataUrl, this.hdriLoader.loadAsync(asset.dataUrl).then((texture) => {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                texture.needsUpdate = true;
+                return texture;
+            }));
+        }
+        return this.hdriCache.get(asset.dataUrl);
+    }
+
+    updateWorldEnvironment(document = this.activeDocument) {
+        const worldLight = document.scene?.worldLight || {};
+        const hdriAsset = document.assets?.hdris?.find((asset) => asset.id === worldLight.hdriAssetId) || null;
+        const signature = JSON.stringify({
+            backgroundColor: document.scene?.backgroundColor,
+            worldLight,
+            hdriDataUrl: hdriAsset?.dataUrl || ''
+        });
+        if (signature === this._worldEnvironmentSignature) return;
+        this._worldEnvironmentSignature = signature;
+
+        this.disposeWorldTexture(this._worldBackgroundTexture);
+        this.disposeWorldTexture(this._worldLightingTexture);
+        this._worldBackgroundTexture = null;
+        this._worldLightingTexture = null;
+
+        if (!worldLight.enabled) {
+            this.scene.environment = null;
+            this.scene.background = new THREE.Color(document.scene.backgroundColor);
+            this.scene.environmentRotation.set(0, 0, 0);
+            this.scene.backgroundRotation.set(0, 0, 0);
+            this.scheduleSceneRebuild();
+            return;
+        }
+
+        if (worldLight.mode === 'hdri' && hdriAsset) {
+            this.scene.environment = null;
+            this.scene.background = new THREE.Color(document.scene.backgroundColor);
+            this.getHdriTexture(hdriAsset).then((texture) => {
+                if (this._worldEnvironmentSignature !== signature) return;
+                this.scene.environment = texture;
+                this.scene.background = worldLight.backgroundVisible ? texture : new THREE.Color(document.scene.backgroundColor);
+                this.scene.environmentRotation.set(0, Number(worldLight.rotation) || 0, 0);
+                this.scene.backgroundRotation.set(0, Number(worldLight.rotation) || 0, 0);
+                this.scheduleSceneRebuild();
+            }).catch((error) => {
+                console.warn('Could not load the HDRI environment.', error);
+            });
+            return;
+        }
+
+        if (worldLight.mode === 'gradient') {
+            this._worldLightingTexture = createGradientEnvironmentTexture(worldLight.gradientStops, worldLight.intensity);
+            if (this._worldLightingTexture) {
+                this._worldLightingTexture.userData = {
+                    ...(this._worldLightingTexture.userData || {}),
+                    threeDOwnedTexture: true
+                };
+            }
+            if (worldLight.backgroundVisible) {
+                this._worldBackgroundTexture = createGradientEnvironmentTexture(worldLight.gradientStops, 1);
+                this._worldBackgroundTexture.userData = {
+                    ...(this._worldBackgroundTexture.userData || {}),
+                    threeDOwnedTexture: true
+                };
+            }
+        } else {
+            this._worldLightingTexture = createSolidEnvironmentTexture(worldLight.color, worldLight.intensity);
+            this._worldLightingTexture.userData = {
+                ...(this._worldLightingTexture.userData || {}),
+                threeDOwnedTexture: true
+            };
+            if (worldLight.backgroundVisible) {
+                this._worldBackgroundTexture = createSolidEnvironmentTexture(worldLight.color, 1);
+                this._worldBackgroundTexture.userData = {
+                    ...(this._worldBackgroundTexture.userData || {}),
+                    threeDOwnedTexture: true
+                };
+            }
+        }
+
+        this.scene.environment = this._worldLightingTexture;
+        this.scene.background = worldLight.backgroundVisible
+            ? this._worldBackgroundTexture
+            : new THREE.Color(document.scene.backgroundColor);
+        this.scene.environmentRotation.set(0, Number(worldLight.rotation) || 0, 0);
+        this.scene.backgroundRotation.set(0, Number(worldLight.rotation) || 0, 0);
+        this.scheduleSceneRebuild();
     }
 
     disposeBooleanSegments(segments = [], { disposeMaterials = false } = {}) {
@@ -1005,11 +1259,11 @@ export class ThreeDEngine {
             return this.createBooleanSlicedObject(item);
         }
 
-        return item.kind === 'primitive'
-            ? this.createPrimitiveObject(item)
-            : item.kind === 'image-plane'
-                ? this.createImagePlaneObject(item)
-                : this.createModelObject(item);
+        if (item.kind === 'primitive') return this.createPrimitiveObject(item);
+        if (item.kind === 'image-plane') return this.createImagePlaneObject(item);
+        if (item.kind === 'text') return this.createTextObject(item);
+        if (item.kind === 'shape-2d') return this.createShape2DObject(item);
+        return this.createModelObject(item);
     }
 
     async createBooleanSlicedObject(item) {
@@ -1114,6 +1368,22 @@ export class ThreeDEngine {
                 type: item.light?.lightType || 'directional'
             });
         }
+        if (item.kind === 'text') {
+            const fontAsset = item.text?.fontSource?.assetId
+                ? this.activeDocument.assets?.fonts?.find((asset) => asset.id === item.text.fontSource.assetId) || null
+                : null;
+            return JSON.stringify({
+                kind: item.kind,
+                text: item.text,
+                fontDataUrl: fontAsset?.dataUrl || ''
+            });
+        }
+        if (item.kind === 'shape-2d') {
+            return JSON.stringify({
+                kind: item.kind,
+                shape2d: item.shape2d
+            });
+        }
         return JSON.stringify({
             kind: item.kind,
             format: item.asset?.format || '',
@@ -1188,6 +1458,45 @@ export class ThreeDEngine {
             child.userData.threeDOriginalMaterialTemplate = cloneMaterialSet(child.material);
         });
         return root;
+    }
+
+    async createTextObject(item) {
+        const group = item.text?.mode === 'extruded'
+            ? await createExtrudedTextObject(item, this.activeDocument)
+            : await createFlatTextObject(item, this.activeDocument);
+        group.name = item.name || 'Text';
+        group.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = item.text?.mode === 'extruded';
+                child.receiveShadow = item.text?.mode === 'extruded';
+                if (!child.userData.threeDOriginalMaterialTemplate) {
+                    child.userData.threeDOriginalMaterialTemplate = cloneMaterialSet(child.material);
+                }
+            }
+        });
+        return group;
+    }
+
+    createShape2DObject(item) {
+        const geometry = item.shape2d?.type === 'circle'
+            ? new THREE.CircleGeometry(0.5, 64)
+            : new THREE.PlaneGeometry(1, 1, 1, 1);
+        const material = new THREE.MeshStandardMaterial({
+            color: new THREE.Color(normalizeHexColor(item.shape2d?.color, '#ffffff')),
+            emissive: new THREE.Color(item.shape2d?.glow?.enabled ? normalizeHexColor(item.shape2d?.glow?.color, item.shape2d?.color || '#ffffff') : '#000000'),
+            emissiveIntensity: item.shape2d?.glow?.enabled ? Number(item.shape2d?.glow?.intensity || 0) : 0,
+            transparent: Number(item.shape2d?.opacity || 1) < 1,
+            opacity: Number(item.shape2d?.opacity || 1),
+            roughness: 1,
+            metalness: 0,
+            side: THREE.DoubleSide
+        });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+        mesh.name = item.name || (item.shape2d?.type === 'circle' ? 'Circle' : 'Square');
+        mesh.userData.threeDOriginalMaterialTemplate = cloneMaterialSet(material);
+        return mesh;
     }
 
     createPrimitiveObject(item) {
@@ -1429,8 +1738,18 @@ export class ThreeDEngine {
     async applyItemState(item, object) {
         object.name = item.name;
         object.visible = item.visible !== false;
-        object.position.fromArray(item.position);
-        object.rotation.set(item.rotation[0], item.rotation[1], item.rotation[2]);
+        let appliedPosition = item.position;
+        let appliedRotation = item.rotation;
+        if (item.kind === 'text' && item.text?.attachment?.targetItemId) {
+            const target = this.activeDocument.scene.items.find((entry) => entry.id === item.text.attachment.targetItemId) || null;
+            const attachedTransform = resolveAttachmentTransform(target, item.text.attachment);
+            if (attachedTransform) {
+                appliedPosition = attachedTransform.position;
+                appliedRotation = attachedTransform.rotation;
+            }
+        }
+        object.position.fromArray(appliedPosition);
+        object.rotation.set(appliedRotation[0], appliedRotation[1], appliedRotation[2]);
         object.scale.fromArray(item.scale);
         object.userData.locked = !!item.locked;
 
@@ -1453,6 +1772,10 @@ export class ThreeDEngine {
                 helper.visible = object.visible;
                 helper.update?.();
             }
+            return;
+        }
+
+        if (item.kind === 'text' || item.kind === 'shape-2d') {
             return;
         }
 
@@ -1524,6 +1847,10 @@ export class ThreeDEngine {
         }
         this.controls.target.copy(center);
         this.camera.position.copy(center).add(direction.multiplyScalar(radius * 2.6));
+        if (this._projectionMode === 'orthographic') {
+            this.orthographicCamera.zoom = Math.max(0.05, 4 / Math.max(radius, 0.1));
+            this.orthographicCamera.updateProjectionMatrix();
+        }
         this.syncFlyStateFromCamera(center.clone());
         if (this._cameraMode === 'orbit') {
             this.controls.update();
@@ -1540,7 +1867,10 @@ export class ThreeDEngine {
         return {
             cameraPosition: this.camera.position.toArray(),
             cameraTarget: this.controls.target.toArray(),
-            fov: this.camera.fov,
+            cameraQuaternion: this.camera.quaternion.toArray(),
+            projection: this._projectionMode,
+            orthoZoom: this.orthographicCamera.zoom,
+            fov: this.perspectiveCamera.fov,
             near: this.camera.near,
             far: this.camera.far
         };
@@ -1550,6 +1880,7 @@ export class ThreeDEngine {
         const document = normalizeThreeDDocument(documentState);
         this.camera.position.fromArray(document.view.cameraPosition);
         this.controls.target.fromArray(document.view.cameraTarget);
+        this.updateOrthographicProjection(document.view.orthoZoom || 1);
         this.syncFlyStateFromCamera(this.controls.target.clone());
         if (this._cameraMode === 'orbit') {
             this.controls.update();
@@ -1588,7 +1919,10 @@ export class ThreeDEngine {
         this.onCameraCommitted?.({
             cameraPosition: this.camera.position.toArray(),
             cameraTarget: this.controls.target.toArray(),
-            fov: this.camera.fov,
+            cameraQuaternion: this.camera.quaternion.toArray(),
+            projection: this._projectionMode,
+            orthoZoom: this.orthographicCamera.zoom,
+            fov: this.perspectiveCamera.fov,
             near: this.camera.near,
             far: this.camera.far
         });
@@ -1781,12 +2115,24 @@ export class ThreeDEngine {
         configurePathTracerQuality(tracer, normalized.render);
         const denoisePass = createDenoisePass();
 
-        const renderCamera = this.camera.clone();
-        renderCamera.aspect = outputWidth / Math.max(1, outputHeight);
+        const renderCamera = normalized.view.projection === 'orthographic'
+            ? new THREE.OrthographicCamera(-5, 5, 5, -5, normalized.view.near, normalized.view.far)
+            : new THREE.PerspectiveCamera(normalized.view.fov, outputWidth / Math.max(1, outputHeight), normalized.view.near, normalized.view.far);
         renderCamera.position.fromArray(normalized.view.cameraPosition);
         renderCamera.near = normalized.view.near;
         renderCamera.far = normalized.view.far;
-        renderCamera.fov = normalized.view.fov;
+        if (renderCamera.isPerspectiveCamera) {
+            renderCamera.aspect = outputWidth / Math.max(1, outputHeight);
+            renderCamera.fov = normalized.view.fov;
+        } else {
+            const aspect = outputWidth / Math.max(1, outputHeight);
+            const halfHeight = 5 / Math.max(0.05, Number(normalized.view.orthoZoom) || 1);
+            const halfWidth = halfHeight * aspect;
+            renderCamera.left = -halfWidth;
+            renderCamera.right = halfWidth;
+            renderCamera.top = halfHeight;
+            renderCamera.bottom = -halfHeight;
+        }
         renderCamera.lookAt(new THREE.Vector3(...normalized.view.cameraTarget));
         renderCamera.updateProjectionMatrix();
 
@@ -2000,6 +2346,11 @@ export class ThreeDEngine {
         disposeDenoisePass(this.viewportDenoisePass);
         disposePathTracerSafely(this.pathTracer);
         this.meshViewMaterial.dispose();
+        this.disposeWorldTexture(this._worldBackgroundTexture);
+        this.disposeWorldTexture(this._worldLightingTexture);
+        this._worldBackgroundTexture = null;
+        this._worldLightingTexture = null;
+        this.hdriCache.clear();
         this.sceneObjects.forEach((_object, itemId) => this.removeSceneItem(itemId));
         this.container.removeChild(this.renderer.domElement);
         this.renderer.dispose();

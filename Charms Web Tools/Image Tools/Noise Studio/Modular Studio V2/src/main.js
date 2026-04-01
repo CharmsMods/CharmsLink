@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { createStore } from './state/store.js';
 import { loadRegistry, createLayerInstance, relabelInstance } from './registry/index.js';
 import { downloadState, readJsonFile, validateImportPayload } from './io/documents.js';
@@ -21,6 +22,7 @@ import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
 import {
     createEmptyThreeDDocument,
+    createThreeDAssetId,
     createThreeDCameraPresetId,
     createThreeDSceneItemId,
     isThreeDDocumentPayload,
@@ -28,6 +30,12 @@ import {
     serializeThreeDDocument,
     summarizeThreeDDocument
 } from './3d/document.js';
+import {
+    alignCameraToLockedView,
+    createAttachmentFromWorldHit,
+    createCanvasSpawnTransform,
+    resolveAttachmentTransform
+} from './3d/viewMath.js';
 
 const DB_NAME = 'ModularStudioDB';
 const DB_VERSION = 2;
@@ -349,6 +357,117 @@ function createThreeDPrimitiveItem(primitiveType = 'cube') {
 
 function isThreeDBooleanCompatibleItem(item) {
     return item?.kind === 'model' || item?.kind === 'primitive';
+}
+
+function getThreeDCanvasSpawn(view = {}) {
+    const spawn = createCanvasSpawnTransform(view);
+    return {
+        position: spawn.position || [0, 0, 0],
+        rotation: spawn.rotation || [0, 0, 0]
+    };
+}
+
+function createThreeDTextItem(view = {}, overrides = {}) {
+    const spawn = getThreeDCanvasSpawn(view);
+    return {
+        id: createThreeDSceneItemId('text'),
+        kind: 'text',
+        name: 'Text',
+        visible: true,
+        locked: false,
+        position: [...spawn.position],
+        rotation: [...spawn.rotation],
+        scale: [1, 1, 1],
+        text: {
+            content: 'Text',
+            mode: 'flat',
+            fontSource: {
+                type: 'system',
+                assetId: null,
+                family: 'Arial'
+            },
+            color: '#ffffff',
+            opacity: 1,
+            glow: {
+                enabled: false,
+                color: '#ffffff',
+                intensity: 4
+            },
+            characterOverrides: [],
+            extrude: {
+                depth: 0.2,
+                bevelSize: 0.02,
+                bevelThickness: 0.02,
+                bevelSegments: 2
+            },
+            attachment: null,
+            ...(overrides.text || {})
+        }
+    };
+}
+
+function createThreeDShapeItem(shapeType = 'square', view = {}) {
+    const spawn = getThreeDCanvasSpawn(view);
+    return {
+        id: createThreeDSceneItemId('shape'),
+        kind: 'shape-2d',
+        name: shapeType === 'circle' ? 'Circle' : 'Square',
+        visible: true,
+        locked: false,
+        position: [...spawn.position],
+        rotation: [...spawn.rotation],
+        scale: [1, 1, 1],
+        shape2d: {
+            type: shapeType === 'circle' ? 'circle' : 'square',
+            color: '#ffffff',
+            opacity: 1,
+            glow: {
+                enabled: false,
+                color: '#ffffff',
+                intensity: 4
+            }
+        }
+    };
+}
+
+function getThreeDFileExtension(fileName = '') {
+    const match = String(fileName || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+    return match ? match[1] : '';
+}
+
+function buildThreeDTargetMatrix(item = {}) {
+    return new THREE.Matrix4().compose(
+        new THREE.Vector3(...(item.position || [0, 0, 0])),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(...(item.rotation || [0, 0, 0]), 'XYZ')),
+        new THREE.Vector3(...(item.scale || [1, 1, 1]))
+    );
+}
+
+function applyAttachedTextTransforms(items = [], changedItemId = null) {
+    const itemMap = new Map(items.map((item) => [item.id, item]));
+    return items.map((item) => {
+        if (item.kind !== 'text' || !item.text?.attachment?.targetItemId) return item;
+        const target = itemMap.get(item.text.attachment.targetItemId);
+        if (!target) {
+            return {
+                ...item,
+                text: {
+                    ...item.text,
+                    attachment: null
+                }
+            };
+        }
+        if (changedItemId && target.id !== changedItemId) {
+            return item;
+        }
+        const transform = resolveAttachmentTransform(target, item.text.attachment);
+        if (!transform) return item;
+        return {
+            ...item,
+            position: [...transform.position],
+            rotation: [...transform.rotation]
+        };
+    });
 }
 
 function buildLibraryPayload(documentState) {
@@ -1106,6 +1225,37 @@ window.addEventListener('DOMContentLoaded', async () => {
             });
         }
         return items;
+    }
+
+    async function createThreeDFontAssetsFromFiles(files) {
+        const assets = [];
+        for (const file of files || []) {
+            const extension = getThreeDFileExtension(file?.name);
+            if (!['ttf', 'otf', 'woff', 'woff2'].includes(extension)) continue;
+            const assetDataUrl = await fileToDataUrl(file);
+            assets.push({
+                id: createThreeDAssetId('font'),
+                name: stripProjectExtension(file.name) || 'Font',
+                format: extension,
+                mimeType: file.type || '',
+                dataUrl: assetDataUrl
+            });
+        }
+        return assets;
+    }
+
+    async function createThreeDHdriAssetFromFile(file) {
+        if (!file) return null;
+        const extension = getThreeDFileExtension(file?.name);
+        if (extension !== 'hdr') return null;
+        const assetDataUrl = await fileToDataUrl(file);
+        return {
+            id: createThreeDAssetId('hdri'),
+            name: stripProjectExtension(file.name) || 'HDRI',
+            format: extension,
+            mimeType: file.type || '',
+            dataUrl: assetDataUrl
+        };
     }
 
     async function getMatchingLibraryEntries(payload, projectType = null) {
@@ -2619,6 +2769,101 @@ window.addEventListener('DOMContentLoaded', async () => {
             });
             commitActiveSection('3d');
         },
+        async importThreeDFontFiles(files) {
+            if (!ensureThreeDSceneUnlocked('uploading fonts')) return [];
+            const assets = await createThreeDFontAssetsFromFiles(files);
+            if (!assets.length) {
+                throw new Error('Choose one or more `.ttf`, `.otf`, `.woff`, or `.woff2` font files.');
+            }
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                return {
+                    ...normalized,
+                    assets: {
+                        ...normalized.assets,
+                        fonts: [...normalized.assets.fonts, ...assets]
+                    }
+                };
+            }, { render: false });
+            return assets;
+        },
+        async importThreeDHdriFile(file) {
+            if (!ensureThreeDSceneUnlocked('uploading an HDRI')) return null;
+            const asset = await createThreeDHdriAssetFromFile(file);
+            if (!asset) {
+                throw new Error('Choose a `.hdr` file for the world light environment.');
+            }
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                return {
+                    ...normalized,
+                    assets: {
+                        ...normalized.assets,
+                        hdris: [...normalized.assets.hdris, asset]
+                    },
+                    scene: {
+                        ...normalized.scene,
+                        worldLight: {
+                            ...normalized.scene.worldLight,
+                            mode: 'hdri',
+                            enabled: true,
+                            hdriAssetId: asset.id
+                        }
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+            return asset;
+        },
+        addThreeDText() {
+            if (!ensureThreeDSceneUnlocked('adding text')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const item = createThreeDTextItem(normalized.view);
+                item.name = createUniqueThreeDItemName(item.name, normalized.scene.items);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: [...normalized.scene.items, item]
+                    },
+                    selection: {
+                        itemId: item.id
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+            commitActiveSection('3d');
+        },
+        addThreeDShape(shapeType = 'square') {
+            if (!ensureThreeDSceneUnlocked('adding a 2D shape')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const item = createThreeDShapeItem(shapeType, normalized.view);
+                item.name = createUniqueThreeDItemName(item.name, normalized.scene.items);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: [...normalized.scene.items, item]
+                    },
+                    selection: {
+                        itemId: item.id
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+            commitActiveSection('3d');
+        },
         setThreeDSelection(itemId) {
             if (!ensureThreeDSceneUnlocked('changing the selected 3D item')) return;
             updateThreeDDocument((document) => ({
@@ -2704,6 +2949,26 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
             }));
         },
+        updateThreeDWorldLight(patch = {}) {
+            if (!ensureThreeDSceneUnlocked('changing world light settings')) return;
+            updateThreeDDocument((document) => ({
+                ...document,
+                scene: {
+                    ...document.scene,
+                    worldLight: {
+                        ...(document.scene?.worldLight || {}),
+                        ...patch,
+                        gradientStops: patch.gradientStops === undefined
+                            ? document.scene?.worldLight?.gradientStops || []
+                            : patch.gradientStops
+                    }
+                },
+                render: {
+                    ...document.render,
+                    currentSamples: 0
+                }
+            }));
+        },
         updateThreeDRenderSettings(patch = {}) {
             if (!ensureThreeDSceneUnlocked('changing 3D render settings')) return;
             updateThreeDDocument((document) => ({
@@ -2724,6 +2989,43 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ...patch
                 }
             }));
+        },
+        configureThreeDCanvasView(patch = {}, snapshot = null) {
+            if (!ensureThreeDSceneUnlocked('changing the 3D camera view')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                let nextView = {
+                    ...normalized.view,
+                    ...patch
+                };
+                if (patch.lockedView === 'current' && snapshot?.cameraQuaternion) {
+                    nextView.lockedRotation = [...snapshot.cameraQuaternion];
+                }
+                if (nextView.navigationMode === 'canvas') {
+                    const aligned = alignCameraToLockedView({
+                        ...nextView,
+                        cameraPosition: snapshot?.cameraPosition || nextView.cameraPosition,
+                        cameraTarget: snapshot?.cameraTarget || nextView.cameraTarget
+                    });
+                    nextView = {
+                        ...nextView,
+                        cameraPosition: aligned.cameraPosition,
+                        cameraTarget: aligned.cameraTarget,
+                        lockedRotation: nextView.lockedView === 'current'
+                            ? aligned.lockedRotation
+                            : nextView.lockedRotation
+                    };
+                    if (nextView.projection === 'orthographic' && (patch.wheelMode == null)) {
+                        nextView.wheelMode = 'zoom';
+                    } else if (nextView.projection === 'perspective' && (patch.wheelMode == null)) {
+                        nextView.wheelMode = 'travel';
+                    }
+                }
+                return {
+                    ...normalized,
+                    view: nextView
+                };
+            });
         },
         resetThreeDCamera() {
             if (!ensureThreeDSceneUnlocked('resetting the 3D camera')) return;
@@ -2749,7 +3051,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                     name: presetName,
                     cameraPosition: [...(source.cameraPosition || document.view.cameraPosition)],
                     cameraTarget: [...(source.cameraTarget || document.view.cameraTarget)],
-                    fov: Number(source.fov || document.view.fov || 50)
+                    fov: Number(source.fov || document.view.fov || 50),
+                    projection: source.projection || document.view.projection || 'perspective',
+                    orthoZoom: Number(source.orthoZoom || document.view.orthoZoom || 1)
                 };
                 return {
                     ...document,
@@ -2772,7 +3076,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                         ...document.view,
                         cameraPosition: [...preset.cameraPosition],
                         cameraTarget: [...preset.cameraTarget],
-                        fov: preset.fov
+                        fov: preset.fov,
+                        projection: preset.projection || document.view.projection,
+                        orthoZoom: Number(preset.orthoZoom || document.view.orthoZoom || 1)
                     }
                 };
             });
@@ -2873,24 +3179,36 @@ window.addEventListener('DOMContentLoaded', async () => {
         updateThreeDItemTransform(itemId, patch = {}) {
             if (!itemId) return;
             if (!ensureThreeDSceneUnlocked('editing transforms')) return;
-            updateThreeDDocument((document) => ({
-                ...document,
-                scene: {
-                    ...document.scene,
-                    items: document.scene.items.map((item) => item.id === itemId
-                        ? {
-                            ...item,
-                            ...(patch.position ? { position: [...patch.position] } : {}),
-                            ...(patch.rotation ? { rotation: [...patch.rotation] } : {}),
-                            ...(patch.scale ? { scale: [...patch.scale] } : {})
-                        }
-                        : item)
-                },
-                render: {
-                    ...document.render,
-                    currentSamples: 0
-                }
-            }));
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const nextItems = normalized.scene.items.map((item) => item.id === itemId
+                    ? {
+                        ...item,
+                        ...(patch.position ? { position: [...patch.position] } : {}),
+                        ...(patch.rotation ? { rotation: [...patch.rotation] } : {}),
+                        ...(patch.scale ? { scale: [...patch.scale] } : {}),
+                        ...(item.kind === 'text' && item.text?.attachment
+                            ? {
+                                text: {
+                                    ...item.text,
+                                    attachment: null
+                                }
+                            }
+                            : {})
+                    }
+                    : item);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: applyAttachedTextTransforms(nextItems, itemId)
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
         },
         resetThreeDItemTransform(itemId) {
             actions.updateThreeDItemTransform(itemId, {
@@ -3013,30 +3331,42 @@ window.addEventListener('DOMContentLoaded', async () => {
         deleteThreeDItem(itemId) {
             if (!itemId) return;
             if (!ensureThreeDSceneUnlocked('deleting a 3D item')) return;
-            updateThreeDDocument((document) => ({
-                ...document,
-                scene: {
-                    ...document.scene,
-                    items: document.scene.items
-                        .filter((item) => item.id !== itemId)
-                        .map((item) => item.kind === 'light' && item.light?.targetItemId === itemId
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const nextItems = normalized.scene.items
+                    .filter((item) => item.id !== itemId)
+                    .map((item) => item.kind === 'light' && item.light?.targetItemId === itemId
+                        ? {
+                            ...item,
+                            light: {
+                                ...item.light,
+                                targetItemId: null
+                            }
+                        }
+                        : item.kind === 'text' && item.text?.attachment?.targetItemId === itemId
                             ? {
                                 ...item,
-                                light: {
-                                    ...item.light,
-                                    targetItemId: null
+                                text: {
+                                    ...item.text,
+                                    attachment: null
                                 }
                             }
-                            : item)
-                },
-                selection: {
-                    itemId: document.selection.itemId === itemId ? null : document.selection.itemId
-                },
-                render: {
-                    ...document.render,
-                    currentSamples: 0
-                }
-            }));
+                            : item);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: nextItems
+                    },
+                    selection: {
+                        itemId: normalized.selection.itemId === itemId ? null : normalized.selection.itemId
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
         },
         updateThreeDMaterial(itemId, patch = {}) {
             if (!itemId) return;
@@ -3068,6 +3398,127 @@ window.addEventListener('DOMContentLoaded', async () => {
                     currentSamples: 0
                 }
             }));
+        },
+        updateThreeDText(itemId, patch = {}) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('editing text')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: normalized.scene.items.map((item) => item.id === itemId && item.kind === 'text'
+                            ? {
+                                ...item,
+                                text: {
+                                    ...item.text,
+                                    ...patch,
+                                    fontSource: patch.fontSource
+                                        ? {
+                                            ...item.text.fontSource,
+                                            ...patch.fontSource
+                                        }
+                                        : item.text.fontSource,
+                                    glow: patch.glow
+                                        ? {
+                                            ...item.text.glow,
+                                            ...patch.glow
+                                        }
+                                        : item.text.glow,
+                                    extrude: patch.extrude
+                                        ? {
+                                            ...item.text.extrude,
+                                            ...patch.extrude
+                                        }
+                                        : item.text.extrude,
+                                    attachment: patch.attachment === undefined ? item.text.attachment : patch.attachment
+                                }
+                            }
+                            : item)
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+        },
+        updateThreeDShape(itemId, patch = {}) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('editing shapes')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: normalized.scene.items.map((item) => item.id === itemId && item.kind === 'shape-2d'
+                            ? {
+                                ...item,
+                                shape2d: {
+                                    ...item.shape2d,
+                                    ...patch,
+                                    glow: patch.glow
+                                        ? {
+                                            ...item.shape2d.glow,
+                                            ...patch.glow
+                                        }
+                                        : item.shape2d.glow
+                                }
+                            }
+                            : item)
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+        },
+        attachThreeDTextToSurface(itemId, surfaceHit) {
+            if (!itemId || !surfaceHit?.targetItemId) return;
+            if (!ensureThreeDSceneUnlocked('attaching text to a surface')) return;
+            updateThreeDDocument((document) => {
+                const normalized = normalizeThreeDDocument(document);
+                const target = normalized.scene.items.find((item) => item.id === surfaceHit.targetItemId);
+                const textItem = normalized.scene.items.find((item) => item.id === itemId && item.kind === 'text');
+                if (!target || !textItem) return normalized;
+                const attachment = createAttachmentFromWorldHit(
+                    target,
+                    new THREE.Vector3(...surfaceHit.point),
+                    new THREE.Vector3(...surfaceHit.normal),
+                    surfaceHit.tangent ? new THREE.Vector3(...surfaceHit.tangent) : null,
+                    surfaceHit.offset ?? 0.01
+                );
+                const transform = resolveAttachmentTransform(target, attachment);
+                return {
+                    ...normalized,
+                    scene: {
+                        ...normalized.scene,
+                        items: normalized.scene.items.map((item) => item.id === itemId
+                            ? {
+                                ...item,
+                                position: transform ? [...transform.position] : item.position,
+                                rotation: transform ? [...transform.rotation] : item.rotation,
+                                text: {
+                                    ...item.text,
+                                    attachment
+                                }
+                            }
+                            : item)
+                    },
+                    render: {
+                        ...normalized.render,
+                        currentSamples: 0
+                    }
+                };
+            });
+        },
+        detachThreeDTextSurface(itemId) {
+            if (!itemId) return;
+            if (!ensureThreeDSceneUnlocked('detaching text from a surface')) return;
+            actions.updateThreeDText(itemId, { attachment: null });
         },
         async setThreeDMaterialTexture(itemId, file) {
             if (!itemId || !file) return;
