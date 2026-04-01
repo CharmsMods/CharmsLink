@@ -39,9 +39,16 @@ const MATERIAL_MAP_KEYS = [
     'transmissionMap'
 ];
 
+const EDIT_VIEW_MAX_PIXEL_RATIO = 1.25;
+
 function normalizeHexColor(value, fallback = '#ffffff') {
     const text = String(value || '').trim();
     return /^#[0-9a-fA-F]{6}$/.test(text) ? text.toLowerCase() : fallback;
+}
+
+function getMaterialColorHex(material, fallback = '#ffffff') {
+    const color = material?.color;
+    return color?.isColor ? `#${color.getHexString()}` : fallback;
 }
 
 function extractItemId(object) {
@@ -359,9 +366,13 @@ export class ThreeDEngine {
         this._pathTraceWarmupPending = false;
         this._pathTraceLoadingActive = false;
         this._pathTraceLoadingMessage = 'Preparing path tracer...';
+        this._pathTracerSceneDirty = true;
         this._worldEnvironmentSignature = '';
         this._worldBackgroundTexture = null;
         this._worldLightingTexture = null;
+        this._viewportPixelRatio = 0;
+        this._viewportWidth = 0;
+        this._viewportHeight = 0;
         this.clock = new THREE.Clock();
 
         this.scene = new THREE.Scene();
@@ -379,14 +390,19 @@ export class ThreeDEngine {
 
         this.renderer = new THREE.WebGLRenderer({
             antialias: true,
-            alpha: false,
+            alpha: true,
             preserveDrawingBuffer: true
         });
         this.renderer.domElement.tabIndex = 0;
         this.renderer.domElement.style.outline = 'none';
-        this.renderer.setPixelRatio(window.devicePixelRatio || 1);
+        this.renderer.domElement.style.position = 'absolute';
+        this.renderer.domElement.style.inset = '0';
+        this.renderer.domElement.style.width = '100%';
+        this.renderer.domElement.style.height = '100%';
+        this.renderer.domElement.style.zIndex = '2';
         this.renderer.setSize(Math.max(1, this.container.clientWidth), Math.max(1, this.container.clientHeight));
-        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.enabled = false;
+        this.renderer.shadowMap.autoUpdate = false;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
 
@@ -397,6 +413,7 @@ export class ThreeDEngine {
         this.pathTracer.minSamples = 0;
         configurePathTracerQuality(this.pathTracer, this.activeDocument.render);
         this.viewportDenoisePass = createDenoisePass();
+        this.syncViewportResolution(true);
         this.meshViewMaterial = new THREE.MeshBasicMaterial({
             color: 0xe7eefc,
             wireframe: true,
@@ -510,6 +527,40 @@ export class ThreeDEngine {
         return this.container.clientWidth / Math.max(1, this.container.clientHeight);
     }
 
+    getViewportPixelRatio() {
+        const devicePixelRatio = window.devicePixelRatio || 1;
+        if (this.canRunViewportPathTrace()) {
+            return devicePixelRatio;
+        }
+        return Math.min(devicePixelRatio, EDIT_VIEW_MAX_PIXEL_RATIO);
+    }
+
+    syncViewportResolution(force = false) {
+        if (!this.container || this.destroyed) return;
+        const width = Math.round(Number(this.container.clientWidth) || 0);
+        const height = Math.round(Number(this.container.clientHeight) || 0);
+        if (width < 2 || height < 2) return;
+
+        const pixelRatio = this.getViewportPixelRatio();
+        if (
+            !force
+            && width === this._viewportWidth
+            && height === this._viewportHeight
+            && Math.abs(pixelRatio - this._viewportPixelRatio) < 0.001
+        ) {
+            return;
+        }
+
+        this._viewportWidth = width;
+        this._viewportHeight = height;
+        this._viewportPixelRatio = pixelRatio;
+        this.renderer.setPixelRatio(pixelRatio);
+        this.renderer.setSize(width, height);
+        if (this.canRunViewportPathTrace()) {
+            this.pathTracer?.updateCamera();
+        }
+    }
+
     updateOrthographicProjection(zoom = this.activeDocument.view.orthoZoom || 1) {
         const aspect = this.getAspect() || 1;
         const halfHeight = 5;
@@ -592,14 +643,33 @@ export class ThreeDEngine {
         return this.withEditorObjectsHidden(callback);
     }
 
+    hasViewportPathTraceContent(document = this.activeDocument) {
+        return (document?.scene?.items || []).some((item) => item.visible !== false && item.kind !== 'light');
+    }
+
+    canRunViewportPathTrace() {
+        return this.renderMode === 'pathtrace' && this.hasViewportPathTraceContent();
+    }
+
     rebuildPathTracerScene() {
+        this._pathTracerSceneDirty = true;
+        if (!this.canRunViewportPathTrace()) {
+            return false;
+        }
         this.queuePathTraceWarmup('Rebuilding path tracer scene...');
-        return this.withPathTracerExclusions(() => this.pathTracer.setScene(this.scene, this.camera));
+        const result = this.withPathTracerExclusions(() => this.pathTracer.setScene(this.scene, this.camera));
+        this._pathTracerSceneDirty = false;
+        return result;
     }
 
     refreshPathTracerLights() {
+        if (!this.canRunViewportPathTrace()) {
+            this._pathTracerSceneDirty = true;
+            return false;
+        }
         this.queuePathTraceWarmup('Updating path tracer lights...');
         this.withPathTracerExclusions(() => this.pathTracer.updateLights());
+        return true;
     }
 
     getRaycastIntersection(clientX, clientY, { includeHelpers = true } = {}) {
@@ -865,7 +935,9 @@ export class ThreeDEngine {
         const signature = this.buildCameraSignature();
         if (!force && signature === this._lastCameraSignature) return false;
         this._lastCameraSignature = signature;
-        this.pathTracer.updateCamera();
+        if (this.canRunViewportPathTrace()) {
+            this.pathTracer.updateCamera();
+        }
         return true;
     }
 
@@ -918,8 +990,7 @@ export class ThreeDEngine {
         this.perspectiveCamera.aspect = width / height;
         this.perspectiveCamera.updateProjectionMatrix();
         this.updateOrthographicProjection(this.activeDocument.view.orthoZoom || 1);
-        this.renderer.setSize(width, height);
-        this.pathTracer.updateCamera();
+        this.syncViewportResolution(true);
     }
 
     queueSync(documentState) {
@@ -1009,25 +1080,28 @@ export class ThreeDEngine {
         const qualityChanged = configurePathTracerQuality(this.pathTracer, document.render);
         this.renderMode = document.render.mode;
         this.targetSamples = document.render.samplesTarget;
-        if (this.renderMode === 'pathtrace' && previousRenderMode !== 'pathtrace') {
-            this.queuePathTraceWarmup('Preparing path tracer...');
+        this.syncViewportResolution(previousRenderMode !== this.renderMode);
+        if (this.renderMode === 'pathtrace' && !this.hasViewportPathTraceContent(document)) {
+            this._pathTraceWarmupPending = false;
+            this.emitPathTraceLoading(false);
+            this.pathTracer.reset();
+        } else if (this.renderMode === 'pathtrace' && (previousRenderMode !== 'pathtrace' || this._pathTracerSceneDirty)) {
+            this.rebuildPathTracerScene();
         } else if (this.renderMode === 'pathtrace' && qualityChanged) {
             this.queuePathTraceWarmup('Updating path trace settings...');
             this.pathTracer.reset();
         } else if (this.renderMode !== 'pathtrace') {
             this._pathTraceWarmupPending = false;
             this.emitPathTraceLoading(false);
+            this.pathTracer.reset();
         }
         this.handleLiveCameraChange(true);
         this.updatePreviewLighting();
     }
 
     updatePreviewLighting() {
-        const hasVisibleSceneLight = this.activeDocument.scene.items.some((item) => item.kind === 'light' && item.visible !== false);
-        const hasWorldLight = !!this.activeDocument.scene?.worldLight?.enabled;
-        const showPreviewLights = this.renderMode === 'raster' && !hasVisibleSceneLight;
-        this.ambientLight.visible = showPreviewLights && !hasWorldLight;
-        this.keyLight.visible = showPreviewLights && !hasWorldLight;
+        this.ambientLight.visible = false;
+        this.keyLight.visible = false;
     }
 
     disposeWorldTexture(texture) {
@@ -1397,6 +1471,7 @@ export class ThreeDEngine {
 
     buildItemStateSignature(item) {
         return JSON.stringify({
+            renderMode: this.renderMode,
             name: item.name,
             visible: item.visible !== false,
             locked: !!item.locked,
@@ -1672,8 +1747,58 @@ export class ThreeDEngine {
         return material;
     }
 
+    createUnlitMaterial(template, config = {}, mapTexture = null, options = {}) {
+        const colorHex = normalizeHexColor(
+            config.color,
+            getMaterialColorHex(template, '#ffffff')
+        );
+        const opacity = Number(config.opacity ?? template?.opacity ?? 1);
+        const material = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(colorHex),
+            map: mapTexture || template?.map || null,
+            alphaMap: options.alphaMap ?? template?.alphaMap ?? null,
+            transparent: options.transparent ?? Boolean(opacity < 1 || mapTexture || template?.transparent),
+            opacity,
+            side: options.side ?? template?.side ?? THREE.FrontSide,
+            vertexColors: !!template?.vertexColors,
+            fog: false,
+            wireframe: !!template?.wireframe
+        });
+        material.flatShading = !!template?.flatShading;
+        material.alphaTest = Number(options.alphaTest ?? template?.alphaTest ?? 0);
+        material.depthTest = template?.depthTest ?? true;
+        material.depthWrite = options.depthWrite ?? template?.depthWrite ?? opacity >= 1;
+        material.blending = template?.blending ?? THREE.NormalBlending;
+        material.premultipliedAlpha = !!template?.premultipliedAlpha;
+        material.toneMapped = false;
+        return material;
+    }
+
+    applyTemplateMaterial(object, { unlit = false } = {}) {
+        const meshes = [];
+        object.traverse((child) => {
+            if (child.isMesh) meshes.push(child);
+        });
+
+        meshes.forEach((mesh) => {
+            const template = mesh.userData.threeDOriginalMaterialTemplate || mesh.material;
+            if (!template) return;
+            const nextMaterial = unlit
+                ? (Array.isArray(template)
+                    ? template.map((entry) => this.createUnlitMaterial(entry))
+                    : this.createUnlitMaterial(template))
+                : cloneMaterialSet(template);
+            disposeMaterialSet(mesh.material);
+            mesh.material = nextMaterial;
+            getMaterialList(mesh.material).forEach((material) => {
+                material.needsUpdate = true;
+            });
+        });
+    }
+
     async applyRenderableMaterial(item, object) {
         const isImagePlane = item.kind === 'image-plane';
+        const useUnlitRaster = this.renderMode === 'raster';
         const meshes = [];
         object.traverse((child) => {
             if (child.isMesh) {
@@ -1687,24 +1812,37 @@ export class ThreeDEngine {
 
             let nextMaterial;
             if (isImagePlane) {
+                const imagePlaneTemplate = Array.isArray(template) ? template[0] : template;
+                const imagePlaneConfig = {
+                    ...item.material,
+                    preset: 'matte'
+                };
                 const planeTexture = await this.createConfiguredTexture(item.asset, {
                     flipY: true,
                     repeat: [1, 1],
                     offset: [0, 0],
                     rotation: 0
                 });
-                nextMaterial = this.createCustomMaterial(
-                    Array.isArray(template) ? template[0] : template,
-                    {
-                        ...item.material,
-                        preset: 'matte'
-                    },
-                    planeTexture,
-                    { transparent: true, side: THREE.DoubleSide }
-                );
+                nextMaterial = useUnlitRaster
+                    ? this.createUnlitMaterial(
+                        imagePlaneTemplate,
+                        imagePlaneConfig,
+                        planeTexture,
+                        { transparent: true, side: THREE.DoubleSide, alphaTest: 0.001 }
+                    )
+                    : this.createCustomMaterial(
+                        imagePlaneTemplate,
+                        imagePlaneConfig,
+                        planeTexture,
+                        { transparent: true, side: THREE.DoubleSide }
+                    );
                 nextMaterial.alphaTest = 0.001;
             } else if (item.material?.preset === 'original') {
-                nextMaterial = cloneMaterialSet(template);
+                nextMaterial = useUnlitRaster
+                    ? (Array.isArray(template)
+                        ? template.map((entry) => this.createUnlitMaterial(entry))
+                        : this.createUnlitMaterial(template))
+                    : cloneMaterialSet(template);
             } else {
                 const texture = item.material?.texture
                     ? await this.createConfiguredTexture(item.material.texture, {
@@ -1712,7 +1850,11 @@ export class ThreeDEngine {
                     })
                     : null;
                 if (Array.isArray(template)) {
-                    nextMaterial = template.map((entry) => this.createCustomMaterial(entry, item.material, texture ? texture.clone() : null));
+                    nextMaterial = template.map((entry) => (
+                        useUnlitRaster
+                            ? this.createUnlitMaterial(entry, item.material, texture ? texture.clone() : null)
+                            : this.createCustomMaterial(entry, item.material, texture ? texture.clone() : null)
+                    ));
                     nextMaterial.forEach((entry) => {
                         if (entry.map) {
                             entry.map.userData = {
@@ -1723,7 +1865,9 @@ export class ThreeDEngine {
                         }
                     });
                 } else {
-                    nextMaterial = this.createCustomMaterial(template, item.material, texture);
+                    nextMaterial = useUnlitRaster
+                        ? this.createUnlitMaterial(template, item.material, texture)
+                        : this.createCustomMaterial(template, item.material, texture);
                 }
             }
 
@@ -1776,6 +1920,9 @@ export class ThreeDEngine {
         }
 
         if (item.kind === 'text' || item.kind === 'shape-2d') {
+            this.applyTemplateMaterial(object, {
+                unlit: this.renderMode === 'raster'
+            });
             return;
         }
 
@@ -1942,7 +2089,7 @@ export class ThreeDEngine {
     async capturePreview(size = 320) {
         if (this.renderMode === 'mesh') {
             this.renderMeshScene();
-        } else if (this.renderMode === 'raster' || this.pathTracer.samples < 1) {
+        } else if (this.renderMode === 'raster' || !this.canRunViewportPathTrace() || this.pathTracer.samples < 1) {
             this.renderer.render(this.scene, this.camera);
         }
         const sourceCanvas = this.renderer.domElement;
@@ -2294,6 +2441,17 @@ export class ThreeDEngine {
         this.itemHelpers.forEach((helper) => helper?.update?.());
 
         if (this.renderMode === 'pathtrace') {
+            if (!this.canRunViewportPathTrace()) {
+                if (this._pathTraceLoadingActive) {
+                    this.emitPathTraceLoading(false);
+                }
+                this.withEditorObjectsHidden(() => {
+                    this.renderer.render(this.scene, this.camera);
+                });
+                this.renderEditorOverlay();
+                this.onSamplesUpdated?.(0);
+                return;
+            }
             if (this._pathTraceWarmupPending) {
                 this._pathTraceWarmupPending = false;
                 this.renderer.render(this.scene, this.camera);

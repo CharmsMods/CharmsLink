@@ -68,7 +68,7 @@ function describeItemKind(item) {
 function formatRenderModeLabel(mode) {
     if (mode === 'pathtrace') return 'Path Trace';
     if (mode === 'mesh') return 'Mesh';
-    return 'Raster';
+    return 'Edit';
 }
 
 function buildEngineSyncKey(documentState) {
@@ -240,7 +240,7 @@ export function createThreeDWorkspace(actions, store) {
                         <label style="display:flex; flex-direction:column; gap:6px;">
                             <span>Mode</span>
                             <select class="custom-select" data-threed-role="render-mode">
-                                <option value="raster">Raster</option>
+                                <option value="raster">Edit</option>
                                 <option value="pathtrace">Path Trace</option>
                                 <option value="mesh">Mesh</option>
                             </select>
@@ -1136,7 +1136,7 @@ export function createThreeDWorkspace(actions, store) {
         viewsPanel.body.appendChild(viewActions);
         const viewsHint = document.createElement('div');
         viewsHint.className = 'info-banner';
-        viewsHint.innerHTML = 'Use <code>1</code>, <code>2</code>, and <code>3</code> for raster, path trace, and mesh. Press <code>F</code> in orbit mode to frame the selected object.';
+        viewsHint.innerHTML = 'Use <code>1</code>, <code>2</code>, and <code>3</code> for edit, path trace, and mesh. Press <code>F</code> in orbit mode to frame the selected object.';
         viewsPanel.body.appendChild(viewsHint);
         if (cameraBody) {
             cameraBody.remove();
@@ -1186,7 +1186,7 @@ export function createThreeDWorkspace(actions, store) {
         viewportTopLeft.className = 'threed-overlay-corner threed-overlay-top-left';
         viewportTopLeft.innerHTML = `
             <div class="threed-mini-bar">
-                <button type="button" class="toolbar-button" data-threed-action="set-render-mode" data-render-mode="raster">Raster</button>
+                <button type="button" class="toolbar-button" data-threed-action="set-render-mode" data-render-mode="raster">Edit</button>
                 <button type="button" class="toolbar-button" data-threed-action="set-render-mode" data-render-mode="pathtrace">Path Trace</button>
                 <button type="button" class="toolbar-button" data-threed-action="set-render-mode" data-render-mode="mesh">Mesh</button>
             </div>
@@ -1208,7 +1208,7 @@ export function createThreeDWorkspace(actions, store) {
                 <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="fullscreen">Fullscreen</button>
                 <button type="button" class="toolbar-button" data-threed-action="save-library">Save</button>
             </div>
-            <span class="threed-overlay-chip">Mode <strong data-threed-role="compact-render-mode-label">Raster</strong></span>
+            <span class="threed-overlay-chip">Mode <strong data-threed-role="compact-render-mode-label">Edit</strong></span>
             <span class="threed-overlay-chip">Spp <strong data-threed-role="header-sample-count">0</strong></span>
         `;
         const viewportBottomLeft = document.createElement('div');
@@ -1218,7 +1218,7 @@ export function createThreeDWorkspace(actions, store) {
         const pathTraceLoading = document.createElement('div');
         pathTraceLoading.className = 'threed-pathtrace-loading';
         pathTraceLoading.dataset.threedRole = 'pathtrace-loading';
-        pathTraceLoading.innerHTML = `<div class="threed-loading-card"><div class="threed-spinner" aria-hidden="true"></div><div style="display:flex; flex-direction:column; gap:4px;"><strong>Preparing Path Tracer</strong><span data-threed-role="pathtrace-loading-text">Preparing path tracer...</span></div></div>`;
+        pathTraceLoading.innerHTML = `<div class="threed-loading-card"><div class="threed-spinner" aria-hidden="true"></div><div style="display:flex; flex-direction:column; gap:4px;"><strong data-threed-role="pathtrace-loading-title">Preparing Renderer</strong><span data-threed-role="pathtrace-loading-text">Preparing renderer...</span></div></div>`;
 
         refs.canvasContainer.style.position = 'absolute';
         refs.canvasContainer.style.inset = '0';
@@ -1253,6 +1253,7 @@ export function createThreeDWorkspace(actions, store) {
     refs.compactSampleCount = root.querySelector('[data-threed-role="compact-sample-count"]') || refs.headerSampleCount;
     refs.compactRenderModeLabel = root.querySelector('[data-threed-role="compact-render-mode-label"]');
     refs.pathTraceLoading = root.querySelector('[data-threed-role="pathtrace-loading"]');
+    refs.pathTraceLoadingTitle = root.querySelector('[data-threed-role="pathtrace-loading-title"]');
     refs.pathTraceLoadingText = root.querySelector('[data-threed-role="pathtrace-loading-text"]');
 
     let engine = null;
@@ -1305,10 +1306,13 @@ export function createThreeDWorkspace(actions, store) {
         });
     }
 
-    function setPathTraceLoading(active, message = 'Preparing path tracer...') {
+    function setPathTraceLoading(active, message = 'Preparing renderer...') {
         refs.pathTraceLoading?.classList.toggle('is-active', !!active);
+        if (refs.pathTraceLoadingTitle) {
+            refs.pathTraceLoadingTitle.textContent = 'Preparing Renderer';
+        }
         if (refs.pathTraceLoadingText) {
-            refs.pathTraceLoadingText.textContent = message || 'Preparing path tracer...';
+            refs.pathTraceLoadingText.textContent = message || 'Preparing renderer...';
         }
     }
 
@@ -1333,7 +1337,9 @@ export function createThreeDWorkspace(actions, store) {
 
     function setRenderMode(mode) {
         const nextMode = mode === 'pathtrace' || mode === 'mesh' ? mode : 'raster';
-        if (nextMode === 'pathtrace') {
+        const document = store.getState().threeDDocument;
+        const hasTracePreviewContent = (document?.scene?.items || []).some((item) => item.visible !== false && item.kind !== 'light');
+        if (nextMode === 'pathtrace' && hasTracePreviewContent) {
             setPathTraceLoading(true, 'Preparing path tracer...');
         } else if (!store.getState().threeDDocument?.renderJob?.active) {
             setPathTraceLoading(false);
@@ -1759,6 +1765,7 @@ export function createThreeDWorkspace(actions, store) {
         const requestedSamples = Math.round(Number(refs.renderDialogSamples?.value) || 0);
         const outputWidth = Math.round(Number(refs.renderDialogWidth?.value) || 0);
         const outputHeight = Math.round(Number(refs.renderDialogHeight?.value) || 0);
+        const exportEngine = 'pathtrace';
 
         if (requestedSamples < 1 || requestedSamples > 1000000) {
             setRenderDialogNote('Enter a sample count between 1 and 1,000,000.', 'error');
@@ -1789,6 +1796,7 @@ export function createThreeDWorkspace(actions, store) {
         };
 
         actions.updateThreeDRenderSettings({
+            exportEngine,
             outputWidth,
             outputHeight,
             lastJobSamples: requestedSamples
@@ -1805,7 +1813,7 @@ export function createThreeDWorkspace(actions, store) {
             message: 'Preparing render...'
         });
         setPathTraceLoading(true, 'Preparing render...');
-        setStatus(`Rendering ${requestedSamples} samples at ${outputWidth} x ${outputHeight}. The final render now takes over the viewport until export completes.`, 'info');
+        setStatus(`Path Trace rendering ${requestedSamples} samples at ${outputWidth} x ${outputHeight}. The final render now takes over the viewport until export completes.`, 'info');
         await waitForUiPaint();
 
         engine.startBackgroundRender({
@@ -2708,6 +2716,7 @@ export function createThreeDWorkspace(actions, store) {
 
             const selected = getSelectedItem(state);
             const selectedMaterial = getSelectedMaterial(state);
+            const hasTracePreviewContent = document.scene.items.some((item) => item.visible !== false && item.kind !== 'light');
             const renderLocked = !!document.renderJob?.active;
             const selectionLocked = !!selected?.locked;
             const lightSupportsTarget = selected?.kind === 'light' && ['directional', 'spot'].includes(selected.light?.lightType);
@@ -2948,6 +2957,8 @@ export function createThreeDWorkspace(actions, store) {
                     setStatus('Surface attach is active. Click a model or primitive surface, or press Escape to cancel.', 'info');
                 } else if (!document.scene.items.length) {
                     setStatus('Load models or add image planes to start building a 3D scene.');
+                } else if (document.render.mode === 'pathtrace' && !hasTracePreviewContent) {
+                    setStatus('Path Trace is active, but there are no visible objects to trace yet. Add a model, primitive, text, shape, or image plane to preview lighting.', 'info');
                 } else if (document.render.mode === 'pathtrace') {
                     setStatus(
                         document.render.denoiseEnabled
@@ -2958,7 +2969,7 @@ export function createThreeDWorkspace(actions, store) {
                 } else if (document.render.mode === 'mesh') {
                     setStatus('Mesh view is active. Scene geometry is shown as wireframe while the editor controls stay available.', 'info');
                 } else {
-                    setStatus(`${document.scene.items.length} scene item${document.scene.items.length === 1 ? '' : 's'} ready.`, 'info');
+                    setStatus('Edit view is active. Objects are shown unlit for faster editing and clearer visibility; switch to Path Trace to preview lighting.', 'info');
                 }
             }
 

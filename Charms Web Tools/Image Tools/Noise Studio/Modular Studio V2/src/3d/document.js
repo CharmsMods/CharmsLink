@@ -7,6 +7,7 @@ const PRIMITIVE_TYPES = new Set(['cube', 'sphere', 'cone', 'cylinder']);
 const SHAPE_2D_TYPES = new Set(['square', 'circle']);
 const MATERIAL_PRESETS = new Set(['original', 'matte', 'metal', 'glass', 'emissive']);
 const RENDER_MODES = new Set(['raster', 'pathtrace', 'mesh']);
+const EXPORT_ENGINES = new Set(['pathtrace']);
 const TONE_MAPPINGS = new Set(['aces', 'neutral', 'none']);
 const CAMERA_MODES = new Set(['orbit', 'fly']);
 const PROJECTIONS = new Set(['perspective', 'orthographic']);
@@ -327,6 +328,7 @@ export function createEmptyThreeDDocument() {
         },
         render: {
             mode: 'raster',
+            exportEngine: 'pathtrace',
             samplesTarget: 256,
             currentSamples: 0,
             exposure: 1,
@@ -350,6 +352,13 @@ export function createEmptyThreeDDocument() {
 export function normalizeThreeDDocument(document) {
     const base = createEmptyThreeDDocument();
     const source = document && typeof document === 'object' ? document : {};
+    const requestedRenderMode = String(source.render?.mode || '').toLowerCase();
+    const requestedExportEngine = String(source.render?.exportEngine || '').toLowerCase();
+    const hasExplicitRenderMode = source.render && Object.prototype.hasOwnProperty.call(source.render, 'mode');
+    const normalizedRenderMode = RENDER_MODES.has(requestedRenderMode)
+        ? requestedRenderMode
+        : (hasExplicitRenderMode ? 'pathtrace' : 'raster');
+    const normalizedExportEngine = EXPORT_ENGINES.has(requestedExportEngine) ? requestedExportEngine : 'pathtrace';
     const assets = {
         fonts: (Array.isArray(source.assets?.fonts) ? source.assets.fonts : []).map((asset, index) => normalizeAsset(asset, 'font', index)).filter(Boolean),
         hdris: (Array.isArray(source.assets?.hdris) ? source.assets.hdris : []).map((asset, index) => normalizeAsset(asset, 'hdri', index)).filter(Boolean)
@@ -395,7 +404,8 @@ export function normalizeThreeDDocument(document) {
         selection: { itemId: selectedId },
         view,
         render: {
-            mode: RENDER_MODES.has(String(source.render?.mode || '').toLowerCase()) ? String(source.render.mode).toLowerCase() : 'raster',
+            mode: normalizedRenderMode,
+            exportEngine: normalizedExportEngine,
             samplesTarget: round(source.render?.samplesTarget, 256, 1, 4096),
             currentSamples: round(source.render?.currentSamples, 0, 0, 1000000),
             exposure: num(source.render?.exposure, 1, 0.05, 10),

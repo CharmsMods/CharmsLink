@@ -2971,12 +2971,13 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         updateThreeDRenderSettings(patch = {}) {
             if (!ensureThreeDSceneUnlocked('changing 3D render settings')) return;
+            const resetsPreview = Object.keys(patch).some((key) => key !== 'exportEngine');
             updateThreeDDocument((document) => ({
                 ...document,
                 render: {
                     ...document.render,
                     ...patch,
-                    currentSamples: 0
+                    currentSamples: resetsPreview ? 0 : document.render?.currentSamples || 0
                 }
             }));
         },
