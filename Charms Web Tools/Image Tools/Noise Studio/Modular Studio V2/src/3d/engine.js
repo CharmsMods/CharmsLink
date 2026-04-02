@@ -373,6 +373,7 @@ export class ThreeDEngine {
         this._viewportPixelRatio = 0;
         this._viewportWidth = 0;
         this._viewportHeight = 0;
+        this.viewportActive = true;
         this.clock = new THREE.Clock();
 
         this.scene = new THREE.Scene();
@@ -991,6 +992,14 @@ export class ThreeDEngine {
         this.perspectiveCamera.updateProjectionMatrix();
         this.updateOrthographicProjection(this.activeDocument.view.orthoZoom || 1);
         this.syncViewportResolution(true);
+    }
+
+    setViewportActive(active) {
+        this.viewportActive = active !== false;
+        if (this.viewportActive) {
+            this.clock.getDelta();
+            this.onResize();
+        }
     }
 
     queueSync(documentState) {
@@ -2427,6 +2436,11 @@ export class ThreeDEngine {
 
         if (this.isBackgroundRenderActive()) {
             this.onSamplesUpdated?.(0);
+            return;
+        }
+
+        if (!this.viewportActive) {
+            this.clock.getDelta();
             return;
         }
 

@@ -738,7 +738,7 @@ function blendLayerIntoCompositeRegion(compositeCtx, layerCtx, region, blendMode
 }
 
 export class StitchEngine {
-    constructor() {
+    constructor(options = {}) {
         this.canvas = null;
         this.ctx = null;
         this.imageCache = new Map();
@@ -757,6 +757,7 @@ export class StitchEngine {
             bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 },
             viewport: { scale: 1, offsetX: 0, offsetY: 0, width: 1, height: 1 }
         };
+        this.taskBroker = options.taskBroker || null;
     }
 
     attachCanvas(canvas) {
@@ -1168,10 +1169,21 @@ export class StitchEngine {
             };
         }
 
-        const worker = await this.ensureWorker();
-        const result = worker
-            ? await this.runWorkerAnalysis(worker, { document: analysisDocument, preparedInputs }, options)
-            : analyzePreparedStitchInputs(analysisDocument, preparedInputs);
+        const result = this.taskBroker
+            ? await this.taskBroker.runTask('stitch', 'analyze-screenshot', {
+                document: analysisDocument,
+                preparedInputs
+            }, {
+                priority: 'user-visible',
+                processId: 'stitch.analysis',
+                onProgress: options.onProgress
+            })
+            : await (async () => {
+                const worker = await this.ensureWorker();
+                return worker
+                    ? this.runWorkerAnalysis(worker, { document: analysisDocument, preparedInputs }, options)
+                    : analyzePreparedStitchInputs(analysisDocument, preparedInputs);
+            })();
         return {
             ...result,
             backend: 'screenshot-js',

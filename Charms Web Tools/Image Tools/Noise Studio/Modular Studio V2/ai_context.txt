@@ -12,14 +12,25 @@ It is meant to be handed to a future AI together with the site files so the AI c
 
 If the code and this file disagree, the code is authoritative and this file should be updated.
 
+## Critical Development Rule
+
+Logging is now a first-class system in this app.
+
+- Modular Studio V2 now includes a top-level `Logs` section that surfaces site-wide process cards for startup, navigation, Library loading, import/export, save flows, sync work, Stitch activity, and 3D activity.
+- Future updates must explicitly consider where new work should emit logs for the Logs tab.
+- Do not add major background processing, save paths, import/export flows, synchronization checks, render stages, or recovery/error paths without wiring them into the logging system.
+- The logging engine and UI are part of the app architecture now, not optional debug-only extras.
+- If a future change introduces a new workflow and the code does not also update relevant logging points, that change should be treated as incomplete.
+
 ## 1. Product Model
 
-Modular Studio V2 is now a single-page app with four top-level sections:
+Modular Studio V2 is now a single-page app with five top-level sections:
 
 1. `Editor`
 2. `Library`
 3. `Stitch`
 4. `3D`
+5. `Logs`
 
 All four sections live inside the same page and same JS runtime.
 
@@ -34,11 +45,14 @@ Current section responsibilities:
   - The original modular image-processing engine.
   - Uses the registry-driven layer stack and the WebGL pipeline.
   - Owns normal state-file save/load for studio documents.
+  - Newly saved Editor JSON files are now self-contained: they embed both the original `source` image and an optional `preview` object containing the latest rendered PNG plus dimensions/timestamp.
 
 - `Library`
   - Integrated project browser backed by IndexedDB.
-  - Can hold mixed project types from `Editor`, `Stitch`, and `3D`.
-  - Owns Library import/export, tag catalog, selection workflows, secure bundle save/load, preview gallery, and detail inspection.
+  - Can hold mixed project types from `Editor`, `Stitch`, and `3D`, plus a separate asset catalog for images and reusable 3D models.
+  - The Library page now has its own local `Library` and `Assets` page tabs.
+  - Owns Library/Asset import-export, tag catalog, selection workflows, secure bundle save/load, asset-folder exchange, preview gallery, and detail inspection.
+  - Quietly backfills older saved Editor Library records that are missing embedded `preview` data by re-rendering them with the Editor engine and logging that repair work in `Logs`.
 
 - `Stitch`
   - A second engine with its own document model and UI.
@@ -49,6 +63,12 @@ Current section responsibilities:
   - Browser-based 3D scene workspace built on three.js.
 - Supports embedded `.glb` / self-contained `.gltf` models, image planes, primitive meshes, flat/extruded text, 2D shapes, editable point / spot / directional lights, world light / HDRI lighting, and path tracing.
   - Saves full 3D scenes into the same Library as Editor and Stitch, including embedded asset data, materials, textures, camera state, render settings, and preview image.
+  - Also has a bottom content drawer that mirrors the Library `Assets` page and can drag saved assets directly into the current scene.
+
+- `Logs`
+  - Process-monitor section that shows live card-based logs for app bootstrap, workspace navigation, Library sync/import/export/save activity, Editor file/export flows, Stitch work, and 3D work.
+  - Each process card can be cleared independently and downloaded as a text log.
+  - Intended as both user-facing transparency and a developer/debugging surface.
 
 ## 2. Entry Points
 
@@ -78,8 +98,12 @@ Current section responsibilities:
 - Main bootstrap.
 - Creates the store.
 - Creates the Studio engine and the Stitch engine.
+- Creates the shared logging engine used by the `Logs` section.
 - Owns the normalized 3D document actions and adapter-backed 3D Library persistence.
 - Owns IndexedDB helpers.
+- Owns both Library project records and Library asset records in the same IndexedDB store.
+- Quietly derives Editor render assets for the Asset Library, deduplicates imported 3D assets by fingerprint, auto-generates low-res previews for image assets, and syncs Library asset updates back into the 3D content drawer.
+- Missing image-asset previews are backfilled once per page reload in the background, and Library change notifications are coalesced before refreshing the Library page plus the 3D content drawer.
 - Owns app-level actions.
 - Owns the project adapter registry that lets the Library save/load mixed engine types.
 
@@ -94,21 +118,38 @@ Current section responsibilities:
   - Editor workspace
   - integrated Library panel
   - integrated Stitch workspace
+  - integrated Logs panel
   - integrated 3D workspace
 
 ### `src/ui/libraryPanel.js`
 
 - Entire integrated Library UI.
 - Owns:
-  - gallery rendering
-  - fullscreen cycling view
-  - detail view
+  - `Library` / `Assets` page-tab switching inside the Library section
+  - project gallery rendering and asset grid rendering
+  - non-blocking first-load Library progress feedback while IndexedDB-backed content hydrates
+  - fullscreen cycling view for Library projects
+  - detail view for projects and assets
+  - dedicated 3D model preview overlay for asset detail cards
   - side drawer
   - tag filters
   - multi-select
-  - save-library wizard
+  - scope-aware save wizard (`Library`, `Assets`, or combined)
+  - asset folder import/export using the File System Access API
   - secure import/export modals
   - drag-safe modal behavior
+  - Library-side progress and workflow logging hooks
+
+### `src/ui/logsPanel.js`
+
+- Card-based UI for the top-level `Logs` section.
+- Renders one card per process stream.
+- Supports per-card log downloads and clearing.
+
+### `src/logs/engine.js`
+
+- Shared in-memory logging engine.
+- Owns process streams, recent-entry snapshots, per-card history, subscriber updates, and text export generation.
 
 ### `src/stitch/`
 
@@ -166,9 +207,15 @@ Current section responsibilities:
   - Owns the 3D import/save controls, primitive creation buttons, text/shape creation, uploaded font / HDRI import, snapping controls, hierarchy, selection editing, material/texture controls, world-light controls, boolean slice/reset controls, camera preset UI, render modal, and render-job status/abort flow.
   - Renderer controls now include `Edit` (`raster`), `Path Trace`, and `Mesh` view modes, shared physically based bounce/exposure controls, PT-only denoise tuning, and keyboard mode switching on `1` / `2` / `3`.
   - `Render PNG` now runs through the path-trace export flow used by the current renderer.
+  - A bottom asset drawer now mirrors the Library `Assets` page, supports tiny live search, and lets the user drag saved assets into the viewport to place them in-scene.
+  - The path-trace loading overlay now includes a progress bar beneath the loader text.
   - Viewport object quick actions now live in a right-click context-menu system with one submenu layer, outside-click dismissal, `Escape` dismissal, and text surface-attach mode.
   - In the viewport, that context menu only opens when right-clicking the already-selected object.
   - In the outliner, right-clicking a row opens the same object context menu for that item.
+
+- `assetPreview.js`
+  - Lightweight three.js viewer used only by the Library asset-detail overlay.
+  - Loads saved `.glb` / self-contained `.gltf` assets into a simple lit gradient viewport with orbit/pan/zoom controls.
 
 ### `src/io/projectAdapters.js`
 
@@ -206,6 +253,7 @@ Allowed values:
 - `?section=library` -> Library
 - `?section=stitch` -> Stitch
 - `?section=3d` -> 3D
+- `?section=logs` -> Logs
 - anything else -> Editor
 
 `actions.setActiveSection(section)` syncs the URL with `history.replaceState(...)`.
@@ -215,6 +263,12 @@ Important behavior:
 - Switching `Editor <-> Stitch` does not trigger save/discard prompts.
 - Studio and Stitch keep separate in-memory drafts at the same time.
 - Replacement prompts happen only when loading/replacing a project inside one engine.
+- Hidden-section rendering is now intentionally deferred:
+  - hidden Editor preview rerenders are postponed until returning to `Editor`
+  - hidden Stitch canvas rerenders are postponed until returning to `Stitch`
+  - the live 3D viewport pauses while `3D` is unfocused
+  - background 3D PNG renders continue even while the 3D section is hidden
+  - Library page refreshes and 3D asset-drawer refreshes are deferred while those sections are hidden
 
 Cleanup on non-Editor section switches:
 
@@ -777,11 +831,13 @@ tags: [...]
 
 That record stores the persistent tag catalog so tags can exist even if no current project is using them.
 
-### Current Library record shape
+### Current Library project record shape
 
 A saved project record now effectively contains:
 
 - `id`
+- `kind: 'library-project'`
+- `recordType: 'project'`
 - `timestamp`
 - `name`
 - `blob`
@@ -800,6 +856,39 @@ A saved project record now effectively contains:
 - `sourceCount`
 - `renderWidth`
 - `renderHeight`
+
+### Current Library asset record shape
+
+A saved asset record now effectively contains:
+
+- `id`
+- `kind: 'library-asset'`
+- `recordType: 'asset'`
+- `timestamp`
+- `name`
+- `assetType`
+  - `'image'` or `'model'`
+- `format`
+- `mimeType`
+- `dataUrl`
+  - embedded asset payload
+- `tags`
+- `width`
+- `height`
+- `sourceProjectId`
+  - used for Editor-derived render assets
+- `sourceProjectType`
+- `sourceProjectName`
+- `origin`
+  - `'project-derived'`, `'3d-import'`, `'import'`, `'folder-import'`, etc.
+- `assetFingerprint`
+
+Important Asset Library rules:
+
+- Editor Library saves create or update a derived image asset tied to the saved project id.
+- Overwriting the same Editor Library project updates that derived asset instead of duplicating it.
+- 3D file-picker imports quietly upsert reusable asset records unless an identical asset fingerprint already exists.
+- Loading a 3D Library scene scans its scene items and backfills any missing reusable asset records.
 
 ### Compare Source rule
 
@@ -846,9 +935,18 @@ Used for Editor/Studio projects:
   "view": {},
   "export": {},
   "source": {},
+  "preview": {},
   "layerStack": []
 }
 ```
+
+Important Studio payload rules:
+
+- `preview` is optional on import/load for backward compatibility.
+- Newly saved Editor JSON files now always try to embed both:
+  - `source.imageData`
+  - `preview.imageData`
+- Studio runtime restore ignores `preview` as authoritative render state; the actual editable state still comes from `source` + `layerStack` + normal document fields.
 
 ### Stitch project payload
 
@@ -966,6 +1064,12 @@ These fields are for Library round-tripping. They are stripped before normal eng
 
 ## 11. Save / Load Behavior
 
+### Save Editor state JSON
+
+- Editor `Save` now captures the current rendered PNG and embeds it into `payload.preview`.
+- The old Editor `Save Image` toggle was removed; Editor JSON saves are now intended to be self-contained by default.
+- If there is no embeddable source image, the app still saves JSON but warns that source/render embedding was unavailable.
+
 ### Save to Library
 
 `actions.saveProjectToLibrary(...)` is now adapter-based.
@@ -977,11 +1081,14 @@ Flow:
 3. Refuse save if the draft is empty or not saveable.
 4. Serialize a clean payload.
 5. Fingerprint it with `makeProjectFingerprint(...)`.
+   - Studio `preview` metadata is stripped from the fingerprint so duplicate detection compares editable document state, not rendered PNG bytes.
 6. Reuse an exact existing Library record when `preferExisting` is requested.
 7. If the draft originated from a Library record, prompt for overwrite-vs-new behavior.
 8. Ask the adapter to render a preview blob and summary metadata.
-9. Save the resulting mixed-engine record into IndexedDB.
-10. Preserve tags on overwrite.
+9. For Studio projects, embed that freshly captured render into `payload.preview` before persistence while still storing the normal Library preview blob separately.
+10. Save the resulting mixed-engine record into IndexedDB.
+11. Preserve tags on overwrite.
+12. If the saved project is an Editor project, upsert its derived Asset Library image record too.
 
 ### Load from Library
 
@@ -993,6 +1100,26 @@ Flow:
 4. restores the payload through that adapter
 5. updates the correct active Library origin
 6. switches to the correct top-level section
+
+### Library project preview backfill
+
+- `actions.getLibraryProjects()` first checks saved Editor Library records for missing `payload.preview.imageData`.
+- Missing Studio previews are quietly re-rendered with the live Editor engine, written back into the IndexedDB project payload, and summarized in `Logs`.
+- After the repair pass, the Editor engine restores the active live document so the backfill does not become the new working state.
+
+### Asset Library synchronization
+
+`actions.getLibraryAssets()` now returns dedicated asset records, not project records.
+
+Important sync rules:
+
+- Editor project saves populate the Asset Library with a derived image record linked to that project id.
+- `importThreeDModelFiles(...)` and `importThreeDImageFiles(...)` quietly save reusable asset records after file-picker import.
+- `addLibraryAssetToThreeDScene(assetId)` converts a saved asset record back into a live 3D scene item.
+- 3D scene restore/import paths call `ensureLibraryAssetsFromThreeDItems(...)` so saved scene assets are backfilled into the Asset Library if needed.
+- New/imported image assets generate `previewDataUrl` thumbnails on save, and older image assets missing previews are backfilled once per reload.
+- `notifyLibraryChanged()` now coalesces refreshes, then updates both the Library page and the 3D content drawer.
+- 3D Library scene restore now commits the `3D` section immediately, then backfills any missing reusable asset records asynchronously so the section switch feels instant.
 
 ### Active Library origin tracking
 
@@ -1054,22 +1181,28 @@ Local panel state includes things like:
 
 ### Current Library browse model
 
-The Library is not a rigid equal-cell grid anymore.
+The Library page now has two local modes:
 
-It is a gallery-style masonry layout:
+- `Library`
+  - mixed project cards in the existing masonry/gallery view
+- `Assets`
+  - a smaller locked card grid for saved images and reusable 3D models
 
-- cards can take advantage of available width
-- preview images are kept larger
-- wasted white space is minimized
-- the right-side drawer holds sort/filter/tag tools
+Both modes share the same right-side drawer for sort/filter/tag workflows.
+
+Performance note:
+
+- the Library page keeps separate project-grid and asset-grid DOM hosts alive
+- switching between `Library` and `Assets` reuses those hosts instead of rebuilding both pages every time
+- hidden Library refreshes are deferred until the panel becomes active again
 
 ### Current sort/filter features
 
 Sort keys:
 
 - saved date
-- project name
-- original image size
+- item name
+- original/asset size
 - rendered image size
 
 Tag filtering supports:
@@ -1083,39 +1216,50 @@ Tag filtering supports:
 The Library has a true multi-select mode.
 
 - toolbar button: `Select`
-- selected projects can be batch deleted
+- selected projects or assets can be batch deleted
 - tags can be created without immediately applying them
-- existing tags can be applied to selected projects separately
+- existing tags can be applied to selected projects/assets separately
 - removing tags from selection requires confirmation
 
 ### Save Library wizard
 
-The Library can save the whole Library, not just one project.
+The Library save wizard is now scope-aware.
 
 Current Library-wide save formats:
 
 1. Plain bundle JSON
    - readable
-   - includes export date, projects, tags, metadata
+   - includes export date, tags, metadata, and whichever scope was chosen
 
 2. Secure packed JSON
    - gzip + base64
    - optional encryption
    - optional duplicate encrypted copies for recovery/tamper resilience
 
+Current save scopes:
+
+- `Library`
+- `Assets`
+- `Library + Assets`
+
+The active page (`Library` or `Assets`) is the default save scope, but the user can choose any of the three scopes from the modal.
+
 ### Library import behavior
 
 The Library import path can currently parse:
 
 - a normal single-project JSON
+- a normal single-asset JSON
 - a plain Library bundle JSON
 - a secure packed Library bundle JSON
+- an Asset Library folder export manifest plus its extracted files
+- a loose folder of supported image/model files through the File System Access API
 
-If the current Library already has projects and the incoming file is a Library bundle:
+If the affected scope already has data and the incoming import is a bundle/folder package:
 
 - the user can merge
 - or replace
-- and if replacing, can optionally save the current Library first through the Save Library workflow
+- and if replacing, can optionally save the current matching scope first through the Save workflow
 
 ### Mixed-engine Library import
 
@@ -1136,6 +1280,12 @@ This means Editor and Stitch projects can coexist in:
 - bundle exports
 - secure bundle exports
 - ZIP exports
+
+It also means:
+
+- Asset-only bundles can load without touching the Library project cards
+- combined bundles can restore both project records and asset records together
+- folder imports can reconstruct Asset Library records without going through JSON upload
 
 ## 14. Library Detail View and Inspection
 
@@ -1169,6 +1319,16 @@ It does not try to fake a Studio layer stack for Stitch projects.
 - scene item list
 - render settings summary
 - camera summary
+
+### Asset detail view
+
+Asset cards have their own detail overlay behavior:
+
+- image assets show the saved image directly
+- image asset cards on the `Assets` page use the saved low-res preview when available instead of placeholder text
+- model assets load through `src/3d/assetPreview.js` into a lightweight dedicated viewport
+- model preview uses a simple lit gradient scene with orbit/pan/zoom, not the full path tracer
+- asset detail actions currently include download and rename
 
 ## 15. Studio Layer Sub-Preview Framework
 
@@ -1273,7 +1433,7 @@ When touching app shell or Library logic, check:
 9. Plain bundle export/import preserves all three project types.
 10. Secure bundle export/import preserves all three project types.
 11. ZIP export still writes one JSON per project.
-12. Studio state save/load still behaves as before.
+12. Studio state save/load still behaves as before, except newly saved Editor JSON files now embed both source and rendered preview data.
 
 ## 19. Electron Bundling and Standalone App
 
@@ -1328,3 +1488,148 @@ It is now:
 - a standalone Electron-powered desktop application
 
 The key architectural shift is that the Library is now engine-aware through adapters, while the app keeps Studio, Stitch, and 3D as separate live drafts inside one page, all while maintaining universal compatibility through strict relative pathing.
+
+## 21. Worker Runtime And Boot Split
+
+The app now has a first shared worker-runtime layer for background processing.
+
+This is not the final worker migration, but it is now part of the architecture and future work must build on it instead of adding one-off worker code.
+
+### Startup sequencing now
+
+Bootstrap is now intentionally split into visible stages:
+
+1. `boot shell`
+2. `registry bootstrap`
+3. `workspace init`
+4. `editor engine init`
+5. `background warmup`
+
+Important behavior:
+
+- A lightweight boot shell renders into `#app` immediately on `DOMContentLoaded` before the registry and Editor engine finish booting.
+- Registry loading is now dispatched through the shared worker broker when worker support is available.
+- The full workspace shell still waits on registry availability, but the page should no longer look blank/frozen during that wait.
+- Boot and worker timing marks are recorded through `src/perf/bootstrapMetrics.js`.
+- Current runtime metrics are exposed for debugging on `window.__modularStudioPerformance`.
+
+### Shared worker runtime
+
+Current core files:
+
+- `src/workers/runtime.js`
+  - main-thread task broker
+  - priority queueing
+  - per-domain worker ownership
+  - worker fallback execution on the main thread when worker support/capabilities are missing
+- `src/workers/host.js`
+  - worker-side task host
+  - standardized message/event contract
+- `src/workers/protocol.js`
+  - shared message/event type constants
+- `src/workers/capabilities.js`
+  - startup capability detection
+
+Current worker contract:
+
+- main-thread task message types:
+  - `init`
+  - `run`
+  - `cancel`
+- worker event types:
+  - `ready`
+  - `progress`
+  - `log`
+  - `result`
+  - `error`
+  - `cancelled`
+
+Current capability registry fields:
+
+- `worker`
+- `moduleWorker`
+- `wasm`
+- `offscreenCanvas2d`
+- `offscreenCanvasWebgl2`
+- `compressionStreams`
+- `fileSystemAccess`
+- `createImageBitmap`
+
+### Current domain workers
+
+The current shared-runtime domains are:
+
+- `app-library`
+- `editor`
+- `stitch`
+- `three`
+
+Current worker-owned tasks:
+
+- `app-library`
+  - registry fetch + normalize
+  - Library asset fingerprinting
+  - Library image preview generation
+  - Library image metadata reads
+- `editor`
+  - Studio state-file JSON parsing + `mns/v2` validation
+- `stitch`
+  - screenshot JS analysis path through the shared broker
+  - Stitch image input preparation from uploaded files
+- `three`
+  - 3D model file prep from uploaded `.glb` / `.gltf`
+  - 3D image-plane file prep from uploaded images
+  - uploaded font asset prep
+  - uploaded HDRI asset prep
+
+### Current fallbacks and non-worker behavior
+
+Fallback support remains mandatory.
+
+If worker/module-worker/capability support is missing:
+
+- the broker falls back to same-thread task execution
+- the app must remain usable on browser hosting and Electron
+- feature code should call the broker instead of branching all over the UI layer
+
+### What is still main-thread only right now
+
+The first worker pass does **not** move these yet:
+
+- Studio `engine.init`
+- Studio `engine.loadImage`
+- Studio live WebGL rendering
+- Studio PNG export and preview capture
+- Library adapter-driven preview capture for Editor and 3D projects
+- IndexedDB ownership and reads/writes
+- File System Access directory traversal
+- 3D scene hydration into live three.js objects
+- 3D viewport rendering and path tracing
+- Stitch OpenCV photo analysis worker boot/protocol
+
+Important Stitch note:
+
+- the screenshot analysis path now has a shared-runtime route
+- the OpenCV/WASM photo worker is still a separate legacy worker path for now
+- future worker consolidation should move that OpenCV worker under the same standardized broker contract instead of creating a second architecture
+
+### Logging rule for worker work
+
+Logging rules now apply to worker-owned tasks too.
+
+- Workers should emit `log` and `progress` events through the shared protocol.
+- The main thread remains the only place that writes into the shared log engine/UI.
+- New worker tasks are incomplete if they do background work without going through the main-thread logging surface.
+
+### Files to read for future worker work
+
+Start with:
+
+1. `src/main.js`
+2. `src/workers/runtime.js`
+3. `src/workers/host.js`
+4. `src/workers/tasks/appLibrary.js`
+5. `src/workers/tasks/stitch.js`
+6. `src/workers/tasks/three.js`
+7. `src/perf/bootstrapMetrics.js`
+8. `src/ui/bootShell.js`

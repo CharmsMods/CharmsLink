@@ -4,6 +4,8 @@ import { createLibraryPanel } from './libraryPanel.js';
 import { clientToImageUv, computePreviewTransform, getPointerRatio } from './previewViewport.js';
 import { createStitchWorkspace } from '../stitch/ui.js';
 import { createThreeDWorkspace } from '../3d/ui.js';
+import { createLogsPanel } from './logsPanel.js';
+import { createProgressOverlayController } from './progressOverlay.js';
 
 const GROUP_LABELS = {
     base: 'Base',
@@ -744,10 +746,6 @@ function renderStudioToolbar(state) {
                     <span>Load Image</span>
                 </label>
                 <button type="button" class="toolbar-button" data-action="save-state">Save</button>
-                <label class="tiny-toggle toolbar-toggle">
-                    <input id="saveImageToggle" type="checkbox" ${state.ui.saveImageOnSave ? 'checked' : ''}>
-                    <span>Save Image</span>
-                </label>
                 <button type="button" class="toolbar-button" data-action="save-to-library">Save to Library</button>
                 <label class="tiny-toggle toolbar-toggle">
                     <input id="themeToggle" type="checkbox" ${state.document.view.theme === 'dark' ? 'checked' : ''}>
@@ -787,6 +785,8 @@ function renderSectionTabs(state) {
             ? 'stitch'
             : state.ui.activeSection === '3d'
                 ? '3d'
+                : state.ui.activeSection === 'logs'
+                    ? 'logs'
                 : 'editor';
     return `
         <nav class="section-switcher">
@@ -794,6 +794,7 @@ function renderSectionTabs(state) {
             <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
             <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
             <button type="button" class="mode-button ${activeSection === '3d' ? 'is-active' : ''}" data-action="set-app-section" data-section="3d">3D</button>
+            <button type="button" class="mode-button ${activeSection === 'logs' ? 'is-active' : ''}" data-action="set-app-section" data-section="logs">Logs</button>
         </nav>
     `;
 }
@@ -845,6 +846,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             <section class="app-section-panel" id="libraryPanel"></section>
             <section class="app-section-panel" id="stitchPanel"></section>
             <section class="app-section-panel" id="threedPanel"></section>
+            <section class="app-section-panel" id="logsPanel"></section>
             <input id="imageInput" type="file" accept="image/*" hidden>
             <input id="stateInput" type="file" accept=".json,.mns.json" hidden>
             <input id="paletteImageInput" type="file" accept="image/*" hidden>
@@ -865,6 +867,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         libraryPanel: root.querySelector('#libraryPanel'),
         stitchPanel: root.querySelector('#stitchPanel'),
         threedPanel: root.querySelector('#threedPanel'),
+        logsPanel: root.querySelector('#logsPanel'),
         previewShell: root.querySelector('#previewShell'),
         previewEmpty: root.querySelector('#previewEmpty'),
         sourcePreviewCanvas: root.querySelector('#sourcePreviewCanvas'),
@@ -892,6 +895,19 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         previewLoupeCanvas: root.querySelector('#previewLoupeCanvas'),
         toleranceTooltip: root.querySelector('#toleranceTooltip')
     };
+    const editorProgressOverlay = createProgressOverlayController(refs.previewShell, {
+        zIndex: 7,
+        defaultTitle: 'Working',
+        defaultMessage: 'Preparing the editor task...',
+        backdrop: 'rgba(8, 10, 14, 0.48)',
+        panelBackground: 'rgba(10, 10, 10, 0.94)',
+        borderColor: 'rgba(245, 241, 232, 0.16)',
+        borderSoftColor: 'rgba(245, 241, 232, 0.12)',
+        textColor: '#f5f1e8',
+        mutedColor: 'rgba(245, 241, 232, 0.72)',
+        accentColor: 'rgba(255, 223, 168, 0.96)',
+        progressFill: 'linear-gradient(90deg, rgba(255,223,168,0.26), rgba(255,223,168,0.9))'
+    });
     let dragSourceId = null;
     let wheelDrag = null;
     let wheelFrame = null;
@@ -902,23 +918,73 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     let latestState = null;
     let lastActiveSection = null;
     let lastSourceSignature = '';
+    let logsTabPulse = '';
+    let logsTabPulseTimer = null;
     const viewportState = {
         pointer: { x: 0.5, y: 0.5 }
     };
     const loupeCtx = refs.previewLoupeCanvas.getContext('2d');
     const libraryPanel = createLibraryPanel(refs.libraryPanel, {
         actions,
-        layerDefaults: Object.fromEntries(registry.layers.map((layer) => [layer.layerId, layer.defaults]))
+        layerDefaults: Object.fromEntries(registry.layers.map((layer) => [layer.layerId, layer.defaults])),
+        logger: extras.logger
     });
     const stitchPanel = createStitchWorkspace(refs.stitchPanel, {
         actions,
-        stitchEngine: extras.stitchEngine
+        stitchEngine: extras.stitchEngine,
+        logger: extras.logger
     });
-    const threedPanel = createThreeDWorkspace(actions, { getState: actions.getState });
+    const threedPanel = createThreeDWorkspace(actions, {
+        getState: actions.getState,
+        logger: extras.logger
+    });
     refs.threedPanel.appendChild(threedPanel.root);
+    const logsPanel = createLogsPanel(refs.logsPanel, { logger: extras.logger });
+    const unsubscribeLogEvents = extras.logger?.subscribeEvents?.((event) => {
+        if (!event?.completed) return;
+        if (event.status !== 'success' && event.status !== 'error') return;
+        const activeSection = actions.getState?.()?.ui?.activeSection || latestState?.ui?.activeSection || 'editor';
+        if (activeSection === 'logs') return;
+        logsTabPulse = event.status === 'error' ? 'error' : 'success';
+        if (logsTabPulseTimer) clearTimeout(logsTabPulseTimer);
+        applyLogsTabPulse();
+        logsTabPulseTimer = setTimeout(() => {
+            logsTabPulse = '';
+            applyLogsTabPulse();
+        }, 1600);
+    }) || (() => {});
 
     function getLiveState() {
         return actions.getState?.() || latestState;
+    }
+
+    function applyLogsTabPulse() {
+        const logsButton = refs.sectionTabsSlot?.querySelector('[data-section="logs"]');
+        if (!logsButton) return;
+        const activeSection = actions.getState?.()?.ui?.activeSection || latestState?.ui?.activeSection || '';
+        logsButton.style.transition = 'background 260ms ease, color 260ms ease, border-color 260ms ease, box-shadow 260ms ease, transform 260ms ease, opacity 260ms ease';
+        if (!logsTabPulse || activeSection === 'logs') {
+            logsButton.style.background = '';
+            logsButton.style.color = '';
+            logsButton.style.borderColor = '';
+            logsButton.style.boxShadow = '';
+            logsButton.style.transform = '';
+            logsButton.style.opacity = '';
+            return;
+        }
+        if (logsTabPulse === 'error') {
+            logsButton.style.background = 'rgba(179, 63, 63, 0.9)';
+            logsButton.style.color = '#fff6f6';
+            logsButton.style.borderColor = 'rgba(255, 145, 145, 0.92)';
+            logsButton.style.boxShadow = '0 0 0 1px rgba(255,145,145,0.18), 0 0 20px rgba(217,86,86,0.18)';
+        } else {
+            logsButton.style.background = 'rgba(58, 145, 94, 0.92)';
+            logsButton.style.color = '#f6fff8';
+            logsButton.style.borderColor = 'rgba(154, 255, 205, 0.92)';
+            logsButton.style.boxShadow = '0 0 0 1px rgba(154,255,205,0.16), 0 0 18px rgba(91,194,130,0.16)';
+        }
+        logsButton.style.transform = 'translateY(-1px)';
+        logsButton.style.opacity = '1';
     }
 
     function currentSelectedInstance() {
@@ -1479,7 +1545,6 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         else if (target.id === 'hoverCompareToggle') actions.setHoverCompareEnabled(target.checked);
         else if (target.id === 'isolateActiveLayerToggle') actions.setRenderUpToActiveLayer(target.checked);
         else if (target.id === 'loadImageToggle') actions.setLoadImageOnOpen(target.checked);
-        else if (target.id === 'saveImageToggle') actions.setSaveImageOnSave(target.checked);
 
         else if (target.id === 'themeToggle') actions.setTheme(target.checked);
         else if (target.dataset.action === 'batch-fps') actions.setBatchFps(parseInt(target.value, 10) || 10);
@@ -1516,6 +1581,8 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
     function render(state) {
         latestState = state;
+        const activeSection = state.ui.activeSection;
+        const isEditorActive = activeSection === 'editor';
         const hasSource = !!state.document.source.width && !!state.document.source.height;
         const processedPreview = hasProcessedPreview(state);
         const sourceSignature = `${state.document.source.name}|${state.document.source.width}x${state.document.source.height}`;
@@ -1526,109 +1593,129 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
         document.documentElement.dataset.theme = state.document.view.theme === 'dark' ? 'dark' : 'light';
         refs.sectionTabsSlot.innerHTML = renderSectionTabs(state);
-        refs.toolbarSlot.innerHTML = state.ui.activeSection === 'editor'
+        applyLogsTabPulse();
+        refs.toolbarSlot.innerHTML = activeSection === 'editor'
             ? renderStudioToolbar(state)
-            : state.ui.activeSection === 'stitch'
+            : activeSection === 'stitch'
                 ? renderStitchToolbar(state)
                 : '';
-        refs.toolbarSlot.style.display = (state.ui.activeSection === 'editor' || state.ui.activeSection === 'stitch') ? 'block' : 'none';
+        refs.toolbarSlot.style.display = (activeSection === 'editor' || activeSection === 'stitch') ? 'block' : 'none';
         refs.noticeStrip.className = `notice-strip ${state.notice ? `is-${state.notice.type || 'info'}` : ''}`;
         refs.noticeStrip.textContent = state.notice?.text || '';
         refs.noticeStrip.style.display = state.notice ? 'flex' : 'none';
         refs.workspaceShell.className = `workspace-shell mode-${state.document.mode} tab-${state.document.workspace.studioView}`;
-        refs.workspaceShell.style.display = state.ui.activeSection === 'editor' ? 'grid' : 'none';
-        refs.libraryPanel.style.display = state.ui.activeSection === 'library' ? 'block' : 'none';
-        refs.stitchPanel.style.display = state.ui.activeSection === 'stitch' ? 'block' : 'none';
-        refs.threedPanel.style.display = state.ui.activeSection === '3d' ? 'block' : 'none';
-        if (state.ui.activeSection !== lastActiveSection) {
-            if (state.ui.activeSection === 'library') {
+        refs.workspaceShell.style.display = activeSection === 'editor' ? 'grid' : 'none';
+        refs.libraryPanel.style.display = activeSection === 'library' ? 'block' : 'none';
+        refs.stitchPanel.style.display = activeSection === 'stitch' ? 'block' : 'none';
+        refs.threedPanel.style.display = activeSection === '3d' ? 'block' : 'none';
+        refs.logsPanel.style.display = activeSection === 'logs' ? 'block' : 'none';
+        if (activeSection !== lastActiveSection) {
+            if (activeSection === 'library') {
                 libraryPanel.activate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
-            } else if (state.ui.activeSection === 'stitch') {
+                logsPanel.deactivate();
+            } else if (activeSection === 'stitch') {
                 libraryPanel.deactivate();
                 stitchPanel.activate();
                 threedPanel.deactivate();
-            } else if (state.ui.activeSection === '3d') {
+                logsPanel.deactivate();
+            } else if (activeSection === '3d') {
                 libraryPanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.activate();
+                logsPanel.deactivate();
+            } else if (activeSection === 'logs') {
+                libraryPanel.deactivate();
+                stitchPanel.deactivate();
+                threedPanel.deactivate();
+                logsPanel.activate();
             } else {
                 libraryPanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
+                logsPanel.deactivate();
             }
-            lastActiveSection = state.ui.activeSection;
+            lastActiveSection = activeSection;
         }
-        const sidebarScrollElement = refs.sidebarPanel.querySelector('.sidebar-scroll');
-        const sidebarScrollTop = sidebarScrollElement ? sidebarScrollElement.scrollTop : refs.sidebarPanel.scrollTop;
-
-        refs.sidebarPanel.innerHTML = renderSidebar(state, registry);
-
-        const newSidebarScroll = refs.sidebarPanel.querySelector('.sidebar-scroll');
-        if (newSidebarScroll) {
-            newSidebarScroll.scrollTop = sidebarScrollTop;
-        } else {
-            refs.sidebarPanel.scrollTop = sidebarScrollTop;
-        }
-
-        drawToleranceSpectrums(state);
-        stitchPanel.render(state.stitchDocument).catch((error) => console.error(error));
-        threedPanel.render(state);
 
         refs.batchSlot.innerHTML = renderBatchDialog(state);
         refs.jsonCompareSlot.innerHTML = renderJsonCompareDialog(state);
         refs.compareDialog.classList.toggle('is-open', !!state.ui.compareOpen);
-        refs.previewTitle.textContent = state.document.source.name || 'No source loaded';
-        refs.previewZoomRange.value = String(state.document.view.zoom);
-        refs.previewScaleWrap.style.display = hasSource ? 'block' : 'none';
-        refs.previewStage.style.display = hasSource ? 'flex' : 'none';
-        refs.highQualityPreviewToggle.checked = !!state.document.view.highQualityPreview;
-        const hoverCompareToggle = root.querySelector('#hoverCompareToggle');
-        if (hoverCompareToggle) hoverCompareToggle.checked = !!state.document.view.hoverCompareEnabled;
-        const isolateActiveLayerToggle = root.querySelector('#isolateActiveLayerToggle');
-        if (isolateActiveLayerToggle) isolateActiveLayerToggle.checked = !!state.document.view.isolateActiveLayerChain;
-        const current = selectedInstance(state);
-        const suppressHoverCompare = current?.layerId === 'bgPatcher'
-            && (
-                current.params.bgPatcherPatchEnabled
-                || state.eyedropperTarget?.kind === 'bg-patcher-main'
+        if (isEditorActive) {
+            const sidebarScrollElement = refs.sidebarPanel.querySelector('.sidebar-scroll');
+            const sidebarScrollTop = sidebarScrollElement ? sidebarScrollElement.scrollTop : refs.sidebarPanel.scrollTop;
+
+            refs.sidebarPanel.innerHTML = renderSidebar(state, registry);
+
+            const newSidebarScroll = refs.sidebarPanel.querySelector('.sidebar-scroll');
+            if (newSidebarScroll) {
+                newSidebarScroll.scrollTop = sidebarScrollTop;
+            } else {
+                refs.sidebarPanel.scrollTop = sidebarScrollTop;
+            }
+
+            drawToleranceSpectrums(state);
+            refs.previewTitle.textContent = state.document.source.name || 'No source loaded';
+            refs.previewZoomRange.value = String(state.document.view.zoom);
+            refs.previewScaleWrap.style.display = hasSource ? 'block' : 'none';
+            refs.previewStage.style.display = hasSource ? 'flex' : 'none';
+            refs.highQualityPreviewToggle.checked = !!state.document.view.highQualityPreview;
+            const hoverCompareToggle = root.querySelector('#hoverCompareToggle');
+            if (hoverCompareToggle) hoverCompareToggle.checked = !!state.document.view.hoverCompareEnabled;
+            const isolateActiveLayerToggle = root.querySelector('#isolateActiveLayerToggle');
+            if (isolateActiveLayerToggle) isolateActiveLayerToggle.checked = !!state.document.view.isolateActiveLayerChain;
+            const current = selectedInstance(state);
+            const suppressHoverCompare = current?.layerId === 'bgPatcher'
+                && (
+                    current.params.bgPatcherPatchEnabled
+                    || state.eyedropperTarget?.kind === 'bg-patcher-main'
+                    || state.eyedropperTarget?.kind === 'bg-patcher-protected'
+                    || state.eyedropperTarget?.kind === 'bg-patcher-patch'
+                );
+            refs.previewShell.classList.toggle('is-empty', !hasSource);
+            refs.previewShell.classList.toggle('has-source', hasSource);
+            refs.previewShell.classList.toggle('compare-enabled', hasSource && processedPreview && !!state.document.view.hoverCompareEnabled && !suppressHoverCompare);
+            refs.previewEmpty.style.display = hasSource ? 'none' : 'flex';
+            refs.sourcePreviewCanvas.style.display = hasSource && !processedPreview ? 'block' : 'none';
+            refs.canvas.style.display = hasSource && processedPreview ? 'block' : 'none';
+            refs.hoverPreviewCanvas.style.display = hasSource && processedPreview ? 'block' : 'none';
+            refs.previewShell.classList.toggle('zoom-locked', !!state.document.view.zoomLocked);
+            refs.previewShell.classList.toggle('checker-active', !!(current?.layerId === 'bgPatcher' && current.params.bgPatcherCheckerEnabled));
+            refs.previewShell.classList.toggle('checker-dark', !!(current?.layerId === 'bgPatcher' && current.params.bgPatcherCheckerEnabled && current.params.bgPatcherCheckerTone === 'black'));
+            if (current?.layerId === 'ca' && current.params.caPin && hasSource) {
+                refs.caPinOverlay.style.display = 'block';
+                refs.caPinOverlay.style.left = `${(current.params.caCenterX ?? 0.5) * 100}%`;
+                refs.caPinOverlay.style.top = `${(1 - (current.params.caCenterY ?? 0.5)) * 100}%`;
+            } else {
+                refs.caPinOverlay.style.display = 'none';
+            }
+            if (current?.layerId === 'tiltShiftBlur' && current.params.tiltShiftPin && hasSource) {
+                refs.tiltShiftPinOverlay.style.display = 'block';
+                refs.tiltShiftPinOverlay.style.left = `${(current.params.tiltShiftCenterX ?? 0.5) * 100}%`;
+                refs.tiltShiftPinOverlay.style.top = `${(1 - (current.params.tiltShiftCenterY ?? 0.5)) * 100}%`;
+            } else {
+                refs.tiltShiftPinOverlay.style.display = 'none';
+            }
+            const loupeEyedropper = state.eyedropperTarget?.kind === 'bg-patcher-main'
                 || state.eyedropperTarget?.kind === 'bg-patcher-protected'
                 || state.eyedropperTarget?.kind === 'bg-patcher-patch'
-            );
-        refs.previewShell.classList.toggle('is-empty', !hasSource);
-        refs.previewShell.classList.toggle('has-source', hasSource);
-        refs.previewShell.classList.toggle('compare-enabled', hasSource && processedPreview && !!state.document.view.hoverCompareEnabled && !suppressHoverCompare);
-        refs.previewEmpty.style.display = hasSource ? 'none' : 'flex';
-        refs.sourcePreviewCanvas.style.display = hasSource && !processedPreview ? 'block' : 'none';
-        refs.canvas.style.display = hasSource && processedPreview ? 'block' : 'none';
-        refs.hoverPreviewCanvas.style.display = hasSource && processedPreview ? 'block' : 'none';
-        refs.previewShell.classList.toggle('zoom-locked', !!state.document.view.zoomLocked);
-        refs.previewShell.classList.toggle('checker-active', !!(current?.layerId === 'bgPatcher' && current.params.bgPatcherCheckerEnabled));
-        refs.previewShell.classList.toggle('checker-dark', !!(current?.layerId === 'bgPatcher' && current.params.bgPatcherCheckerEnabled && current.params.bgPatcherCheckerTone === 'black'));
-        if (current?.layerId === 'ca' && current.params.caPin && hasSource) {
-            refs.caPinOverlay.style.display = 'block';
-            refs.caPinOverlay.style.left = `${(current.params.caCenterX ?? 0.5) * 100}%`;
-            refs.caPinOverlay.style.top = `${(1 - (current.params.caCenterY ?? 0.5)) * 100}%`;
+                || state.eyedropperTarget?.kind === 'expander-color';
+            if (!hasSource || !loupeEyedropper) {
+                hideLoupe();
+            }
+            applyPreviewScale();
+            bindPipelineDrag();
         } else {
-            refs.caPinOverlay.style.display = 'none';
-        }
-        if (current?.layerId === 'tiltShiftBlur' && current.params.tiltShiftPin && hasSource) {
-            refs.tiltShiftPinOverlay.style.display = 'block';
-            refs.tiltShiftPinOverlay.style.left = `${(current.params.tiltShiftCenterX ?? 0.5) * 100}%`;
-            refs.tiltShiftPinOverlay.style.top = `${(1 - (current.params.tiltShiftCenterY ?? 0.5)) * 100}%`;
-        } else {
-            refs.tiltShiftPinOverlay.style.display = 'none';
-        }
-        const loupeEyedropper = state.eyedropperTarget?.kind === 'bg-patcher-main'
-            || state.eyedropperTarget?.kind === 'bg-patcher-protected'
-            || state.eyedropperTarget?.kind === 'bg-patcher-patch'
-            || state.eyedropperTarget?.kind === 'expander-color';
-        if (!hasSource || !loupeEyedropper) {
             hideLoupe();
         }
-        applyPreviewScale();
-        bindPipelineDrag();
+
+        if (activeSection === 'stitch') {
+            stitchPanel.render(state.stitchDocument).catch((error) => console.error(error));
+        }
+        if (activeSection === '3d') {
+            threedPanel.render(state);
+        }
     }
 
     function destroy() {
@@ -1676,8 +1763,22 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
     return {
         render,
+        setEditorProgress(payload = null) {
+            if (payload?.active) {
+                editorProgressOverlay.show(payload);
+                return;
+            }
+            editorProgressOverlay.hide();
+        },
+        setStitchProgress(payload = null) {
+            stitchPanel.setProgressOverlay?.(payload);
+        },
+        setThreeDProgress(payload = null) {
+            threedPanel.setProgressOverlay?.(payload);
+        },
         refreshLibrary() {
             libraryPanel.refresh();
+            threedPanel.refreshLibraryAssets?.();
         },
         openStitchPicker() {
             stitchPanel.openPicker?.();
@@ -1709,6 +1810,10 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 subLayerCanvas: root.querySelector('#subLayerCanvas'),
                 subLayerLabel: root.querySelector('#subLayerLabel')
             };
+        },
+        destroy() {
+            if (logsTabPulseTimer) clearTimeout(logsTabPulseTimer);
+            unsubscribeLogEvents();
         }
     };
 }

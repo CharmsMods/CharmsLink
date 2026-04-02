@@ -1,5 +1,6 @@
 import { getActivePlacements, getPlacementByInput, getSelectedStitchInput, normalizeStitchDocument } from './document.js';
 import { STITCH_ANALYSIS_GROUPS, STITCH_SELECTION_ACTION_HELP, STITCH_SELECTION_FIELDS } from './meta.js';
+import { createProgressOverlayController } from '../ui/progressOverlay.js';
 
 const PANEL_TABS = [
     { id: 'inputs', label: 'Inputs', description: 'Load and manage source images.' },
@@ -118,7 +119,7 @@ function getStageStatus(document) {
     return { text: 'Run the analysis to generate ranked stitch candidates.', tone: 'info' };
 }
 
-export function createStitchWorkspace(root, { actions, stitchEngine }) {
+export function createStitchWorkspace(root, { actions, stitchEngine, logger = null }) {
     root.innerHTML = `
         <style data-stitch-compact-style>
             .stitch-shell{--stitch-border:#b8b2a3;--stitch-border-soft:rgba(184,178,163,.28);--stitch-accent:rgba(184,178,163,.14);--stitch-muted:#b8b2a3;position:relative;width:100%;height:100%;min-width:0;min-height:0;display:grid;grid-template-columns:minmax(232px,292px) minmax(0,1fr);gap:8px;padding:8px;background:#000;color:#fff;font-size:11px;line-height:1.24;overflow:hidden}
@@ -222,13 +223,35 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         galleryGrid: root.querySelector('[data-stitch-role="gallery-grid"]'),
         fileInput: root.querySelector('[data-stitch-role="file-input"]')
     };
+    const progressOverlay = createProgressOverlayController(root.querySelector('.stitch-stage-wrap'), {
+        zIndex: 12,
+        defaultTitle: 'Working',
+        defaultMessage: 'Preparing the Stitch workspace...',
+        backdrop: 'rgba(0, 0, 0, 0.52)',
+        panelBackground: 'rgba(0, 0, 0, 0.94)',
+        borderColor: 'rgba(184,178,163,0.5)',
+        borderSoftColor: 'rgba(184,178,163,0.28)',
+        textColor: '#ffffff',
+        mutedColor: 'rgba(184,178,163,0.88)',
+        accentColor: 'rgba(184,178,163,0.96)',
+        progressFill: 'linear-gradient(90deg, rgba(184,178,163,0.2), rgba(184,178,163,0.92))'
+    });
 
     let currentDocument = normalizeStitchDocument();
     let dragState = null;
     let openTooltipId = null;
+    let lastStatusLogSignature = '';
     const canUseHoverTooltips = typeof window.matchMedia === 'function'
         ? window.matchMedia('(hover: hover)').matches
         : false;
+
+    function logStitch(level, message, options = {}) {
+        if (!logger || !message) return;
+        const method = typeof logger[level] === 'function'
+            ? logger[level].bind(logger)
+            : logger.info.bind(logger);
+        method('stitch.workspace', 'Stitch Workspace', message, options);
+    }
 
     stitchEngine.attachCanvas(refs.canvas);
 
@@ -437,7 +460,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
                 </div>
                 <div class="stitch-button-row stitch-button-row-2">
                     <button type="button" class="mini-button" data-stitch-action="export-project" ${document.inputs.length ? '' : 'disabled'}>Export PNG</button>
-                    <button type="button" class="mini-button" data-stitch-action="save-library" ${document.inputs.length ? '' : 'disabled'}>Save Library</button>
+        <button type="button" class="mini-button" data-stitch-action="save-library" ${document.inputs.length ? '' : 'disabled'}>Save to Library</button>
                 </div>
                 ${activeCandidate ? `
                     <div class="stitch-summary-card">
@@ -518,6 +541,24 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         const status = getStageStatus(document);
         refs.status.textContent = status.text;
         refs.status.dataset.tone = status.tone;
+        const signature = `${status.tone}|${status.text}`;
+        if (signature !== lastStatusLogSignature) {
+            lastStatusLogSignature = signature;
+            logStitch(
+                status.tone === 'error'
+                    ? 'error'
+                    : status.tone === 'warning'
+                        ? 'warning'
+                        : status.tone === 'success'
+                            ? 'success'
+                            : 'info',
+                status.text,
+                {
+                    dedupeKey: signature,
+                    dedupeWindowMs: 160
+                }
+            );
+        }
     }
 
     async function render(document) {
@@ -531,7 +572,6 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
         renderGallery(currentDocument);
         refs.empty.classList.toggle('is-visible', !currentDocument.inputs.length);
         applyTooltipState();
-        stitchEngine.requestRender(currentDocument);
         requestAnimationFrame(() => renderHeader(currentDocument));
     }
 
@@ -749,13 +789,28 @@ export function createStitchWorkspace(root, { actions, stitchEngine }) {
     return {
         activate() {
             root.style.display = 'block';
+            logStitch('info', 'Stitch workspace activated.', {
+                dedupeKey: 'stitch-workspace-activated',
+                dedupeWindowMs: 180
+            });
             stitchEngine.requestRender(currentDocument);
         },
         deactivate() {
             root.style.display = 'none';
+            logStitch('info', 'Stitch workspace hidden.', {
+                dedupeKey: 'stitch-workspace-hidden',
+                dedupeWindowMs: 180
+            });
         },
         openPicker() {
             refs.fileInput.click();
+        },
+        setProgressOverlay(payload = null) {
+            if (payload?.active) {
+                progressOverlay.show(payload);
+                return;
+            }
+            progressOverlay.hide();
         },
         async render(document) {
             await render(document);

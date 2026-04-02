@@ -1,4 +1,6 @@
 import { ThreeDEngine } from './engine.js';
+import { createProgressOverlayController } from '../ui/progressOverlay.js';
+import { nextPaint } from '../ui/scheduling.js';
 
 function formatNumber(value, digits = 3) {
     const numeric = Number(value);
@@ -69,6 +71,37 @@ function formatRenderModeLabel(mode) {
     if (mode === 'pathtrace') return 'Path Trace';
     if (mode === 'mesh') return 'Mesh';
     return 'Edit';
+}
+
+function formatLibraryAssetType(asset) {
+    if (asset?.assetType === 'model') {
+        return String(asset.format || 'model').toUpperCase();
+    }
+    return 'IMAGE';
+}
+
+function formatLibraryAssetSize(asset) {
+    const width = Number(asset?.width || 0);
+    const height = Number(asset?.height || 0);
+    if (width > 0 && height > 0) {
+        return `${width} x ${height}`;
+    }
+    return asset?.assetType === 'model' ? '3D Asset' : 'Image Asset';
+}
+
+function getPathTraceLoadingProgress(message = '') {
+    const normalized = String(message || '').trim().toLowerCase();
+    if (!normalized) return 0.18;
+    if (normalized.includes('rebuilding path tracer scene')) return 0.36;
+    if (normalized.includes('updating path tracer lights')) return 0.52;
+    if (normalized.includes('updating path trace settings')) return 0.66;
+    if (normalized.includes('building render scene')) return 0.24;
+    if (normalized.includes('compiling render kernels')) return 0.48;
+    if (normalized.includes('preparing render')) return 0.2;
+    if (normalized.includes('rendering')) return 0.74;
+    if (normalized.includes('encoding png')) return 0.9;
+    if (normalized.includes('denoising')) return 0.96;
+    return 0.18;
 }
 
 function buildEngineSyncKey(documentState) {
@@ -183,6 +216,7 @@ function describeHierarchyBadge(item) {
 }
 
 export function createThreeDWorkspace(actions, store) {
+    const logger = store?.logger || null;
     const root = document.createElement('div');
     root.className = 'threed-workspace-root';
     root.style.width = '100%';
@@ -742,7 +776,28 @@ export function createThreeDWorkspace(actions, store) {
             .threed-status-pill { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
             .threed-pathtrace-loading { position:absolute; inset:0; z-index:6; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(8,10,14,0.62); pointer-events:none; }
             .threed-pathtrace-loading.is-active { display:flex; }
-            .threed-loading-card { min-width:min(280px,100%); display:flex; align-items:center; gap:12px; padding:12px 14px; border:1px solid var(--threed-border); background:rgba(0,0,0,0.94); color:var(--threed-text); }
+            .threed-asset-drawer { position:absolute; left:10px; right:10px; bottom:10px; z-index:9; display:flex; flex-direction:column; align-items:center; gap:6px; pointer-events:none; }
+            .threed-asset-drawer-tab { min-height:18px; padding:0 9px !important; border:1px solid var(--threed-border); background:rgba(0,0,0,0.94); color:var(--threed-text); font-size:9px !important; letter-spacing:0.08em; text-transform:uppercase; pointer-events:auto; }
+            .threed-asset-drawer-panel { width:min(100%, 860px); max-width:100%; height:226px; display:none; flex-direction:column; gap:8px; padding:10px; border:1px solid var(--threed-border); background:rgba(0,0,0,0.96); box-shadow:0 -18px 42px rgba(0,0,0,0.36); pointer-events:auto; }
+            .threed-asset-drawer.is-open .threed-asset-drawer-panel { display:flex; }
+            .threed-asset-drawer-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+            .threed-asset-drawer-head strong { font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:var(--threed-muted); }
+            .threed-asset-search { width:132px; min-width:132px; min-height:20px; padding:2px 6px !important; border:1px solid var(--threed-border); background:#000000; color:var(--threed-text); font-size:10px !important; }
+            .threed-asset-grid { flex:1; min-height:0; overflow:auto; display:grid; grid-template-columns:repeat(auto-fill, minmax(88px, 1fr)); gap:8px; }
+            .threed-asset-card { display:flex; flex-direction:column; gap:6px; padding:6px; border:1px solid var(--threed-border-soft); background:rgba(184,178,163,0.06); color:var(--threed-text); text-align:left; cursor:grab; }
+            .threed-asset-card:active { cursor:grabbing; }
+            .threed-asset-card:hover { background:rgba(184,178,163,0.1); border-color:var(--threed-border); }
+            .threed-asset-thumb { aspect-ratio:1 / 1; display:flex; align-items:flex-end; justify-content:flex-start; padding:6px; border:1px dashed var(--threed-border-soft); background:linear-gradient(180deg, rgba(184,178,163,0.08), rgba(184,178,163,0.02)); color:var(--threed-muted); font-size:9px; letter-spacing:0.08em; text-transform:uppercase; }
+            .threed-asset-card strong { font-size:10px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+            .threed-asset-card span { font-size:9px; color:var(--threed-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+            .threed-asset-empty { display:none; flex:1; align-items:center; justify-content:center; text-align:center; color:var(--threed-muted); border:1px dashed var(--threed-border-soft); padding:12px; }
+            .threed-asset-empty.is-visible { display:flex; }
+            .threed-loading-card { min-width:min(300px,100%); display:flex; flex-direction:column; gap:10px; padding:12px 14px; border:1px solid var(--threed-border); background:rgba(0,0,0,0.94); color:var(--threed-text); }
+            .threed-loading-card-head { display:flex; align-items:center; gap:12px; }
+            .threed-loading-card-copy { display:flex; flex-direction:column; gap:4px; min-width:0; }
+            .threed-loading-progress { position:relative; width:100%; height:6px; overflow:hidden; border:1px solid var(--threed-border-soft); background:rgba(184,178,163,0.08); }
+            .threed-loading-progress-fill { position:absolute; inset:0 auto 0 0; width:0%; background:linear-gradient(90deg, rgba(184,178,163,0.26), rgba(184,178,163,0.9)); transition:width 180ms ease; }
+            .threed-loading-progress-label { font-size:9px; color:var(--threed-muted); letter-spacing:0.04em; text-transform:uppercase; }
             .threed-spinner { width:15px; height:15px; flex:0 0 auto; border-radius:50%; border:2px solid rgba(184,178,163,0.2); border-top-color:var(--threed-border); animation:threed-spin 0.8s linear infinite; }
             .threed-outliner { display:flex; flex-direction:column; gap:6px; }
             .threed-outliner-item { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; width:100%; padding:6px 7px; border:1px solid var(--threed-border); background:#000000; color:inherit; cursor:pointer; text-align:left; }
@@ -767,7 +822,7 @@ export function createThreeDWorkspace(actions, store) {
             .threed-shell[data-ui-mode="fullscreen"] .threed-viewport-card { border:none; }
             @keyframes threed-spin { to { transform: rotate(360deg); } }
             @media (max-width: 920px) { .threed-shell { grid-template-columns:minmax(190px, 230px) minmax(0, 1fr); gap:6px; padding:6px; } }
-            @media (max-width: 680px) { .threed-shell { grid-template-columns:minmax(170px, 42vw) minmax(0, 1fr); } }
+            @media (max-width: 680px) { .threed-shell { grid-template-columns:minmax(170px, 42vw) minmax(0, 1fr); } .threed-asset-drawer { left:6px; right:6px; bottom:6px; } .threed-asset-drawer-panel { height:200px; padding:8px; } .threed-asset-search { width:108px; min-width:108px; } .threed-asset-grid { grid-template-columns:repeat(auto-fill, minmax(78px, 1fr)); gap:6px; } }
         `;
         root.prepend(style);
 
@@ -1218,7 +1273,35 @@ export function createThreeDWorkspace(actions, store) {
         const pathTraceLoading = document.createElement('div');
         pathTraceLoading.className = 'threed-pathtrace-loading';
         pathTraceLoading.dataset.threedRole = 'pathtrace-loading';
-        pathTraceLoading.innerHTML = `<div class="threed-loading-card"><div class="threed-spinner" aria-hidden="true"></div><div style="display:flex; flex-direction:column; gap:4px;"><strong data-threed-role="pathtrace-loading-title">Preparing Renderer</strong><span data-threed-role="pathtrace-loading-text">Preparing renderer...</span></div></div>`;
+        pathTraceLoading.innerHTML = `
+            <div class="threed-loading-card">
+                <div class="threed-loading-card-head">
+                    <div class="threed-spinner" aria-hidden="true"></div>
+                    <div class="threed-loading-card-copy">
+                        <strong data-threed-role="pathtrace-loading-title">Preparing Renderer</strong>
+                        <span data-threed-role="pathtrace-loading-text">Preparing renderer...</span>
+                    </div>
+                </div>
+                <div class="threed-loading-progress" aria-hidden="true">
+                    <div class="threed-loading-progress-fill" data-threed-role="pathtrace-loading-progress-fill"></div>
+                </div>
+                <div class="threed-loading-progress-label" data-threed-role="pathtrace-loading-progress-label">Warming up path tracer</div>
+            </div>
+        `;
+        const assetDrawer = document.createElement('section');
+        assetDrawer.className = 'threed-asset-drawer';
+        assetDrawer.dataset.threedRole = 'asset-drawer';
+        assetDrawer.innerHTML = `
+            <button type="button" class="threed-asset-drawer-tab" data-threed-action="toggle-asset-drawer">Assets</button>
+            <div class="threed-asset-drawer-panel">
+                <div class="threed-asset-drawer-head">
+                    <strong>Content Drawer</strong>
+                    <input type="search" class="threed-asset-search" data-threed-role="asset-search" placeholder="Search">
+                </div>
+                <div class="threed-asset-grid" data-threed-role="asset-grid"></div>
+                <div class="threed-asset-empty" data-threed-role="asset-empty">Library assets from the Assets page appear here. Drag a card into the viewport to place it.</div>
+            </div>
+        `;
 
         refs.canvasContainer.style.position = 'absolute';
         refs.canvasContainer.style.inset = '0';
@@ -1232,6 +1315,7 @@ export function createThreeDWorkspace(actions, store) {
         viewportStage.appendChild(viewportBottomLeft);
         viewportStage.appendChild(viewportBottomRight);
         viewportStage.appendChild(pathTraceLoading);
+        viewportStage.appendChild(assetDrawer);
 
         shell.appendChild(viewportPanel);
         shell.appendChild(contextMenuHost);
@@ -1255,6 +1339,25 @@ export function createThreeDWorkspace(actions, store) {
     refs.pathTraceLoading = root.querySelector('[data-threed-role="pathtrace-loading"]');
     refs.pathTraceLoadingTitle = root.querySelector('[data-threed-role="pathtrace-loading-title"]');
     refs.pathTraceLoadingText = root.querySelector('[data-threed-role="pathtrace-loading-text"]');
+    refs.pathTraceLoadingProgressFill = root.querySelector('[data-threed-role="pathtrace-loading-progress-fill"]');
+    refs.pathTraceLoadingProgressLabel = root.querySelector('[data-threed-role="pathtrace-loading-progress-label"]');
+    refs.assetDrawer = root.querySelector('[data-threed-role="asset-drawer"]');
+    refs.assetSearch = root.querySelector('[data-threed-role="asset-search"]');
+    refs.assetGrid = root.querySelector('[data-threed-role="asset-grid"]');
+    refs.assetEmpty = root.querySelector('[data-threed-role="asset-empty"]');
+    const progressOverlay = createProgressOverlayController(root.querySelector('.threed-viewport-stage'), {
+        zIndex: 5,
+        defaultTitle: 'Working',
+        defaultMessage: 'Preparing the 3D workspace...',
+        backdrop: 'rgba(8, 10, 14, 0.48)',
+        panelBackground: 'rgba(0, 0, 0, 0.94)',
+        borderColor: 'rgba(184,178,163,0.38)',
+        borderSoftColor: 'rgba(184,178,163,0.18)',
+        textColor: '#f4f4f4',
+        mutedColor: 'rgba(184,178,163,0.86)',
+        accentColor: 'rgba(184,178,163,0.96)',
+        progressFill: 'linear-gradient(90deg, rgba(184,178,163,0.26), rgba(184,178,163,0.92))'
+    });
 
     let engine = null;
     let active = false;
@@ -1270,12 +1373,150 @@ export function createThreeDWorkspace(actions, store) {
     let contextMenuPath = [];
     let contextMenuAnchor = null;
     let surfaceAttachTextId = null;
+    let libraryAssets = [];
+    let visibleLibraryAssets = [];
+    let assetDrawerOpen = false;
+    let assetSearchQuery = '';
+    let assetRefreshToken = 0;
+    let assetRefreshPending = false;
+    let draggedAssetId = '';
+    let lastStatusLogSignature = '';
+    let lastPathTraceLogSignature = '';
+    let lastRenderProgressSignature = '';
+    let lastAssetRefreshSignature = '';
+
+    function logThreeD(level, processId, message, progressOrOptions = {}, maybeOptions = {}) {
+        if (!logger || !message) return;
+        const label = processId === '3d.render'
+            ? '3D Render'
+            : processId === '3d.assets'
+                ? '3D Assets'
+                : '3D Workspace';
+        if (level === 'progress' && typeof logger.progress === 'function') {
+            logger.progress(processId, label, message, progressOrOptions, maybeOptions);
+            return;
+        }
+        const method = typeof logger[level] === 'function'
+            ? logger[level].bind(logger)
+            : logger.info.bind(logger);
+        method(processId, label, message, progressOrOptions);
+    }
+
+    function shouldLogStatusMessage(text) {
+        const normalized = String(text || '').trim();
+        if (!normalized) return false;
+        if (
+            normalized.startsWith('Edit view is active.')
+            || normalized.startsWith('Mesh view is active.')
+            || normalized.startsWith('Path tracing is active.')
+            || normalized.startsWith('Fly camera active.')
+            || normalized.startsWith('Load models or add image planes to start building a 3D scene.')
+            || normalized.startsWith('Surface attach is active.')
+            || normalized.startsWith('Path Trace is active, but there are no visible objects')
+            || normalized.startsWith('Final render running:')
+            || normalized.includes('samples at')
+        ) {
+            return false;
+        }
+        return true;
+    }
+
+    function logStatusMessage(text, tone = 'info') {
+        const message = String(text || '').trim();
+        if (!shouldLogStatusMessage(message)) return;
+        const signature = `${tone}|${message}`;
+        if (signature === lastStatusLogSignature) return;
+        lastStatusLogSignature = signature;
+        logThreeD(
+            tone === 'error'
+                ? 'error'
+                : tone === 'warning'
+                    ? 'warning'
+                    : tone === 'success'
+                        ? 'success'
+                        : 'info',
+            '3d.workspace',
+            message,
+            {
+                dedupeKey: signature,
+                dedupeWindowMs: 120
+            }
+        );
+    }
 
     const transformInputs = {
         position: [0, 1, 2].map((index) => root.querySelector(`[data-threed-role="position-${index}"]`)),
         rotation: [0, 1, 2].map((index) => root.querySelector(`[data-threed-role="rotation-${index}"]`)),
         scale: [0, 1, 2].map((index) => root.querySelector(`[data-threed-role="scale-${index}"]`))
     };
+
+    function getVisibleLibraryAssets() {
+        const query = String(assetSearchQuery || '').trim().toLowerCase();
+        return [...libraryAssets]
+            .filter((asset) => !query || String(asset.name || '').toLowerCase().includes(query))
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+    }
+
+    function setAssetDrawerOpen(enabled) {
+        assetDrawerOpen = Boolean(enabled);
+        refs.assetDrawer?.classList.toggle('is-open', assetDrawerOpen);
+    }
+
+    function renderAssetDrawer() {
+        visibleLibraryAssets = getVisibleLibraryAssets();
+        if (refs.assetGrid) {
+            refs.assetGrid.innerHTML = visibleLibraryAssets.map((asset) => `
+                <button
+                    type="button"
+                    class="threed-asset-card"
+                    draggable="true"
+                    data-library-asset-id="${escapeHtml(asset.id)}"
+                    title="${escapeHtml(asset.name || 'Library asset')}"
+                >
+                    <div class="threed-asset-thumb">${escapeHtml(formatLibraryAssetType(asset))}</div>
+                    <strong>${escapeHtml(asset.name || 'Library Asset')}</strong>
+                    <span>${escapeHtml(formatLibraryAssetSize(asset))}</span>
+                </button>
+            `).join('');
+        }
+        if (refs.assetEmpty) {
+            refs.assetEmpty.classList.toggle('is-visible', !visibleLibraryAssets.length);
+            refs.assetEmpty.textContent = visibleLibraryAssets.length
+                ? ''
+                : (libraryAssets.length
+                    ? 'No Library assets match this search.'
+                    : 'Library assets from the Assets page appear here. Drag a card into the viewport to place it.');
+        }
+    }
+
+    async function refreshLibraryAssets() {
+        if (!active) {
+            assetRefreshPending = true;
+            return;
+        }
+        logThreeD('active', '3d.assets', 'Refreshing the 3D content drawer from the Assets Library.', {
+            dedupeKey: '3d-content-drawer-refresh-start',
+            dedupeWindowMs: 250
+        });
+        const token = ++assetRefreshToken;
+        const nextAssets = await actions.getLibraryAssets?.() || [];
+        if (token !== assetRefreshToken) return;
+        if (!active) {
+            assetRefreshPending = true;
+            return;
+        }
+        libraryAssets = Array.isArray(nextAssets) ? nextAssets : [];
+        assetRefreshPending = false;
+        const refreshSignature = `${libraryAssets.length}:${libraryAssets.map((asset) => asset.id).slice(0, 12).join('|')}`;
+        if (refreshSignature !== lastAssetRefreshSignature) {
+            lastAssetRefreshSignature = refreshSignature;
+            logThreeD('info', '3d.assets', `Content drawer ready with ${libraryAssets.length} synced asset${libraryAssets.length === 1 ? '' : 's'}.`, {
+                dedupeKey: refreshSignature,
+                dedupeWindowMs: 120
+            });
+        }
+        renderAssetDrawer();
+    }
 
     function setStatus(text, tone = 'info') {
         statusTone = tone;
@@ -1286,6 +1527,7 @@ export function createThreeDWorkspace(actions, store) {
         refs.status.style.borderColor = tone === 'info'
             ? 'rgba(184,178,163,0.28)'
             : 'rgba(184,178,163,0.72)';
+        logStatusMessage(text, tone);
     }
 
     function setInputValue(input, value) {
@@ -1294,7 +1536,7 @@ export function createThreeDWorkspace(actions, store) {
     }
 
     function waitForUiPaint() {
-        return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        return nextPaint();
     }
 
     function renderRenderJobUi(job = {}) {
@@ -1306,13 +1548,23 @@ export function createThreeDWorkspace(actions, store) {
         });
     }
 
-    function setPathTraceLoading(active, message = 'Preparing renderer...') {
-        refs.pathTraceLoading?.classList.toggle('is-active', !!active);
+    function setPathTraceLoading(active, message = 'Preparing renderer...', progress = null) {
+        const enabled = !!active;
+        refs.pathTraceLoading?.classList.toggle('is-active', enabled);
         if (refs.pathTraceLoadingTitle) {
             refs.pathTraceLoadingTitle.textContent = 'Preparing Renderer';
         }
         if (refs.pathTraceLoadingText) {
             refs.pathTraceLoadingText.textContent = message || 'Preparing renderer...';
+        }
+        if (refs.pathTraceLoadingProgressFill) {
+            const ratio = enabled ? (progress == null ? getPathTraceLoadingProgress(message) : Math.max(0, Math.min(1, Number(progress) || 0))) : 1;
+            refs.pathTraceLoadingProgressFill.style.width = `${Math.round(ratio * 100)}%`;
+        }
+        if (refs.pathTraceLoadingProgressLabel) {
+            refs.pathTraceLoadingProgressLabel.textContent = enabled
+                ? (message || 'Preparing renderer...')
+                : 'Ready';
         }
     }
 
@@ -1814,6 +2066,7 @@ export function createThreeDWorkspace(actions, store) {
         });
         setPathTraceLoading(true, 'Preparing render...');
         setStatus(`Path Trace rendering ${requestedSamples} samples at ${outputWidth} x ${outputHeight}. The final render now takes over the viewport until export completes.`, 'info');
+        logThreeD('active', '3d.render', `Starting final 3D render at ${outputWidth} x ${outputHeight} for ${requestedSamples} samples.`);
         await waitForUiPaint();
 
         engine.startBackgroundRender({
@@ -1850,6 +2103,8 @@ export function createThreeDWorkspace(actions, store) {
         if (action === 'ui-mode') {
             uiMode = actionNode.dataset.uiMode === 'fullscreen' ? 'fullscreen' : 'edit';
             applyUiMode();
+        } else if (action === 'toggle-asset-drawer') {
+            setAssetDrawerOpen(!assetDrawerOpen);
         } else if (action === 'workspace-panel-tab') {
             const panelTab = actionNode.dataset.workspacePanelTab || 'outliner';
             actions.updateThreeDWorkspace?.({
@@ -2015,7 +2270,10 @@ export function createThreeDWorkspace(actions, store) {
 
     root.addEventListener('input', (event) => {
         const role = event.target?.dataset?.threedRole || '';
-        if (role === 'gradient-stop-color') {
+        if (role === 'asset-search') {
+            assetSearchQuery = event.target.value || '';
+            renderAssetDrawer();
+        } else if (role === 'gradient-stop-color') {
             updateWorldLightGradientStop(
                 Number(event.target.dataset.stopIndex),
                 { color: event.target.value || '#ffffff' }
@@ -2093,6 +2351,51 @@ export function createThreeDWorkspace(actions, store) {
         surfaceAttachTextId = null;
         setStatus(`Attached "${textItem?.name || 'Text'}" to the selected surface.`, 'success');
     }, true);
+
+    refs.assetGrid?.addEventListener('dragstart', (event) => {
+        const assetCard = event.target.closest('[data-library-asset-id]');
+        if (!assetCard) return;
+        draggedAssetId = assetCard.dataset.libraryAssetId || '';
+        if (!draggedAssetId) return;
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData('text/plain', draggedAssetId);
+        }
+        setAssetDrawerOpen(false);
+        const assetName = libraryAssets.find((asset) => asset.id === draggedAssetId)?.name || 'Library asset';
+        logThreeD('info', '3d.assets', `Dragging "${assetName}" from the content drawer into the 3D scene.`, {
+            dedupeKey: `drag-asset:${draggedAssetId}`,
+            dedupeWindowMs: 120
+        });
+    });
+
+    refs.assetGrid?.addEventListener('dragend', () => {
+        draggedAssetId = '';
+    });
+
+    refs.canvasContainer.addEventListener('dragover', (event) => {
+        if (!draggedAssetId) return;
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'copy';
+        }
+    });
+
+    refs.canvasContainer.addEventListener('drop', async (event) => {
+        const assetId = (event.dataTransfer?.getData('text/plain') || draggedAssetId || '').trim();
+        draggedAssetId = '';
+        if (!assetId) return;
+        event.preventDefault();
+        try {
+            const didPlace = await actions.addLibraryAssetToThreeDScene?.(assetId);
+            if (didPlace) {
+                setStatus('Placed Library asset into the 3D scene.', 'success');
+            }
+        } catch (error) {
+            console.error(error);
+            setStatus(error?.message || 'Could not place that Library asset.', 'error');
+        }
+    });
 
     window.addEventListener('pointerdown', (event) => {
         if (!contextMenuAnchor) return;
@@ -2599,7 +2902,24 @@ export function createThreeDWorkspace(actions, store) {
             }
         };
         engine.onPathTraceLoading = (payload) => {
-            setPathTraceLoading(payload?.active, payload?.message);
+            const progress = payload?.active ? getPathTraceLoadingProgress(payload?.message) : 1;
+            setPathTraceLoading(payload?.active, payload?.message, progress);
+            if (payload?.active) {
+                const signature = `${payload?.message || 'Preparing renderer'}|${Math.round(progress * 100)}`;
+                if (signature !== lastPathTraceLogSignature) {
+                    lastPathTraceLogSignature = signature;
+                    logThreeD('progress', '3d.render', payload?.message || 'Preparing renderer...', progress, {
+                        dedupeKey: signature,
+                        dedupeWindowMs: 100
+                    });
+                }
+            } else if (lastPathTraceLogSignature) {
+                lastPathTraceLogSignature = '';
+                logThreeD('info', '3d.render', 'Renderer preparation finished.', {
+                    dedupeKey: 'renderer-prep-finished',
+                    dedupeWindowMs: 220
+                });
+            }
         };
         engine.onBackgroundRenderViewport = (payload) => {
             setRenderViewportPreview(payload);
@@ -2615,6 +2935,28 @@ export function createThreeDWorkspace(actions, store) {
                 const prefix = payload?.message ? `${payload.message} ` : 'Final render running: ';
                 setStatus(`${prefix}${payload.currentSamples || 0} / ${payload.requestedSamples || 0} samples at ${formatRenderSize(payload)}.`, 'info');
             }
+            if (payload?.active) {
+                const requestedSamples = Math.max(1, Number(payload.requestedSamples || 0));
+                const ratio = requestedSamples > 0 ? Math.min(1, (Number(payload.currentSamples || 0) / requestedSamples)) : 0;
+                const bucket = Math.floor(ratio * 20);
+                const signature = `${payload.status || 'active'}|${payload.message || ''}|${requestedSamples}|${bucket}|${formatRenderSize(payload)}`;
+                if (signature !== lastRenderProgressSignature) {
+                    lastRenderProgressSignature = signature;
+                    logThreeD('progress', '3d.render', `${payload.message || 'Final render running'} ${payload.currentSamples || 0} / ${payload.requestedSamples || 0} samples at ${formatRenderSize(payload)}.`, ratio, {
+                        dedupeKey: signature,
+                        dedupeWindowMs: 80
+                    });
+                }
+            } else if (payload?.status === 'complete') {
+                lastRenderProgressSignature = '';
+                logThreeD('success', '3d.render', payload?.message || '3D render complete. PNG exported.');
+            } else if (payload?.status === 'aborted') {
+                lastRenderProgressSignature = '';
+                logThreeD('warning', '3d.render', payload?.message || '3D render aborted.');
+            } else if (payload?.status === 'error') {
+                lastRenderProgressSignature = '';
+                logThreeD('error', '3d.render', payload?.message || 'The 3D render failed.');
+            }
             actions.setThreeDRenderJob(
                 payload,
                 payload?.active
@@ -2626,12 +2968,21 @@ export function createThreeDWorkspace(actions, store) {
     }
 
     applyUiMode();
+    setAssetDrawerOpen(false);
+    renderAssetDrawer();
 
     return {
         root,
         activate() {
             active = true;
+            logThreeD('info', '3d.workspace', '3D workspace activated.');
             hydrateEngine();
+            engine.setViewportActive?.(true);
+            const assetRefreshPromise = (assetRefreshPending || !libraryAssets.length) ? refreshLibraryAssets() : Promise.resolve();
+            assetRefreshPromise.catch((error) => {
+                console.error(error);
+                setStatus('Could not refresh Library assets for the content drawer.', 'error');
+            });
             refs.sampleCount.textContent = String(sampleCount);
             if (refs.headerSampleCount) {
                 refs.headerSampleCount.textContent = String(sampleCount);
@@ -2650,10 +3001,16 @@ export function createThreeDWorkspace(actions, store) {
         },
         deactivate() {
             active = false;
+            logThreeD('info', '3d.workspace', '3D workspace hidden; live viewport work is paused while background jobs can continue.', {
+                dedupeKey: '3d-workspace-hidden',
+                dedupeWindowMs: 200
+            });
+            engine?.setViewportActive?.(false);
             closeRenderDialog();
             closeContextMenu();
             clearSurfaceAttachMode();
         },
+        refreshLibraryAssets,
         render(state) {
             const document = state.threeDDocument;
             if (!document) return;
@@ -2997,6 +3354,13 @@ export function createThreeDWorkspace(actions, store) {
                 await engine.queueSync(store.getState().threeDDocument);
             }
             return engine.capturePreview();
+        },
+        setProgressOverlay(payload = null) {
+            if (payload?.active) {
+                progressOverlay.show(payload);
+                return;
+            }
+            progressOverlay.hide();
         }
     };
 }

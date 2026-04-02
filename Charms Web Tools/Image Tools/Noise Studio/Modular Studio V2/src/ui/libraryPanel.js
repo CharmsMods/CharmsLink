@@ -1,7 +1,12 @@
+import { createThreeDAssetPreview } from '../3d/assetPreview.js';
+import { maybeYieldToUi, nextPaint } from './scheduling.js';
+
 const SKIP_PARAMS = new Set(['_libraryName', '_libraryTags', '_libraryProjectType', '_libraryHoverSource', '_librarySourceArea', '_librarySourceCount']);
 const LIBRARY_EXPORT_TYPE = 'noise-studio-library';
-const LIBRARY_EXPORT_FORMAT = 'library-json/v1';
+const LIBRARY_EXPORT_FORMAT = 'library-json/v2';
+const LEGACY_LIBRARY_EXPORT_FORMAT = 'library-json/v1';
 const LIBRARY_SECURE_EXPORT_FORMAT = 'library-secure-json/v1';
+const LIBRARY_ASSET_FOLDER_FORMAT = 'library-assets-folder/v1';
 const LIBRARY_SECURE_KDF_ITERATIONS = 250000;
 const textEncoder = new TextEncoder();
 
@@ -29,6 +34,49 @@ function toJsonFilename(name) {
 function buildDefaultLibraryFilename(name = 'noise-studio-library') {
     const stamp = new Date().toISOString().slice(0, 10);
     return toJsonFilename(`${stripJsonExtension(name)} ${stamp}`);
+}
+
+function sanitizeFileStem(name, fallback = 'library-item') {
+    return String(name || fallback)
+        .trim()
+        .replace(/[<>:"/\\|?*]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .replace(/\.+$/g, '')
+        || fallback;
+}
+
+function formatCountLabel(count, singular, plural = `${singular}s`) {
+    const safeCount = Number(count || 0);
+    return `${safeCount} ${safeCount === 1 ? singular : plural}`;
+}
+
+function formatImportSummary(projectCount = 0, assetCount = 0) {
+    const parts = [];
+    if (projectCount) parts.push(formatCountLabel(projectCount, 'project'));
+    if (assetCount) parts.push(formatCountLabel(assetCount, 'asset'));
+    return parts.join(' and ') || '0 items';
+}
+
+function formatScopeLabel(scope) {
+    if (scope === 'library') return 'Library';
+    if (scope === 'assets') return 'Assets';
+    return 'Library + Assets';
+}
+
+function getScopeDefaultBaseName(scope) {
+    if (scope === 'library') return 'noise-studio-library';
+    if (scope === 'assets') return 'noise-studio-assets';
+    return 'noise-studio-library-package';
+}
+
+function getScopeDescription(scope, projectCount, assetCount) {
+    if (scope === 'library') {
+        return `${formatCountLabel(projectCount, 'project')} and Library tags.`;
+    }
+    if (scope === 'assets') {
+        return `${formatCountLabel(assetCount, 'asset')} and Asset tags.`;
+    }
+    return `${formatCountLabel(projectCount, 'project')} plus ${formatCountLabel(assetCount, 'asset')} in one package.`;
 }
 
 function clamp01(value) {
@@ -145,7 +193,64 @@ function buildLibraryProjectExportPayload(project) {
     };
 }
 
-function buildLibraryExportBundle(projects, tagCatalog, name = 'noise-studio-library') {
+function normalizeLibraryAssetType(assetType) {
+    return String(assetType || '').toLowerCase() === 'model' ? 'model' : 'image';
+}
+
+function buildLibraryAssetExportPayload(asset) {
+    return {
+        id: asset.id || null,
+        kind: 'library-asset',
+        recordType: 'asset',
+        timestamp: Number(asset.timestamp || Date.now()),
+        name: String(asset.name || (normalizeLibraryAssetType(asset.assetType) === 'model' ? 'Model Asset' : 'Image Asset')),
+        assetType: normalizeLibraryAssetType(asset.assetType),
+        format: String(asset.format || ''),
+        mimeType: String(asset.mimeType || ''),
+        dataUrl: String(asset.dataUrl || ''),
+        previewDataUrl: String(asset.previewDataUrl || ''),
+        tags: normalizeTagList(asset.tags),
+        width: Number(asset.width || 0),
+        height: Number(asset.height || 0),
+        sourceProjectId: asset.sourceProjectId || null,
+        sourceProjectType: asset.sourceProjectType || null,
+        sourceProjectName: asset.sourceProjectName || null,
+        origin: asset.origin || 'library',
+        assetFingerprint: asset.assetFingerprint || ''
+    };
+}
+
+function buildLibraryAssetFolderManifest({
+    assets = [],
+    tagCatalog = [],
+    name = 'noise-studio-assets'
+} = {}) {
+    const exportedAt = new Date().toISOString();
+    return {
+        type: LIBRARY_EXPORT_TYPE,
+        format: LIBRARY_ASSET_FOLDER_FORMAT,
+        version: 1,
+        scope: 'assets',
+        name: stripJsonExtension(name || 'noise-studio-assets') || 'noise-studio-assets',
+        exportedAt,
+        assetCount: (assets || []).length,
+        tags: normalizeTagList(tagCatalog),
+        assets: (assets || []).map((asset) => {
+            const payload = buildLibraryAssetExportPayload(asset);
+            delete payload.dataUrl;
+            delete payload.previewDataUrl;
+            return payload;
+        })
+    };
+}
+
+function buildLibraryExportBundle({
+    projects = [],
+    assets = [],
+    tagCatalog = [],
+    name = 'noise-studio-library',
+    scope = 'combined'
+} = {}) {
     const exportedAt = new Date().toISOString();
     const normalizedProjects = (projects || []).map((project) => ({
         id: project.id || null,
@@ -162,16 +267,20 @@ function buildLibraryExportBundle(projects, tagCatalog, name = 'noise-studio-lib
         },
         payload: buildLibraryProjectExportPayload(project)
     }));
+    const normalizedAssets = (assets || []).map((asset) => buildLibraryAssetExportPayload(asset));
 
     return {
         type: LIBRARY_EXPORT_TYPE,
         format: LIBRARY_EXPORT_FORMAT,
-        version: 1,
+        version: 2,
+        scope: scope === 'library' || scope === 'assets' ? scope : 'combined',
         name: stripJsonExtension(name || 'noise-studio-library') || 'noise-studio-library',
         exportedAt,
         projectCount: normalizedProjects.length,
+        assetCount: normalizedAssets.length,
         tags: normalizeTagList(tagCatalog),
-        projects: normalizedProjects
+        projects: normalizedProjects,
+        assets: normalizedAssets
     };
 }
 
@@ -180,7 +289,7 @@ function isPlainLibraryExportPayload(parsed) {
         && typeof parsed === 'object'
         && !Array.isArray(parsed)
         && parsed.type === LIBRARY_EXPORT_TYPE
-        && parsed.format === LIBRARY_EXPORT_FORMAT;
+        && (parsed.format === LIBRARY_EXPORT_FORMAT || parsed.format === LEGACY_LIBRARY_EXPORT_FORMAT);
 }
 
 function isSecureLibraryExportPayload(parsed) {
@@ -216,31 +325,74 @@ function createImportEntryFromPayload(rawPayload, fallbackName, index = 0, expli
     };
 }
 
+function isLibraryAssetPayload(parsed) {
+    return !!parsed
+        && typeof parsed === 'object'
+        && !Array.isArray(parsed)
+        && (parsed.recordType === 'asset' || parsed.kind === 'library-asset');
+}
+
+function createImportAssetEntryFromPayload(rawAsset, fallbackName, index = 0, explicitTags = null) {
+    const dataUrl = String(rawAsset?.dataUrl || '');
+    if (!dataUrl) return null;
+    return {
+        name: String(rawAsset?.name || fallbackName || `Asset ${index + 1}`),
+        tags: normalizeTagList(explicitTags || rawAsset?.tags || []),
+        asset: {
+            id: rawAsset?.id || null,
+            timestamp: Number(rawAsset?.timestamp || Date.parse(rawAsset?.savedAt || '') || Date.now()),
+            name: String(rawAsset?.name || fallbackName || `Asset ${index + 1}`),
+            assetType: normalizeLibraryAssetType(rawAsset?.assetType),
+            format: String(rawAsset?.format || ''),
+            mimeType: String(rawAsset?.mimeType || ''),
+            dataUrl,
+            previewDataUrl: String(rawAsset?.previewDataUrl || ''),
+            width: Number(rawAsset?.width || rawAsset?.sourceSize?.width || 0),
+            height: Number(rawAsset?.height || rawAsset?.sourceSize?.height || 0),
+            sourceProjectId: rawAsset?.sourceProjectId || null,
+            sourceProjectType: rawAsset?.sourceProjectType || null,
+            sourceProjectName: rawAsset?.sourceProjectName || null,
+            origin: rawAsset?.origin || 'import',
+            assetFingerprint: rawAsset?.assetFingerprint || ''
+        }
+    };
+}
+
 function extractLibraryImportBundle(parsed, fallbackName) {
     if (isPlainLibraryExportPayload(parsed)) {
         const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
-        const entries = projects.map((project, index) => createImportEntryFromPayload(
+        const assets = Array.isArray(parsed.assets) ? parsed.assets : [];
+        const projectEntries = projects.map((project, index) => createImportEntryFromPayload(
             project?.payload || project,
             project?.name || `${fallbackName} ${index + 1}`,
             index,
             project?.tags || project?.payload?._libraryTags
         ));
+        const assetEntries = assets.map((asset, index) => createImportAssetEntryFromPayload(
+            asset,
+            asset?.name || `${fallbackName} Asset ${index + 1}`,
+            index,
+            asset?.tags
+        )).filter(Boolean);
         const importedTags = normalizeTagList([
             ...(parsed.tags || []),
-            ...entries.flatMap((entry) => entry.tags)
+            ...projectEntries.flatMap((entry) => entry.tags),
+            ...assetEntries.flatMap((entry) => entry.tags)
         ]);
         return {
             kind: 'library-bundle',
-            sourceFormat: LIBRARY_EXPORT_FORMAT,
+            sourceFormat: parsed.format,
             bundleName: stripJsonExtension(parsed.name || fallbackName) || 'noise-studio-library',
             exportedAt: parsed.exportedAt || null,
-            entries,
+            scope: parsed.scope || (assetEntries.length && projectEntries.length ? 'combined' : assetEntries.length ? 'assets' : 'library'),
+            projectEntries,
+            assetEntries,
             tags: importedTags
         };
     }
 
     if (Array.isArray(parsed)) {
-        const entries = parsed.map((entry, index) => createImportEntryFromPayload(
+        const projectEntries = parsed.map((entry, index) => createImportEntryFromPayload(
             entry,
             `${fallbackName} ${index + 1}`,
             index
@@ -250,8 +402,24 @@ function extractLibraryImportBundle(parsed, fallbackName) {
             sourceFormat: 'legacy-array',
             bundleName: stripJsonExtension(fallbackName) || 'noise-studio-library',
             exportedAt: null,
-            entries,
-            tags: normalizeTagList(entries.flatMap((entry) => entry.tags))
+            scope: 'library',
+            projectEntries,
+            assetEntries: [],
+            tags: normalizeTagList(projectEntries.flatMap((entry) => entry.tags))
+        };
+    }
+
+    if (isLibraryAssetPayload(parsed)) {
+        const assetEntry = createImportAssetEntryFromPayload(parsed, fallbackName, 0, parsed.tags);
+        return {
+            kind: 'single-asset',
+            sourceFormat: 'single-asset',
+            bundleName: stripJsonExtension(fallbackName) || 'library-asset',
+            exportedAt: null,
+            scope: 'assets',
+            projectEntries: [],
+            assetEntries: assetEntry ? [assetEntry] : [],
+            tags: normalizeTagList(parsed?.tags || [])
         };
     }
 
@@ -260,7 +428,9 @@ function extractLibraryImportBundle(parsed, fallbackName) {
         sourceFormat: 'single-project',
         bundleName: stripJsonExtension(fallbackName) || 'library-project',
         exportedAt: null,
-        entries: [createImportEntryFromPayload(parsed, fallbackName, 0)],
+        scope: 'library',
+        projectEntries: [createImportEntryFromPayload(parsed, fallbackName, 0)],
+        assetEntries: [],
         tags: normalizeTagList(parsed?._libraryTags || parsed?.tags || [])
     };
 }
@@ -396,6 +566,111 @@ function formatDimensions(width, height) {
     const h = Number(height) || 0;
     if (!w || !h) return 'Unknown';
     return `${w.toLocaleString()} x ${h.toLocaleString()}`;
+}
+
+function normalizeAssetMimeType(format, mimeType, assetType = 'image') {
+    const normalizedMimeType = String(mimeType || '').trim().toLowerCase();
+    if (normalizedMimeType) return normalizedMimeType;
+    const normalizedFormat = String(format || '').trim().toLowerCase();
+    if (assetType === 'model') {
+        if (normalizedFormat === 'gltf') return 'model/gltf+json';
+        return 'model/gltf-binary';
+    }
+    if (normalizedFormat === 'jpg' || normalizedFormat === 'jpeg') return 'image/jpeg';
+    if (normalizedFormat === 'webp') return 'image/webp';
+    if (normalizedFormat === 'gif') return 'image/gif';
+    if (normalizedFormat === 'svg') return 'image/svg+xml';
+    return 'image/png';
+}
+
+function getAssetFileExtension(asset) {
+    const normalizedFormat = String(asset?.format || '').trim().toLowerCase();
+    if (normalizedFormat === 'glb' || normalizedFormat === 'gltf') return normalizedFormat;
+    if (normalizedFormat === 'jpg' || normalizedFormat === 'jpeg') return 'jpg';
+    if (normalizedFormat === 'webp') return 'webp';
+    if (normalizedFormat === 'gif') return 'gif';
+    if (normalizedFormat === 'svg') return 'svg';
+    const mimeType = String(asset?.mimeType || '').toLowerCase();
+    if (mimeType.includes('jpeg') || mimeType.includes('jpg')) return 'jpg';
+    if (mimeType.includes('webp')) return 'webp';
+    if (mimeType.includes('gif')) return 'gif';
+    if (mimeType.includes('svg')) return 'svg';
+    if (mimeType.includes('gltf')) return normalizedFormat === 'gltf' ? 'gltf' : 'glb';
+    return asset?.assetType === 'model' ? 'glb' : 'png';
+}
+
+async function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Could not read that file.'));
+        reader.readAsDataURL(blob);
+    });
+}
+
+async function dataUrlToBlob(dataUrl) {
+    const response = await fetch(String(dataUrl || ''));
+    return response.blob();
+}
+
+function inferAssetFileMeta(fileName, mimeType = '') {
+    const extension = String(fileName || '').trim().toLowerCase().split('.').pop() || '';
+    const normalizedMime = String(mimeType || '').trim().toLowerCase();
+
+    if (extension === 'glb' || extension === 'gltf' || normalizedMime.includes('model/gltf')) {
+        return {
+            assetType: 'model',
+            format: extension === 'gltf' ? 'gltf' : 'glb',
+            mimeType: normalizeAssetMimeType(extension, normalizedMime, 'model')
+        };
+    }
+
+    const imageExtension = extension === 'jpeg' ? 'jpg' : extension;
+    const supportedImageExtensions = new Set(['png', 'jpg', 'webp', 'gif', 'svg']);
+    if (supportedImageExtensions.has(imageExtension) || normalizedMime.startsWith('image/')) {
+        const inferredFormat = supportedImageExtensions.has(imageExtension)
+            ? imageExtension
+            : (normalizedMime.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('+xml', '');
+        return {
+            assetType: 'image',
+            format: inferredFormat || 'png',
+            mimeType: normalizeAssetMimeType(inferredFormat, normalizedMime, 'image')
+        };
+    }
+
+    return null;
+}
+
+async function collectDirectoryFiles(directoryHandle, prefix = '') {
+    const entries = [];
+    for await (const handle of directoryHandle.values()) {
+        const path = prefix ? `${prefix}/${handle.name}` : handle.name;
+        if (handle.kind === 'file') {
+            entries.push({ handle, path });
+            continue;
+        }
+        if (handle.kind === 'directory') {
+            entries.push(...await collectDirectoryFiles(handle, path));
+        }
+    }
+    return entries;
+}
+
+async function getNestedFileHandle(directoryHandle, relativePath) {
+    const parts = String(relativePath || '').split('/').filter(Boolean);
+    if (!parts.length) return null;
+    let current = directoryHandle;
+    for (let index = 0; index < parts.length - 1; index += 1) {
+        current = await current.getDirectoryHandle(parts[index]);
+    }
+    return current.getFileHandle(parts[parts.length - 1]);
+}
+
+async function writeDirectoryFile(directoryHandle, fileName, content) {
+    const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(content);
+    await writable.close();
 }
 
 function getImageArea(width, height) {
@@ -541,25 +816,36 @@ function getSortDirectionLabels(sortKey) {
     return { desc: 'Largest first', asc: 'Smallest first' };
 }
 
-export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
+export function createLibraryPanel(root, { actions, layerDefaults = {}, logger = null }) {
     root.innerHTML = `
         <div class="library-panel-shell">
             <div class="toolbar library-toolbar">
-                <div class="library-toolbar-title">Library</div>
+                <div class="library-toolbar-page">
+                    <div class="library-toolbar-title">Library Page</div>
+                    <div class="library-page-tabs" data-library-role="page-tabs">
+                        <button type="button" class="mode-button is-active" data-library-action="set-page-mode" data-mode="library">Library</button>
+                        <button type="button" class="mode-button" data-library-action="set-page-mode" data-mode="assets">Assets</button>
+                    </div>
+                </div>
                 <button type="button" class="toolbar-button" data-library-action="upload">Import JSON</button>
+                <button type="button" class="toolbar-button" data-library-action="import-folder" data-library-role="folder-import-button">Import Folder</button>
                 <button type="button" class="toolbar-button" data-library-action="toggle-select-mode" aria-pressed="false">Select</button>
                 <button type="button" class="toolbar-button" data-library-action="toggle-hover" aria-pressed="false">Compare Source</button>
                 <button type="button" class="toolbar-button" data-library-action="toggle-fullscreen" aria-pressed="false">Focus View</button>
-                <button type="button" class="toolbar-button" data-library-action="save-library">Save Library</button>
-                <button type="button" class="toolbar-button" data-library-action="export-zip">Export ZIP</button>
-                <button type="button" class="toolbar-button" data-library-action="clear-all">Clear Library</button>
+                <button type="button" class="toolbar-button" data-library-action="save-library" data-library-role="save-button">Save Library</button>
+                <button type="button" class="toolbar-button" data-library-action="export-zip" data-library-role="zip-button">Export ZIP</button>
+                <button type="button" class="toolbar-button" data-library-action="export-folder" data-library-role="folder-export-button">Export Folder</button>
+                <button type="button" class="toolbar-button" data-library-action="clear-all" data-library-role="clear-button">Clear Library</button>
             </div>
             <div class="library-content">
                 <input type="file" accept=".json,application/json" multiple hidden data-library-role="upload-input">
-                <div class="library-grid-view"></div>
+                <div class="library-grid-view">
+                    <div class="library-grid-mode library-project-grid is-active" data-library-role="project-grid"></div>
+                    <div class="library-grid-mode library-asset-grid" data-library-role="asset-grid"></div>
+                </div>
                 <div class="library-empty-state">
                     <strong data-library-role="empty-title">Library is empty</strong>
-                    <span data-library-role="empty-text">Save projects from Editor or Stitch, or import JSON files to build your gallery.</span>
+                    <span data-library-role="empty-text">Save projects from Editor, Stitch, or 3D, or import JSON files to build your gallery.</span>
                 </div>
                 <div class="library-fullscreen-view">
                     <div class="library-fullscreen-label">Library Preview</div>
@@ -600,11 +886,14 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                 </div>
             </div>
             <div class="library-detail-overlay">
-                <div class="library-detail-shell">
+                    <div class="library-detail-shell">
                     <div class="library-detail-image-pane">
                         <div class="library-hover-hint">Hovering Original</div>
                         <img class="library-img-base" alt="">
                         <img class="library-img-hover" alt="">
+                        <div class="library-asset-preview-shell" data-library-role="asset-preview-shell">
+                            <div class="library-asset-preview-host" data-library-role="asset-preview-host"></div>
+                        </div>
                     </div>
                     <div class="library-detail-sidebar">
                         <div class="library-detail-sidebar-header">
@@ -620,6 +909,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                         <div class="library-detail-sidebar-footer">
                             <button type="button" class="toolbar-button" data-library-action="download-project">Download JSON</button>
                             <button type="button" class="toolbar-button" data-library-action="load-detail">Load Project</button>
+                            <button type="button" class="toolbar-button" data-library-action="download-asset">Download Asset</button>
+                            <button type="button" class="toolbar-button" data-library-action="rename-asset">Rename Asset</button>
                         </div>
                     </div>
                 </div>
@@ -630,15 +921,23 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     const refs = {
         shell: root.querySelector('.library-panel-shell'),
         toolbar: root.querySelector('.library-toolbar'),
+        pageTabs: root.querySelector('[data-library-role="page-tabs"]'),
         content: root.querySelector('.library-content'),
         grid: root.querySelector('.library-grid-view'),
+        projectGrid: root.querySelector('[data-library-role="project-grid"]'),
+        assetGrid: root.querySelector('[data-library-role="asset-grid"]'),
         empty: root.querySelector('.library-empty-state'),
         emptyTitle: root.querySelector('[data-library-role="empty-title"]'),
         emptyText: root.querySelector('[data-library-role="empty-text"]'),
         uploadInput: root.querySelector('[data-library-role="upload-input"]'),
+        folderImportButton: root.querySelector('[data-library-role="folder-import-button"]'),
         selectToggle: root.querySelector('[data-library-action="toggle-select-mode"]'),
         hoverToggle: root.querySelector('[data-library-action="toggle-hover"]'),
         fullscreenToggle: root.querySelector('[data-library-action="toggle-fullscreen"]'),
+        saveButton: root.querySelector('[data-library-role="save-button"]'),
+        zipButton: root.querySelector('[data-library-role="zip-button"]'),
+        folderExportButton: root.querySelector('[data-library-role="folder-export-button"]'),
+        clearButton: root.querySelector('[data-library-role="clear-button"]'),
         fullscreenView: root.querySelector('.library-fullscreen-view'),
         fullscreenLabel: root.querySelector('.library-fullscreen-label'),
         fullscreenBase: root.querySelector('.library-fullscreen-view .library-img-base'),
@@ -663,12 +962,17 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         detailMeta: root.querySelector('[data-library-role="detail-meta"]'),
         detailLayers: root.querySelector('[data-library-role="detail-layers"]'),
         detailBase: root.querySelector('.library-detail-image-pane .library-img-base'),
-        detailHover: root.querySelector('.library-detail-image-pane .library-img-hover')
+        detailHover: root.querySelector('.library-detail-image-pane .library-img-hover'),
+        detailAssetPreviewShell: root.querySelector('[data-library-role="asset-preview-shell"]'),
+        detailAssetPreviewHost: root.querySelector('[data-library-role="asset-preview-host"]')
     };
 
     let libraryData = [];
     let visibleLibraryData = [];
+    let assetData = [];
+    let visibleAssetData = [];
     let libraryTags = [];
+    let activePageMode = 'library';
     let isHoverEnabled = false;
     let isFullscreen = false;
     let isSidePanelOpen = false;
@@ -677,6 +981,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     let detailData = null;
     let selectedProjectId = null;
     let selectedProjectIds = new Set();
+    let selectedAssetId = null;
+    let selectedAssetIds = new Set();
     let pendingApplyTagKeys = new Set();
     let refreshToken = 0;
     let sortKey = 'timestamp';
@@ -688,22 +994,177 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     let expandedParamIds = new Set();
     let hasRenderedLibrary = false;
     let suppressOutsideClick = false;
+    let assetPreview = null;
+    let detailPreviewToken = 0;
+    let panelActive = false;
+    let pendingRefreshWhileInactive = false;
+    const gridMarkupSignatureByMode = { library: '', assets: '' };
+    const gridStateSignatureByMode = { library: '', assets: '' };
+    let lastProgressLogSignature = '';
+
+    function logLibrary(level, processId, message, progressOrOptions = {}, maybeOptions = {}) {
+        if (!logger || !message) return;
+        const label = processId === 'library.import'
+            ? 'Library Import'
+            : processId === 'library.export'
+                ? 'Library Export'
+                : processId === 'library.assets'
+                    ? 'Library Assets'
+                    : 'Library Sync';
+        if (level === 'progress' && typeof logger.progress === 'function') {
+            logger.progress(processId, label, message, progressOrOptions, maybeOptions);
+            return;
+        }
+        const method = typeof logger[level] === 'function'
+            ? logger[level].bind(logger)
+            : logger.info.bind(logger);
+        method(processId, label, message, progressOrOptions);
+    }
+
+    function getLibraryProcessId(message = '') {
+        const normalized = String(message || '').trim().toLowerCase();
+        if (
+            normalized.includes('import')
+            || normalized.includes('scanning asset folder')
+            || normalized.includes('rendering library projects')
+        ) {
+            return 'library.import';
+        }
+        if (
+            normalized.includes('export')
+            || normalized.includes('zip')
+            || normalized.includes('packing')
+            || normalized.includes('saving export')
+        ) {
+            return 'library.export';
+        }
+        return 'library.sync';
+    }
+
+    function scopeIncludesProjects(scope) {
+        return scope === 'library' || scope === 'combined';
+    }
+
+    function scopeIncludesAssets(scope) {
+        return scope === 'assets' || scope === 'combined';
+    }
+
+    function isAssetsPage() {
+        return activePageMode === 'assets';
+    }
+
+    function getActiveExportScope() {
+        return isAssetsPage() ? 'assets' : 'library';
+    }
+
+    function getCurrentData() {
+        return isAssetsPage() ? assetData : libraryData;
+    }
+
+    function getVisibleCurrentData() {
+        return isAssetsPage() ? visibleAssetData : visibleLibraryData;
+    }
+
+    function getSelectedPrimaryId() {
+        return isAssetsPage() ? selectedAssetId : selectedProjectId;
+    }
+
+    function setSelectedPrimaryId(id) {
+        if (isAssetsPage()) selectedAssetId = id || null;
+        else selectedProjectId = id || null;
+    }
+
+    function getSelectedIdSet() {
+        return isAssetsPage() ? selectedAssetIds : selectedProjectIds;
+    }
+
+    function setSelectedIdSet(nextSet) {
+        if (isAssetsPage()) selectedAssetIds = nextSet;
+        else selectedProjectIds = nextSet;
+    }
+
+    function getDataForScope(scope) {
+        return {
+            projects: scopeIncludesProjects(scope) ? libraryData : [],
+            assets: scopeIncludesAssets(scope) ? assetData : []
+        };
+    }
+
+    function getTagCatalogForScope(scope) {
+        const { projects, assets } = getDataForScope(scope);
+        return normalizeTagList([
+            ...libraryTags,
+            ...projects.flatMap((item) => item.tags || []),
+            ...assets.flatMap((item) => item.tags || [])
+        ]);
+    }
+
+    function getExportCounts(scope) {
+        const { projects, assets } = getDataForScope(scope);
+        return {
+            projectCount: projects.length,
+            assetCount: assets.length
+        };
+    }
+
+    function buildExportBundleForScope(scope, filename) {
+        const { projects, assets } = getDataForScope(scope);
+        return buildLibraryExportBundle({
+            projects,
+            assets,
+            tagCatalog: getTagCatalogForScope(scope),
+            name: stripJsonExtension(filename || getScopeDefaultBaseName(scope)),
+            scope
+        });
+    }
+
+    function getSurvivingTagsForReplace(scope) {
+        const survivingTags = [];
+        if (!scopeIncludesProjects(scope)) {
+            survivingTags.push(...libraryData.flatMap((item) => item.tags || []));
+        }
+        if (!scopeIncludesAssets(scope)) {
+            survivingTags.push(...assetData.flatMap((item) => item.tags || []));
+        }
+        return normalizeTagList(survivingTags);
+    }
+
+    function resetScopeUiState(scope) {
+        if (scopeIncludesProjects(scope)) {
+            selectedProjectId = null;
+            selectedProjectIds = new Set();
+            if (!isAssetsPage()) {
+                closeDetail();
+                setFullscreenEnabled(false);
+            }
+        }
+        if (scopeIncludesAssets(scope)) {
+            selectedAssetId = null;
+            selectedAssetIds = new Set();
+            if (isAssetsPage()) {
+                closeDetail();
+            }
+        }
+        pendingApplyTagKeys = new Set();
+        updateSelectToggle();
+    }
 
     function getSelectedProject() {
-        return libraryData.find((item) => item.id === selectedProjectId) || null;
+        return getCurrentData().find((item) => item.id === getSelectedPrimaryId()) || null;
     }
 
     function getSelectedProjects() {
-        return libraryData.filter((item) => selectedProjectIds.has(item.id));
+        const selectedIds = getSelectedIdSet();
+        return getCurrentData().filter((item) => selectedIds.has(item.id));
     }
 
     function getSelectedProjectIds() {
-        return [...selectedProjectIds];
+        return [...getSelectedIdSet()];
     }
 
     function getTagSummaries() {
         const map = new Map(libraryTags.map((tag) => [getTagKey(tag), { key: getTagKey(tag), tag, count: 0 }]));
-        for (const item of libraryData) {
+        for (const item of getCurrentData()) {
             for (const tag of normalizeTagList(item.tags)) {
                 const key = getTagKey(tag);
                 if (!map.has(key)) {
@@ -730,7 +1191,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     }
 
     function updateSelectToggle() {
-        const selectionCount = selectedProjectIds.size;
+        const selectionCount = getSelectedIdSet().size;
         refs.selectToggle.setAttribute('aria-pressed', isSelectMode ? 'true' : 'false');
         refs.selectToggle.textContent = selectionCount ? `Select (${selectionCount})` : 'Select';
         refs.shell.classList.toggle('is-select-mode', isSelectMode);
@@ -742,15 +1203,18 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     }
 
     function clearProjectSelection() {
-        selectedProjectIds = new Set();
+        if (isAssetsPage()) selectedAssetIds = new Set();
+        else selectedProjectIds = new Set();
         pendingApplyTagKeys = new Set();
         updateSelectToggle();
     }
 
     function toggleProjectSelection(id) {
         if (!id) return;
-        if (selectedProjectIds.has(id)) selectedProjectIds.delete(id);
-        else selectedProjectIds.add(id);
+        const nextSelection = new Set(getSelectedIdSet());
+        if (nextSelection.has(id)) nextSelection.delete(id);
+        else nextSelection.add(id);
+        setSelectedIdSet(nextSelection);
         updateSelectToggle();
     }
 
@@ -804,8 +1268,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         return (Number(aWidth) || 0) - (Number(bWidth) || 0) || (Number(aHeight) || 0) - (Number(bHeight) || 0);
     }
 
-    function getVisibleLibraryData() {
-        const filtered = libraryData.filter((item) => {
+    function getFilteredSortedData(data, pageMode = 'library') {
+        const filtered = (data || []).filter((item) => {
             const itemTags = normalizeTagList(item.tags);
             if (activeTagMode === 'all') return true;
             if (activeTagMode === 'untagged') return !itemTags.length;
@@ -819,14 +1283,22 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             if (sortKey === 'name') {
                 comparison = (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
             } else if (sortKey === 'source-area') {
-                comparison = (a.sourceArea || 0) - (b.sourceArea || 0);
+                comparison = pageMode === 'assets'
+                    ? getImageArea(a.width, a.height) - getImageArea(b.width, b.height)
+                    : (a.sourceArea || 0) - (b.sourceArea || 0);
                 if (comparison === 0) {
-                    comparison = compareByDimensions(a.sourceWidth, a.sourceHeight, b.sourceWidth, b.sourceHeight);
+                    comparison = pageMode === 'assets'
+                        ? compareByDimensions(a.width, a.height, b.width, b.height)
+                        : compareByDimensions(a.sourceWidth, a.sourceHeight, b.sourceWidth, b.sourceHeight);
                 }
             } else if (sortKey === 'render-area') {
-                comparison = (a.renderArea || 0) - (b.renderArea || 0);
+                comparison = pageMode === 'assets'
+                    ? getImageArea(a.width, a.height) - getImageArea(b.width, b.height)
+                    : (a.renderArea || 0) - (b.renderArea || 0);
                 if (comparison === 0) {
-                    comparison = compareByDimensions(a.renderWidth, a.renderHeight, b.renderWidth, b.renderHeight);
+                    comparison = pageMode === 'assets'
+                        ? compareByDimensions(a.width, a.height, b.width, b.height)
+                        : compareByDimensions(a.renderWidth, a.renderHeight, b.renderWidth, b.renderHeight);
                 }
             } else {
                 comparison = (a.timestamp || 0) - (b.timestamp || 0);
@@ -840,6 +1312,14 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         });
 
         return filtered;
+    }
+
+    function getVisibleLibraryData() {
+        return getFilteredSortedData(libraryData, 'library');
+    }
+
+    function getVisibleAssetData() {
+        return getFilteredSortedData(assetData, 'assets');
     }
 
     function setHoverEnabled(enabled) {
@@ -870,6 +1350,88 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         if (isFullscreen) {
             currentIndex = Math.max(0, Math.min(currentIndex, visibleLibraryData.length - 1));
             updateFullscreen();
+        }
+    }
+
+    function updateToolbarState() {
+        refs.shell.classList.toggle('is-assets-mode', isAssetsPage());
+        refs.pageTabs.querySelectorAll('[data-mode]').forEach((node) => {
+            node.classList.toggle('is-active', node.dataset.mode === activePageMode);
+        });
+        refs.hoverToggle.style.display = isAssetsPage() ? 'none' : '';
+        refs.fullscreenToggle.style.display = isAssetsPage() ? 'none' : '';
+        refs.zipButton.style.display = isAssetsPage() ? 'none' : '';
+        refs.folderImportButton.style.display = isAssetsPage() ? '' : 'none';
+        refs.folderExportButton.style.display = isAssetsPage() ? '' : 'none';
+        refs.saveButton.textContent = isAssetsPage() ? 'Save Assets' : 'Save Library';
+        refs.clearButton.textContent = isAssetsPage() ? 'Clear Assets' : 'Clear Library';
+    }
+
+    function updateGridModeVisibility() {
+        refs.projectGrid?.classList.toggle('is-active', !isAssetsPage());
+        refs.assetGrid?.classList.toggle('is-active', isAssetsPage());
+    }
+
+    function setActivePageMode(mode) {
+        const nextMode = mode === 'assets' ? 'assets' : 'library';
+        if (activePageMode === nextMode) return;
+        activePageMode = nextMode;
+        logLibrary('info', 'library.sync', `Switched the Library page to ${nextMode === 'assets' ? 'Assets' : 'Library'} mode.`, {
+            dedupeKey: `library-page-mode:${nextMode}`,
+            dedupeWindowMs: 120
+        });
+        detailData = null;
+        expandedParamIds = new Set();
+        if (isFullscreen) {
+            setFullscreenEnabled(false);
+        }
+        if (isHoverEnabled && isAssetsPage()) {
+            setHoverEnabled(false);
+        }
+        updateToolbarState();
+        applyViewState();
+    }
+
+    function getAssetDownloadExtension(asset) {
+        return getAssetFileExtension(asset);
+    }
+
+    function downloadAssetFile(asset) {
+        if (!asset?.dataUrl) return;
+        const link = document.createElement('a');
+        link.href = asset.dataUrl;
+        link.download = `${sanitizeFileStem(stripJsonExtension(asset.name || 'library-asset'), 'library-asset')}.${getAssetDownloadExtension(asset)}`;
+        link.click();
+    }
+
+    function ensureAssetPreview() {
+        if (!assetPreview && refs.detailAssetPreviewHost) {
+            assetPreview = createThreeDAssetPreview(refs.detailAssetPreviewHost);
+        }
+        return assetPreview;
+    }
+
+    function clearAssetPreview() {
+        detailPreviewToken += 1;
+        refs.detailAssetPreviewShell?.classList.remove('is-visible');
+        assetPreview?.clear?.();
+    }
+
+    async function loadAssetPreview(asset) {
+        clearAssetPreview();
+        if (!asset?.dataUrl || asset.assetType !== 'model') return;
+        const token = ++detailPreviewToken;
+        refs.detailAssetPreviewShell?.classList.add('is-visible');
+        showProgress('Loading asset preview...', asset.name || '3D asset', 0.3);
+        try {
+            const preview = ensureAssetPreview();
+            await preview.loadAsset(asset);
+            if (token !== detailPreviewToken) return;
+        } catch (error) {
+            clearAssetPreview();
+            throw error;
+        } finally {
+            hideProgress();
         }
     }
 
@@ -1081,32 +1643,54 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         `;
     }
 
-    function renderGrid() {
-        if (!libraryData.length) {
-            refs.grid.innerHTML = '';
-            refs.empty.classList.add('is-visible');
-            refs.emptyTitle.textContent = 'Library is empty';
-            refs.emptyText.textContent = 'Save projects from Editor or Stitch, or import JSON files to build your gallery.';
-            return;
-        }
+    function buildGridStateSignature(mode) {
+        const data = mode === 'assets' ? assetData : libraryData;
+        const visibleData = mode === 'assets' ? visibleAssetData : visibleLibraryData;
+        const selectedIds = mode === 'assets' ? selectedAssetIds : selectedProjectIds;
+        const selectedPrimaryId = mode === 'assets' ? selectedAssetId : selectedProjectId;
+        return JSON.stringify({
+            total: data.length,
+            visible: visibleData.map((item) => item.recordSignature || item.id || ''),
+            selected: [...selectedIds].sort(),
+            focused: selectedPrimaryId || null
+        });
+    }
 
-        if (!visibleLibraryData.length) {
-            refs.grid.innerHTML = '';
-            refs.empty.classList.add('is-visible');
-            refs.emptyTitle.textContent = 'No projects match this view';
-            refs.emptyText.textContent = 'Try a different tag tab or sorting mode from the Library Tools drawer.';
-            return;
-        }
-
-        refs.empty.classList.remove('is-visible');
-        refs.grid.innerHTML = visibleLibraryData.map((item, index) => `
-            <article class="library-grid-item ${selectedProjectIds.has(item.id) || selectedProjectId === item.id ? 'is-selected' : ''}" data-library-index="${index}" data-library-id="${item.id}">
+    function buildAssetGridHtml() {
+        const selectedIds = selectedAssetIds;
+        const selectedPrimaryId = selectedAssetId;
+        return visibleAssetData.map((item, index) => `
+            <article class="library-grid-item library-asset-card ${selectedIds.has(item.id) || selectedPrimaryId === item.id ? 'is-selected' : ''}" data-library-index="${index}" data-library-id="${item.id}">
                 <button type="button" class="library-delete-button" data-library-action="delete-project" data-library-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">&times;</button>
-                ${selectedProjectIds.has(item.id) ? '<div class="library-selection-badge">Selected</div>' : ''}
+                ${selectedIds.has(item.id) ? '<div class="library-selection-badge">Selected</div>' : ''}
+                <div class="library-asset-thumb ${item.assetType === 'model' ? 'is-model' : 'is-image'}">
+                    ${item.assetType === 'model'
+                        ? `<span>${escapeHtml((item.format || 'model').toUpperCase())}</span>`
+                        : `<img src="${item.previewDataUrl || item.dataUrl || ''}" alt="${escapeHtml(item.name)}" loading="lazy" decoding="async">`}
+                </div>
+                <div class="library-card-meta">
+                    <div class="library-card-title">${escapeHtml(item.name)}</div>
+                    <div class="library-card-dimensions">
+                        <span>${escapeHtml(item.assetType === 'model' ? '3D Asset' : 'Image Asset')}</span>
+                        <span>${escapeHtml(formatDimensions(item.width, item.height))}</span>
+                    </div>
+                    ${renderTagPills(item.tags)}
+                </div>
+            </article>
+        `).join('');
+    }
+
+    function buildProjectGridHtml() {
+        const selectedIds = selectedProjectIds;
+        const selectedPrimaryId = selectedProjectId;
+        return visibleLibraryData.map((item, index) => `
+            <article class="library-grid-item ${selectedIds.has(item.id) || selectedPrimaryId === item.id ? 'is-selected' : ''}" data-library-index="${index}" data-library-id="${item.id}">
+                <button type="button" class="library-delete-button" data-library-action="delete-project" data-library-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">&times;</button>
+                ${selectedIds.has(item.id) ? '<div class="library-selection-badge">Selected</div>' : ''}
                 ${item.hoverSrc ? '<div class="library-hover-hint">Hovering Original</div>' : ''}
                 <div class="library-image-container">
-                    <img src="${item.url}" class="library-img-base" alt="${escapeHtml(item.name)}">
-                    ${item.hoverSrc ? `<img src="${item.hoverSrc}" class="library-img-hover" alt="">` : ''}
+                    <img src="${item.url}" class="library-img-base" alt="${escapeHtml(item.name)}" loading="lazy" decoding="async">
+                    ${item.hoverSrc ? `<img src="${item.hoverSrc}" class="library-img-hover" alt="" loading="lazy" decoding="async">` : ''}
                 </div>
                 <div class="library-card-meta">
                     <div class="library-card-title">${escapeHtml(item.name)}</div>
@@ -1120,8 +1704,47 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         `).join('');
     }
 
+    function renderGrid() {
+        const currentData = getCurrentData();
+        const visibleData = getVisibleCurrentData();
+        const activeMode = isAssetsPage() ? 'assets' : 'library';
+        const activeHost = activeMode === 'assets' ? refs.assetGrid : refs.projectGrid;
+
+        updateGridModeVisibility();
+
+        if (!currentData.length) {
+            activeHost.innerHTML = '';
+            gridMarkupSignatureByMode[activeMode] = gridStateSignatureByMode[activeMode];
+            refs.empty.classList.add('is-visible');
+            refs.emptyTitle.textContent = isAssetsPage() ? 'Assets page is empty' : 'Library is empty';
+            refs.emptyText.textContent = isAssetsPage()
+                ? '3D imports and saved Editor renders appear here as assets, or you can import asset bundles and asset folders.'
+                : 'Save projects from Editor, Stitch, or 3D, or import JSON files to build your gallery.';
+            return;
+        }
+
+        if (!visibleData.length) {
+            activeHost.innerHTML = '';
+            gridMarkupSignatureByMode[activeMode] = gridStateSignatureByMode[activeMode];
+            refs.empty.classList.add('is-visible');
+            refs.emptyTitle.textContent = isAssetsPage() ? 'No assets match this view' : 'No projects match this view';
+            refs.emptyText.textContent = 'Try a different tag tab or sorting mode from the Library Tools drawer.';
+            return;
+        }
+
+        refs.empty.classList.remove('is-visible');
+        if (gridMarkupSignatureByMode[activeMode] === gridStateSignatureByMode[activeMode]) {
+            return;
+        }
+
+        activeHost.innerHTML = activeMode === 'assets'
+            ? buildAssetGridHtml()
+            : buildProjectGridHtml();
+        gridMarkupSignatureByMode[activeMode] = gridStateSignatureByMode[activeMode];
+    }
+
     function updateFullscreen() {
-        if (!isFullscreen || !visibleLibraryData.length) {
+        if (isAssetsPage() || !isFullscreen || !visibleLibraryData.length) {
             refs.fullscreenBase.removeAttribute('src');
             refs.fullscreenHover.removeAttribute('src');
             return;
@@ -1143,37 +1766,105 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             refs.detailLayers.innerHTML = '';
             refs.detailBase.removeAttribute('src');
             refs.detailHover.removeAttribute('src');
+            clearAssetPreview();
+            root.querySelector('[data-library-action="download-project"]').style.display = '';
+            root.querySelector('[data-library-action="load-detail"]').style.display = '';
+            root.querySelector('[data-library-action="download-asset"]').style.display = 'none';
+            root.querySelector('[data-library-action="rename-asset"]').style.display = 'none';
             return;
         }
 
         refs.detailOverlay.classList.add('is-active');
         refs.detailName.textContent = detailData.name;
+        if (isAssetsPage()) {
+            refs.detailMeta.textContent = `${detailData.assetType === 'model' ? '3D Model' : 'Image'} | Saved ${formatDateTime(detailData.timestamp)} | ${formatDimensions(detailData.width, detailData.height)}`;
+            if (detailData.assetType === 'image' && detailData.dataUrl) {
+                refs.detailBase.src = detailData.dataUrl;
+            } else {
+                refs.detailBase.removeAttribute('src');
+            }
+            refs.detailHover.removeAttribute('src');
+            refs.detailLayers.innerHTML = `
+                <section class="library-source-info">
+                    <div class="library-param-row">
+                        <span class="library-param-key">Asset Type</span>
+                        <span class="library-param-val">${escapeHtml(detailData.assetType === 'model' ? '3D Model' : 'Image')}</span>
+                    </div>
+                    <div class="library-param-row">
+                        <span class="library-param-key">Format</span>
+                        <span class="library-param-val">${escapeHtml(detailData.format || 'Unknown')}</span>
+                    </div>
+                    <div class="library-param-row">
+                        <span class="library-param-key">Mime Type</span>
+                        <span class="library-param-val">${escapeHtml(detailData.mimeType || 'Unknown')}</span>
+                    </div>
+                    <div class="library-param-row">
+                        <span class="library-param-key">Dimensions</span>
+                        <span class="library-param-val">${escapeHtml(formatDimensions(detailData.width, detailData.height))}</span>
+                    </div>
+                    ${detailData.sourceProjectName ? `
+                        <div class="library-param-row">
+                            <span class="library-param-key">Linked Project</span>
+                            <span class="library-param-val">${escapeHtml(detailData.sourceProjectName)}</span>
+                        </div>
+                    ` : ''}
+                </section>
+                <section class="library-source-info">
+                    <div class="library-side-label">Tags</div>
+                    ${renderTagPills(detailData.tags)}
+                </section>
+            `;
+            root.querySelector('[data-library-action="download-project"]').style.display = 'none';
+            root.querySelector('[data-library-action="load-detail"]').style.display = 'none';
+            root.querySelector('[data-library-action="download-asset"]').style.display = '';
+            root.querySelector('[data-library-action="rename-asset"]').style.display = '';
+            return;
+        }
+
+        clearAssetPreview();
         refs.detailMeta.textContent = `${getProjectTypeLabel(detailData.projectType)} | Saved ${formatDateTime(detailData.timestamp)} | ${getProjectSourceLabel(detailData.projectType)} ${formatDimensions(detailData.sourceWidth, detailData.sourceHeight)} | Render ${formatDimensions(detailData.renderWidth, detailData.renderHeight)}`;
         refs.detailBase.src = detailData.url;
         if (detailData.hoverSrc) refs.detailHover.src = detailData.hoverSrc;
         else refs.detailHover.removeAttribute('src');
         refs.detailLayers.innerHTML = renderProjectSummaryCard(detailData) + renderLayerCards(detailData.payload);
+        root.querySelector('[data-library-action="download-project"]').style.display = '';
+        root.querySelector('[data-library-action="load-detail"]').style.display = '';
+        root.querySelector('[data-library-action="download-asset"]').style.display = 'none';
+        root.querySelector('[data-library-action="rename-asset"]').style.display = 'none';
     }
 
-    function openDetailByData(data) {
+    async function openDetailByData(data) {
         if (!data) return;
         if (detailData?.id !== data.id) expandedParamIds = new Set();
         detailData = data;
-        selectedProjectId = data.id;
+        setSelectedPrimaryId(data.id);
         renderDetail();
         renderSidePanel();
+        if (isAssetsPage()) {
+            try {
+                await loadAssetPreview(data);
+            } catch (error) {
+                console.error(error);
+                showAlert(error.message || 'Could not load that asset preview.');
+            }
+        }
     }
 
     function closeDetail() {
         detailData = null;
         expandedParamIds = new Set();
+        clearAssetPreview();
         renderDetail();
     }
 
     function renderSidePanel() {
+        const currentData = getCurrentData();
+        const visibleData = getVisibleCurrentData();
         const focusedProject = getSelectedProject();
         const selectedProjects = getSelectedProjects();
         const selectionCount = selectedProjects.length;
+        const itemLabel = isAssetsPage() ? 'asset' : 'project';
+        const itemLabelPlural = `${itemLabel}${selectionCount === 1 ? '' : 's'}`;
         const tagSummaries = getTagSummaries();
         const selectionTagSummaries = getSelectionTagSummaries();
         const sortLabels = getSortDirectionLabels(sortKey);
@@ -1183,7 +1874,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             ${selectionCount ? `
                 <section class="library-side-section">
                     <h3>Selection Actions</h3>
-                    <p class="library-side-summary">${selectionCount} project${selectionCount === 1 ? '' : 's'} selected</p>
+                    <p class="library-side-summary">${selectionCount} ${itemLabelPlural} selected</p>
                     <div class="library-side-actions">
                         <button type="button" class="toolbar-button" data-library-action="delete-selected-projects">Delete</button>
                         <button type="button" class="toolbar-button" data-library-action="clear-selection">Clear Selection</button>
@@ -1192,34 +1883,34 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             ` : ''}
             <section class="library-side-section">
                 <h3>Gallery View</h3>
-                <label class="library-side-label" for="library-sort-key">Sort Projects</label>
+                <label class="library-side-label" for="library-sort-key">Sort ${isAssetsPage() ? 'Assets' : 'Projects'}</label>
                 <select id="library-sort-key" class="library-side-select" data-library-role="sort-key">
                     <option value="timestamp" ${sortKey === 'timestamp' ? 'selected' : ''}>Saved date</option>
-                    <option value="name" ${sortKey === 'name' ? 'selected' : ''}>Project name</option>
-                    <option value="source-area" ${sortKey === 'source-area' ? 'selected' : ''}>Original image size</option>
-                    <option value="render-area" ${sortKey === 'render-area' ? 'selected' : ''}>Rendered image size</option>
+                    <option value="name" ${sortKey === 'name' ? 'selected' : ''}>${isAssetsPage() ? 'Asset name' : 'Project name'}</option>
+                    <option value="source-area" ${sortKey === 'source-area' ? 'selected' : ''}>${isAssetsPage() ? 'Asset size' : 'Original image size'}</option>
+                    <option value="render-area" ${sortKey === 'render-area' ? 'selected' : ''}>${isAssetsPage() ? 'Asset size' : 'Rendered image size'}</option>
                 </select>
                 <div class="library-sort-direction">
                     <button type="button" class="library-filter-chip ${sortDirection === 'desc' ? 'is-active' : ''}" data-library-action="set-sort-direction" data-direction="desc">${escapeHtml(sortLabels.desc)}</button>
                     <button type="button" class="library-filter-chip ${sortDirection === 'asc' ? 'is-active' : ''}" data-library-action="set-sort-direction" data-direction="asc">${escapeHtml(sortLabels.asc)}</button>
                 </div>
-                <p class="library-side-summary">${visibleLibraryData.length} of ${libraryData.length} projects visible</p>
+                <p class="library-side-summary">${visibleData.length} of ${currentData.length} ${isAssetsPage() ? 'assets' : 'projects'} visible</p>
             </section>
             <section class="library-side-section">
                 <h3>Tag Tabs</h3>
                 <div class="library-filter-tabs">
-                    <button type="button" class="library-filter-chip ${activeTagMode === 'all' ? 'is-active' : ''}" data-library-action="toggle-special-filter" data-mode="all">All (${libraryData.length})</button>
-                    <button type="button" class="library-filter-chip ${activeTagMode === 'untagged' ? 'is-active' : ''}" data-library-action="toggle-special-filter" data-mode="untagged">Untagged (${libraryData.filter((item) => !normalizeTagList(item.tags).length).length})</button>
+                    <button type="button" class="library-filter-chip ${activeTagMode === 'all' ? 'is-active' : ''}" data-library-action="toggle-special-filter" data-mode="all">All (${currentData.length})</button>
+                    <button type="button" class="library-filter-chip ${activeTagMode === 'untagged' ? 'is-active' : ''}" data-library-action="toggle-special-filter" data-mode="untagged">Untagged (${currentData.filter((item) => !normalizeTagList(item.tags).length).length})</button>
                     ${tagSummaries.map((summary) => `
                         <button type="button" class="library-filter-chip ${activeTagMode === 'custom' && activeTagFilters.has(summary.key) ? 'is-active' : ''}" data-library-action="toggle-tag-filter" data-filter="${escapeHtml(summary.key)}">${escapeHtml(summary.tag)} (${summary.count})</button>
                     `).join('')}
                 </div>
             </section>
             <section class="library-side-section">
-                <h3>${selectionCount ? 'Selected Images' : 'Focused Project'}</h3>
+                <h3>${selectionCount ? `Selected ${isAssetsPage() ? 'Assets' : 'Projects'}` : `Focused ${isAssetsPage() ? 'Asset' : 'Project'}`}</h3>
                 ${selectionCount ? `
                     <div class="library-selected-card">
-                        <strong>${selectionCount} project${selectionCount === 1 ? '' : 's'} selected</strong>
+                        <strong>${selectionCount} ${itemLabelPlural} selected</strong>
                         <div class="library-selected-meta">
                             <span>${escapeHtml(selectedNames)}${selectionCount > 3 ? `, +${selectionCount - 3} more` : ''}</span>
                             <span>${selectionTagSummaries.length} total tag${selectionTagSummaries.length === 1 ? '' : 's'} across selection</span>
@@ -1239,7 +1930,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                                     </button>
                                 `).join('')}
                             </div>
-                        ` : '<div class="library-side-empty">Selected images do not have any tags yet.</div>'}
+                        ` : `<div class="library-side-empty">Selected ${isAssetsPage() ? 'assets' : 'projects'} do not have any tags yet.</div>`}
                         <div class="library-side-label">Create Tag</div>
                         <div class="library-tag-input-row">
                             <input type="text" class="library-tag-input" data-library-role="create-tag-input" placeholder="Create a new tag">
@@ -1257,7 +1948,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                                     >${escapeHtml(tag)}</button>
                                 `).join('')}
                             </div>
-                        ` : '<div class="library-side-empty">Create your first tag, then apply it to the selected images.</div>'}
+                        ` : `<div class="library-side-empty">Create your first tag, then apply it to the selected ${isAssetsPage() ? 'assets' : 'projects'}.</div>`}
                         <div class="library-side-actions">
                             <button type="button" class="toolbar-button" data-library-action="apply-pending-tags" ${pendingApplyTagKeys.size ? '' : 'disabled'}>Apply Chosen Tags</button>
                         </div>
@@ -1266,9 +1957,9 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                     <div class="library-selected-card">
                         <strong>${escapeHtml(focusedProject.name)}</strong>
                         <div class="library-selected-meta">
-                            <span>${escapeHtml(getProjectTypeLabel(focusedProject.projectType))}</span>
-                            <span>${escapeHtml(getProjectSourceLabel(focusedProject.projectType))} ${escapeHtml(formatDimensions(focusedProject.sourceWidth, focusedProject.sourceHeight))}</span>
-                            <span>Render ${escapeHtml(formatDimensions(focusedProject.renderWidth, focusedProject.renderHeight))}</span>
+                            <span>${escapeHtml(isAssetsPage() ? (focusedProject.assetType === 'model' ? '3D Model' : 'Image') : getProjectTypeLabel(focusedProject.projectType))}</span>
+                            <span>${escapeHtml(isAssetsPage() ? 'Asset Size' : getProjectSourceLabel(focusedProject.projectType))} ${escapeHtml(isAssetsPage() ? formatDimensions(focusedProject.width, focusedProject.height) : formatDimensions(focusedProject.sourceWidth, focusedProject.sourceHeight))}</span>
+                            ${!isAssetsPage() ? `<span>Render ${escapeHtml(formatDimensions(focusedProject.renderWidth, focusedProject.renderHeight))}</span>` : ''}
                             <span>Saved ${escapeHtml(formatDateTime(focusedProject.timestamp))}</span>
                         </div>
                         ${focusedProject.tags.length ? `
@@ -1282,14 +1973,16 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                                     >${escapeHtml(tag)}</button>
                                 `).join('')}
                             </div>
-                        ` : '<div class="library-side-empty">This project has no tags yet.</div>'}
+                        ` : `<div class="library-side-empty">This ${itemLabel} has no tags yet.</div>`}
                         <div class="library-side-actions">
                             <button type="button" class="toolbar-button" data-library-action="open-selected-detail">Open Details</button>
-                            <button type="button" class="toolbar-button" data-library-action="load-selected-project">Load Project</button>
+                            ${isAssetsPage()
+                                ? '<button type="button" class="toolbar-button" data-library-action="rename-asset">Rename Asset</button>'
+                                : '<button type="button" class="toolbar-button" data-library-action="load-selected-project">Load Project</button>'}
                         </div>
                     </div>
                 ` : `
-                    <div class="library-side-empty">Use Select to mark one or more images, then manage tags or batch-delete them from this panel.</div>
+                    <div class="library-side-empty">Use Select to mark one or more ${isAssetsPage() ? 'assets' : 'projects'}, then manage tags or batch-delete them from this panel.</div>
                 `}
             </section>
         `;
@@ -1298,29 +1991,37 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     function applyViewState() {
         ensureActiveFilterStillExists();
         visibleLibraryData = getVisibleLibraryData();
+        visibleAssetData = getVisibleAssetData();
         selectedProjectIds = new Set([...selectedProjectIds].filter((id) => libraryData.some((item) => item.id === id)));
+        selectedAssetIds = new Set([...selectedAssetIds].filter((id) => assetData.some((item) => item.id === id)));
         updateSelectToggle();
 
         if (selectedProjectId && !libraryData.some((item) => item.id === selectedProjectId)) {
             selectedProjectId = null;
         }
+        if (selectedAssetId && !assetData.some((item) => item.id === selectedAssetId)) {
+            selectedAssetId = null;
+        }
 
         if (detailData) {
-            const freshDetail = libraryData.find((item) => item.id === detailData.id);
+            const freshDetail = getCurrentData().find((item) => item.id === detailData.id);
             if (freshDetail) detailData = freshDetail;
             else closeDetail();
         }
 
-        if (!visibleLibraryData.length) currentIndex = 0;
-        else currentIndex = Math.max(0, Math.min(currentIndex, visibleLibraryData.length - 1));
+        const visibleData = getVisibleCurrentData();
+        if (!visibleData.length) currentIndex = 0;
+        else currentIndex = Math.max(0, Math.min(currentIndex, visibleData.length - 1));
 
+        gridStateSignatureByMode.library = buildGridStateSignature('library');
+        gridStateSignatureByMode.assets = buildGridStateSignature('assets');
         renderGrid();
         renderSidePanel();
         renderDetail();
 
-        if (isFullscreen && visibleLibraryData.length) {
+        if (!isAssetsPage() && isFullscreen && visibleLibraryData.length) {
             updateFullscreen();
-        } else if (isFullscreen && !visibleLibraryData.length) {
+        } else if (!isAssetsPage() && isFullscreen && !visibleLibraryData.length) {
             setFullscreenEnabled(false);
         } else {
             updateFullscreenToggle();
@@ -1432,6 +2133,13 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     }
 
     function showAlert(text, title = 'Library') {
+        const message = `${title}: ${text}`;
+        const processId = getLibraryProcessId(message);
+        const level = /could not|failed|error/i.test(message) ? 'error' : 'warning';
+        logLibrary(level, processId, message, {
+            dedupeKey: `alert:${message}`,
+            dedupeWindowMs: 180
+        });
         showModal({
             title,
             text,
@@ -1490,35 +2198,67 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         return value ? toJsonFilename(value) : null;
     }
 
-    async function promptSaveLibraryMode(defaultName) {
-        const exportMode = await runModalStep({
-            title: 'Save Library',
-            text: 'Choose how you want to save the current Library.',
+    async function promptSaveLibraryMode(defaultScope = getActiveExportScope()) {
+        const exportChoice = await runModalStep({
+            title: isAssetsPage() ? 'Save Assets' : 'Save Library',
+            text: 'Choose what to export, then choose whether the package should be plain JSON or use the secure packed format.',
             html: `
+                <div class="library-side-label">Export Scope</div>
+                <div class="library-modal-choice-grid">
+                    ${['library', 'assets', 'combined'].map((scope) => {
+                        const counts = getExportCounts(scope);
+                        return `
+                            <label class="library-modal-choice">
+                                <input type="radio" name="library-export-scope" value="${scope}" ${scope === defaultScope ? 'checked' : ''}>
+                                <strong>${escapeHtml(formatScopeLabel(scope))}</strong>
+                                <span>${escapeHtml(getScopeDescription(scope, counts.projectCount, counts.assetCount))}</span>
+                            </label>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="library-side-label">Export Format</div>
                 <div class="library-modal-choice-grid">
                     <label class="library-modal-choice">
                         <input type="radio" name="library-export-mode" value="plain" checked>
                         <strong>Json Export</strong>
-                        <span>Readable Library JSON with every project, tag, and export date preserved.</span>
+                        <span>Readable JSON package with every included project, asset, tag, and export date preserved.</span>
                     </label>
                     <label class="library-modal-choice">
                         <input type="radio" name="library-export-mode" value="secure">
                         <strong>Secure Export</strong>
-                        <span>Pack the whole Library into a compressed JSON-safe block, with optional encryption.</span>
+                        <span>Pack the selected Library data into a compressed JSON-safe block, with optional encryption.</span>
                     </label>
                 </div>
             `,
             confirmLabel: 'Next',
             onConfirm: ({ root, setError }) => {
+                const scope = root.querySelector('input[name="library-export-scope"]:checked')?.value || defaultScope;
                 const selected = root.querySelector('input[name="library-export-mode"]:checked')?.value;
+                const counts = getExportCounts(scope);
+                if ((scopeIncludesProjects(scope) && !counts.projectCount) && (scopeIncludesAssets(scope) && !counts.assetCount)) {
+                    setError('There is nothing in that export scope yet.');
+                    return false;
+                }
+                if (scope === 'library' && !counts.projectCount) {
+                    setError('Save or import one or more Library projects first.');
+                    return false;
+                }
+                if (scope === 'assets' && !counts.assetCount) {
+                    setError('Import or create one or more Library assets first.');
+                    return false;
+                }
                 if (!selected) {
                     setError('Choose an export type first.');
                     return false;
                 }
-                return { exportMode: selected, suggestedFilename: buildDefaultLibraryFilename(defaultName) };
+                return {
+                    scope,
+                    exportMode: selected,
+                    suggestedFilename: buildDefaultLibraryFilename(getScopeDefaultBaseName(scope))
+                };
             }
         });
-        return exportMode;
+        return exportChoice;
     }
 
     async function promptSecureSaveMode() {
@@ -1601,7 +2341,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                     </label>
                 </div>
             `,
-            confirmLabel: 'Save Library',
+            confirmLabel: 'Save Export',
             onConfirm: ({ root, setError }) => {
                 const selected = root.querySelector('input[name="library-duplicate-copies"]:checked')?.value;
                 if (!selected) {
@@ -1613,21 +2353,22 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         });
     }
 
-    async function promptReplaceMode(incomingCount) {
+    async function promptReplaceMode({ scope = 'combined', projectCount = 0, assetCount = 0 } = {}) {
+        const scopeLabel = formatScopeLabel(scope);
         return runModalStep({
-            title: 'Load Library File',
-            text: `This file contains ${incomingCount} Library project${incomingCount === 1 ? '' : 's'}. How should it be loaded?`,
+            title: `Load ${scopeLabel}`,
+            text: `This import contains ${formatImportSummary(projectCount, assetCount)}. How should it be loaded?`,
             html: `
                 <div class="library-modal-choice-grid">
                     <label class="library-modal-choice">
                         <input type="radio" name="library-replace-mode" value="merge" checked>
-                        <strong>Add To Current Library</strong>
-                        <span>Keep everything that is already saved and add the incoming Library items to it.</span>
+                        <strong>Add To Current ${escapeHtml(scopeLabel)}</strong>
+                        <span>Keep what is already saved and add the incoming ${escapeHtml(scopeLabel.toLowerCase())} items on top.</span>
                     </label>
                     <label class="library-modal-choice">
                         <input type="radio" name="library-replace-mode" value="replace">
-                        <strong>Replace Current Library</strong>
-                        <span>Clear existing Library projects first, then load the incoming Library file.</span>
+                        <strong>Replace Current ${escapeHtml(scopeLabel)}</strong>
+                        <span>Clear the matching saved data first, then load the incoming ${escapeHtml(scopeLabel.toLowerCase())} items.</span>
                     </label>
                 </div>
             `,
@@ -1643,21 +2384,22 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         });
     }
 
-    async function promptSaveBeforeReplace() {
+    async function promptSaveBeforeReplace(scope = 'combined') {
+        const scopeLabel = formatScopeLabel(scope);
         return runModalStep({
-            title: 'Replace Current Library',
-            text: 'Do you want to save the current Library before it is cleared?',
+            title: `Replace Current ${scopeLabel}`,
+            text: `Do you want to save the current ${scopeLabel} before it is cleared?`,
             html: `
                 <div class="library-modal-choice-grid">
                     <label class="library-modal-choice">
                         <input type="radio" name="library-save-before-replace" value="save" checked>
-                        <strong>Save Current Library</strong>
-                        <span>Run the Save Library workflow first, then replace the current contents.</span>
+                        <strong>Save Current ${escapeHtml(scopeLabel)}</strong>
+                        <span>Run the save workflow first, then replace the current ${escapeHtml(scopeLabel.toLowerCase())} contents.</span>
                     </label>
                     <label class="library-modal-choice">
                         <input type="radio" name="library-save-before-replace" value="discard">
                         <strong>Replace Without Saving</strong>
-                        <span>Skip the backup and clear the current Library immediately before loading the new file.</span>
+                        <span>Skip the backup and clear the current ${escapeHtml(scopeLabel.toLowerCase())} immediately before loading the new file.</span>
                     </label>
                 </div>
             `,
@@ -1731,119 +2473,209 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         refs.countText.textContent = countText || '';
         refs.progressFill.style.width = `${Math.round(clamp01(ratio) * 100)}%`;
         refs.loadingOverlay.classList.add('is-active');
+        const message = [text || 'Working...', countText || ''].filter(Boolean).join(' | ');
+        const signature = `${message}|${Math.round(clamp01(ratio) * 1000)}`;
+        if (signature !== lastProgressLogSignature) {
+            lastProgressLogSignature = signature;
+            logLibrary('progress', getLibraryProcessId(text), message, clamp01(ratio), {
+                dedupeKey: signature,
+                dedupeWindowMs: 80
+            });
+        }
     }
 
     function hideProgress() {
         refs.loadingOverlay.classList.remove('is-active');
         refs.progressFill.style.width = '0%';
+        lastProgressLogSignature = '';
     }
 
     async function refresh() {
+        if (!panelActive) {
+            pendingRefreshWhileInactive = true;
+            return;
+        }
         const token = ++refreshToken;
+        const shouldShowInitialProgress = !hasRenderedLibrary;
         const previousData = libraryData;
+        const previousAssets = assetData;
         const previousTags = libraryTags;
         const previousById = new Map(previousData.map((item) => [item.id, item]));
-        const [projects, nextLibraryTagsRaw] = await Promise.all([
-            actions.getLibraryProjects(),
-            actions.getLibraryTagCatalog?.() || []
-        ]);
-        const nextLibraryTags = normalizeTagList(nextLibraryTagsRaw || []);
-
-        const nextData = await Promise.all(projects.map(async (project) => {
-            const previous = previousById.get(project.id);
-            const tags = normalizeTagList(project.tags || []);
-            let renderWidth = Number(project.renderWidth || 0);
-            let renderHeight = Number(project.renderHeight || 0);
-            const projectType = project.projectType || inferProjectTypeFromPayload(project.payload);
-            const hoverSource = project.hoverSource || project.payload?._libraryHoverSource || project.payload?.source || null;
-            const previewImageData = project.payload?.preview?.imageData || '';
-            const sourceWidth = Number(project.sourceWidth || hoverSource?.width || project.payload?.source?.width || project.payload?.preview?.width || 0);
-            const sourceHeight = Number(project.sourceHeight || hoverSource?.height || project.payload?.source?.height || project.payload?.preview?.height || 0);
-            const sourceAreaOverride = Number(project.sourceAreaOverride || project.payload?._librarySourceArea || 0) || 0;
-            const sourceCount = Number(
-                project.sourceCount
-                || project.payload?._librarySourceCount
-                || (projectType === '3d'
-                    ? project.payload?.scene?.items?.filter?.((item) => item.kind !== 'light').length || 0
-                    : projectType === 'stitch'
-                        ? project.payload?.inputs?.length || 0
-                        : (hoverSource?.imageData ? 1 : 0))
-                || 0
-            );
-            let previewSignature = getProjectPreviewSignature(project, renderWidth, renderHeight);
-            let url = previous?.previewSignature === previewSignature
-                ? previous.url
-                : (project.blob ? URL.createObjectURL(project.blob) : (hoverSource?.imageData || previewImageData || ''));
-
-            if ((!renderWidth || !renderHeight) && previous?.previewSignature === previewSignature) {
-                renderWidth = previous.renderWidth;
-                renderHeight = previous.renderHeight;
-            }
-
-            if ((!renderWidth || !renderHeight) && url) {
-                try {
-                    const measured = await readImageDimensions(url);
-                    renderWidth = measured.width;
-                    renderHeight = measured.height;
-                } catch (_error) {
-                    renderWidth = Number(project.payload?.source?.width || 0);
-                    renderHeight = Number(project.payload?.source?.height || 0);
-                }
-            }
-
-            previewSignature = getProjectPreviewSignature(project, renderWidth, renderHeight);
-            const recordSignature = getProjectRecordSignature(project, tags, sourceWidth, sourceHeight, renderWidth, renderHeight);
-
-            return {
-                ...project,
-                name: String(project.name || 'Untitled Project'),
-                payload: project.payload || {},
-                projectType,
-                tags,
-                url,
-                hoverSrc: hoverSource?.imageData || '',
-                hoverSource,
-                sourceWidth,
-                sourceHeight,
-                sourceAreaOverride,
-                sourceCount,
-                renderWidth,
-                renderHeight,
-                sourceArea: sourceAreaOverride || getImageArea(sourceWidth, sourceHeight),
-                renderArea: getImageArea(renderWidth, renderHeight),
-                previewSignature,
-                recordSignature
-            };
-        }));
-
-        if (token !== refreshToken) {
-            for (const item of nextData) {
-                const previous = previousById.get(item.id);
-                if (item?.url && String(item.url).startsWith('blob:') && item.url !== previous?.url) {
-                    URL.revokeObjectURL(item.url);
-                }
-            }
-            return;
+        const previousAssetById = new Map(previousAssets.map((item) => [item.id, item]));
+        if (shouldShowInitialProgress) {
+            showProgress('Loading Library...', 'Reading saved projects and assets', 0.08);
         }
+        logLibrary('active', 'library.sync', shouldShowInitialProgress
+            ? 'Loading Library projects, tags, and assets from memory.'
+            : 'Refreshing Library page data.');
+        try {
+            const [projects, nextLibraryTagsRaw, nextAssetsRaw] = await Promise.all([
+                actions.getLibraryProjects(),
+                actions.getLibraryTagCatalog?.() || [],
+                actions.getLibraryAssets?.() || []
+            ]);
+            const nextLibraryTags = normalizeTagList(nextLibraryTagsRaw || []);
 
-        const didDataChange = !hasRenderedLibrary
-            || previousData.length !== nextData.length
-            || nextData.some((item) => previousById.get(item.id)?.recordSignature !== item.recordSignature)
-            || JSON.stringify(previousTags) !== JSON.stringify(nextLibraryTags);
+            if (shouldShowInitialProgress && token === refreshToken) {
+                const summary = `${projects.length} project${projects.length === 1 ? '' : 's'} | ${(nextAssetsRaw || []).length} asset${(nextAssetsRaw || []).length === 1 ? '' : 's'}`;
+                showProgress('Preparing Library...', summary, 0.56);
+            }
 
-        releaseUnusedUrls(previousData, nextData);
-        libraryData = nextData;
-        libraryTags = nextLibraryTags;
-        if (!didDataChange && hasRenderedLibrary) {
-            return;
+            const nextData = await Promise.all(projects.map(async (project) => {
+                const previous = previousById.get(project.id);
+                const tags = normalizeTagList(project.tags || []);
+                let renderWidth = Number(project.renderWidth || 0);
+                let renderHeight = Number(project.renderHeight || 0);
+                const projectType = project.projectType || inferProjectTypeFromPayload(project.payload);
+                const hoverSource = project.hoverSource || project.payload?._libraryHoverSource || project.payload?.source || null;
+                const previewImageData = project.payload?.preview?.imageData || '';
+                const sourceWidth = Number(project.sourceWidth || hoverSource?.width || project.payload?.source?.width || project.payload?.preview?.width || 0);
+                const sourceHeight = Number(project.sourceHeight || hoverSource?.height || project.payload?.source?.height || project.payload?.preview?.height || 0);
+                const sourceAreaOverride = Number(project.sourceAreaOverride || project.payload?._librarySourceArea || 0) || 0;
+                const sourceCount = Number(
+                    project.sourceCount
+                    || project.payload?._librarySourceCount
+                    || (projectType === '3d'
+                        ? project.payload?.scene?.items?.filter?.((item) => item.kind !== 'light').length || 0
+                        : projectType === 'stitch'
+                            ? project.payload?.inputs?.length || 0
+                            : (hoverSource?.imageData ? 1 : 0))
+                    || 0
+                );
+                let previewSignature = getProjectPreviewSignature(project, renderWidth, renderHeight);
+                let url = previous?.previewSignature === previewSignature
+                    ? previous.url
+                    : (project.blob ? URL.createObjectURL(project.blob) : (hoverSource?.imageData || previewImageData || ''));
+
+                if ((!renderWidth || !renderHeight) && previous?.previewSignature === previewSignature) {
+                    renderWidth = previous.renderWidth;
+                    renderHeight = previous.renderHeight;
+                }
+
+                if ((!renderWidth || !renderHeight) && url) {
+                    try {
+                        const measured = await readImageDimensions(url);
+                        renderWidth = measured.width;
+                        renderHeight = measured.height;
+                    } catch (_error) {
+                        renderWidth = Number(project.payload?.source?.width || 0);
+                        renderHeight = Number(project.payload?.source?.height || 0);
+                    }
+                }
+
+                previewSignature = getProjectPreviewSignature(project, renderWidth, renderHeight);
+                const recordSignature = getProjectRecordSignature(project, tags, sourceWidth, sourceHeight, renderWidth, renderHeight);
+
+                return {
+                    ...project,
+                    name: String(project.name || 'Untitled Project'),
+                    payload: project.payload || {},
+                    projectType,
+                    tags,
+                    url,
+                    hoverSrc: hoverSource?.imageData || '',
+                    hoverSource,
+                    sourceWidth,
+                    sourceHeight,
+                    sourceAreaOverride,
+                    sourceCount,
+                    renderWidth,
+                    renderHeight,
+                    sourceArea: sourceAreaOverride || getImageArea(sourceWidth, sourceHeight),
+                    renderArea: getImageArea(renderWidth, renderHeight),
+                    previewSignature,
+                    recordSignature
+                };
+            }));
+
+            if (shouldShowInitialProgress && token === refreshToken) {
+                showProgress('Preparing Library...', 'Building asset gallery', 0.82);
+            }
+
+            const nextAssetData = await Promise.all(((nextAssetsRaw || []) || []).map(async (asset) => {
+                const previous = previousAssetById.get(asset.id);
+                const tags = normalizeTagList(asset.tags || []);
+                let width = Number(asset.width || 0);
+                let height = Number(asset.height || 0);
+                if ((!width || !height) && asset.assetType !== 'model' && asset.dataUrl) {
+                    try {
+                        const measured = await readImageDimensions(asset.dataUrl);
+                        width = measured.width;
+                        height = measured.height;
+                    } catch (_error) {
+                        width = Number(asset.width || 0);
+                        height = Number(asset.height || 0);
+                    }
+                }
+                return {
+                    ...asset,
+                    assetType: normalizeLibraryAssetType(asset.assetType),
+                    tags,
+                    width,
+                    height,
+                    recordSignature: [
+                        asset.id,
+                        asset.name,
+                        asset.assetType,
+                        asset.format,
+                        asset.mimeType,
+                        width,
+                        height,
+                        asset.timestamp,
+                        tags.join('|'),
+                        asset.sourceProjectId || '',
+                        asset.assetFingerprint || '',
+                        asset.previewDataUrl ? 'preview' : 'no-preview'
+                    ].join('::')
+                };
+            }));
+
+            if (token !== refreshToken) {
+                for (const item of nextData) {
+                    const previous = previousById.get(item.id);
+                    if (item?.url && String(item.url).startsWith('blob:') && item.url !== previous?.url) {
+                        URL.revokeObjectURL(item.url);
+                    }
+                }
+                return;
+            }
+
+            const didDataChange = !hasRenderedLibrary
+                || previousData.length !== nextData.length
+                || nextData.some((item) => previousById.get(item.id)?.recordSignature !== item.recordSignature)
+                || previousAssets.length !== nextAssetData.length
+                || nextAssetData.some((item) => previousAssetById.get(item.id)?.recordSignature !== item.recordSignature)
+                || JSON.stringify(previousTags) !== JSON.stringify(nextLibraryTags);
+
+            releaseUnusedUrls(previousData, nextData);
+            libraryData = nextData;
+            assetData = nextAssetData;
+            libraryTags = nextLibraryTags;
+            pendingRefreshWhileInactive = false;
+            if (!didDataChange && hasRenderedLibrary) {
+                return;
+            }
+
+            hasRenderedLibrary = true;
+            applyViewState();
+            logLibrary('success', 'library.sync', `Library ready with ${libraryData.length} project${libraryData.length === 1 ? '' : 's'} and ${assetData.length} asset${assetData.length === 1 ? '' : 's'}.`, {
+                dedupeKey: `library-ready:${libraryData.length}:${assetData.length}`,
+                dedupeWindowMs: 120
+            });
+        } finally {
+            if (shouldShowInitialProgress && token === refreshToken) {
+                hideProgress();
+            }
         }
-
-        hasRenderedLibrary = true;
-        applyViewState();
     }
 
-    async function saveTagsForProject(projectId, nextTags) {
-        await actions.updateLibraryProjectTags(projectId, normalizeTagList(nextTags));
+    async function saveTagsForCurrentEntry(entryId, nextTags) {
+        const normalizedTags = normalizeTagList(nextTags);
+        if (isAssetsPage()) {
+            await actions.updateLibraryAssetTags?.(entryId, normalizedTags);
+        } else {
+            await actions.updateLibraryProjectTags?.(entryId, normalizedTags);
+        }
         await refresh();
     }
 
@@ -1856,11 +2688,11 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         await refresh();
     }
 
-    async function removeTagFromFocusedProject(tag) {
-        const project = getSelectedProject();
-        if (!project) return;
+    async function removeTagFromFocusedEntry(tag) {
+        const item = getSelectedProject();
+        if (!item) return;
         const removeKey = getTagKey(tag);
-        await saveTagsForProject(project.id, project.tags.filter((item) => getTagKey(item) !== removeKey));
+        await saveTagsForCurrentEntry(item.id, item.tags.filter((entry) => getTagKey(entry) !== removeKey));
     }
 
     async function applyPendingTagsToSelection() {
@@ -1868,7 +2700,11 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         if (!targetIds.length || !pendingApplyTagKeys.size) return;
         const tagsToApply = libraryTags.filter((tag) => pendingApplyTagKeys.has(getTagKey(tag)));
         if (!tagsToApply.length) return;
-        await actions.applyLibraryTagsToProjects?.(targetIds, tagsToApply);
+        if (isAssetsPage()) {
+            await actions.applyLibraryTagsToAssets?.(targetIds, tagsToApply);
+        } else {
+            await actions.applyLibraryTagsToProjects?.(targetIds, tagsToApply);
+        }
         pendingApplyTagKeys = new Set();
         await refresh();
     }
@@ -1876,7 +2712,38 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     async function removeTagFromSelection(tag) {
         const targetIds = getSelectedProjectIds();
         if (!targetIds.length) return;
-        await actions.removeLibraryTagFromProjects?.(targetIds, tag);
+        if (isAssetsPage()) {
+            await actions.removeLibraryTagFromAssets?.(targetIds, tag);
+        } else {
+            await actions.removeLibraryTagFromProjects?.(targetIds, tag);
+        }
+        await refresh();
+    }
+
+    async function renameFocusedAsset(asset = detailData || getSelectedProject()) {
+        if (!asset?.id) return;
+        const nextName = await runModalStep({
+            title: 'Rename Asset',
+            text: 'Choose a new name for this saved asset.',
+            html: `
+                <label class="library-modal-field">
+                    <span>Asset name</span>
+                    <input type="text" class="library-modal-input" data-library-role="modal-asset-name" value="${escapeHtml(asset.name || 'Library Asset')}">
+                </label>
+            `,
+            confirmLabel: 'Rename',
+            onOpen: () => focusModalField('[data-library-role="modal-asset-name"]'),
+            onConfirm: ({ root, setError }) => {
+                const value = String(root.querySelector('[data-library-role="modal-asset-name"]')?.value || '').trim();
+                if (!value) {
+                    setError('Enter an asset name first.');
+                    return false;
+                }
+                return value;
+            }
+        });
+        if (!nextName) return;
+        await actions.renameLibraryAsset?.(asset.id, nextName);
         await refresh();
     }
 
@@ -1936,26 +2803,30 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     }
 
     async function saveLibraryWorkflow(options = {}) {
-        if (!libraryData.length && !libraryTags.length) {
-            showAlert('There are no Library projects or tags to save yet.');
+        if (!libraryData.length && !assetData.length && !libraryTags.length) {
+            showAlert('There are no Library projects, assets, or tags to save yet.');
             return false;
         }
 
-        const defaultName = stripJsonExtension(options.defaultName || buildDefaultLibraryFilename('noise-studio-library'));
-        const exportChoice = await promptSaveLibraryMode(defaultName);
+        const defaultScope = options.defaultScope || getActiveExportScope();
+        const exportChoice = await promptSaveLibraryMode(defaultScope);
         if (!exportChoice) return false;
 
         const filename = await promptLibraryFilename(
-            'Save Library',
-            'Choose a file name for this Library export.',
-            exportChoice.suggestedFilename || defaultName
+            exportChoice.scope === 'assets' ? 'Save Assets' : 'Save Library',
+            'Choose a file name for this export.',
+            options.defaultName || exportChoice.suggestedFilename || buildDefaultLibraryFilename(getScopeDefaultBaseName(exportChoice.scope))
         );
         if (!filename) return false;
 
-        const bundle = buildLibraryExportBundle(libraryData, libraryTags, stripJsonExtension(filename));
+        const bundle = buildExportBundleForScope(exportChoice.scope, filename);
+        const counts = getExportCounts(exportChoice.scope);
+        const summary = formatImportSummary(counts.projectCount, counts.assetCount);
+        logLibrary('active', 'library.export', `Preparing a ${exportChoice.scope === 'assets' ? 'Assets' : exportChoice.scope === 'combined' ? 'combined Library + Assets' : 'Library'} export named "${filename}".`);
 
         if (exportChoice.exportMode === 'plain') {
             downloadJsonFile(bundle, filename);
+            logLibrary('success', 'library.export', `Saved plain JSON export "${toJsonFilename(filename)}".`);
             return true;
         }
 
@@ -1973,18 +2844,20 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         }
 
         try {
-            showProgress('Packing Library export...', `${libraryData.length} project${libraryData.length === 1 ? '' : 's'}`, 0.15);
+            showProgress('Packing export...', summary, 0.15);
             const payload = await buildSecureLibraryExportRecord(bundle, {
                 secureMode,
                 passphrase,
                 duplicateCopies
             });
-            showProgress('Saving Library export...', toJsonFilename(filename), 1);
+            showProgress('Saving export...', toJsonFilename(filename), 1);
             downloadJsonFile(payload, filename);
+            logLibrary('success', 'library.export', `Saved secure ${secureMode} export "${toJsonFilename(filename)}".`);
             return true;
         } catch (error) {
             console.error(error);
-            showAlert(error.message || 'Could not save the Library export.');
+            logLibrary('error', 'library.export', error.message || 'Could not save the secure Library export.');
+            showAlert(error.message || 'Could not save that export.');
             return false;
         } finally {
             hideProgress();
@@ -2046,15 +2919,21 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                 const repairedPayload = await buildSecureLibraryExportRecord(
                     isPlainLibraryExportPayload(recoveredParsed)
                         ? recoveredParsed
-                        : buildLibraryExportBundle(
-                            extracted.entries.map((entry) => ({
+                        : buildLibraryExportBundle({
+                            projects: extracted.projectEntries.map((entry) => ({
                                 name: entry.name,
                                 tags: entry.tags,
                                 payload: JSON.parse(entry.text)
                             })),
-                            extracted.tags,
-                            parsed.name || fallbackName
-                        ),
+                            assets: extracted.assetEntries.map((entry) => ({
+                                ...(entry.asset || {}),
+                                name: entry.asset?.name || entry.name,
+                                tags: entry.tags || entry.asset?.tags || []
+                            })),
+                            tagCatalog: extracted.tags,
+                            name: parsed.name || fallbackName,
+                            scope: extracted.scope || 'combined'
+                        }),
                     {
                         secureMode: 'encrypted',
                         passphrase,
@@ -2085,6 +2964,305 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         return extractLibraryImportBundle(parsed, fallbackName);
     }
 
+    function getImportScopeFromEntries(projectEntries = [], assetEntries = []) {
+        if (projectEntries.length && assetEntries.length) return 'combined';
+        if (assetEntries.length) return 'assets';
+        return 'library';
+    }
+
+    function hasStoredDataForScope(scope) {
+        const counts = getExportCounts(scope);
+        return (scopeIncludesProjects(scope) && counts.projectCount > 0)
+            || (scopeIncludesAssets(scope) && counts.assetCount > 0);
+    }
+
+    function normalizeImportedAssetEntries(assetEntries = []) {
+        return (assetEntries || []).map((entry, index) => {
+            const asset = entry?.asset || entry || {};
+            const meta = inferAssetFileMeta(asset.name || entry?.name || `Asset ${index + 1}`, asset.mimeType || '');
+            const assetType = normalizeLibraryAssetType(asset.assetType || meta?.assetType || 'image');
+            const format = String(asset.format || meta?.format || (assetType === 'model' ? 'glb' : 'png'));
+            const mimeType = normalizeAssetMimeType(format, asset.mimeType || meta?.mimeType || '', assetType);
+            const dataUrl = String(asset.dataUrl || '');
+            if (!dataUrl) return null;
+            return {
+                id: asset.id || null,
+                timestamp: Number(asset.timestamp || Date.now()),
+                name: String(asset.name || entry?.name || `Asset ${index + 1}`),
+                assetType,
+                format,
+                mimeType,
+                dataUrl,
+                tags: normalizeTagList(entry?.tags || asset.tags || []),
+                width: Number(asset.width || 0),
+                height: Number(asset.height || 0),
+                sourceProjectId: asset.sourceProjectId || null,
+                sourceProjectType: asset.sourceProjectType || null,
+                sourceProjectName: asset.sourceProjectName || null,
+                origin: asset.origin || 'import',
+                assetFingerprint: asset.assetFingerprint || ''
+            };
+        }).filter(Boolean);
+    }
+
+    async function applyImportPackages(importPackages, { allowReplacePrompt = true } = {}) {
+        const projectEntries = importPackages.flatMap((entry) => entry.projectEntries || []);
+        const assetEntries = normalizeImportedAssetEntries(importPackages.flatMap((entry) => entry.assetEntries || []));
+        const importedCatalog = normalizeTagList([
+            ...importPackages.flatMap((entry) => entry.tags || []),
+            ...projectEntries.flatMap((entry) => entry.tags || []),
+            ...assetEntries.flatMap((entry) => entry.tags || [])
+        ]);
+
+        if (!projectEntries.length && !assetEntries.length && !importedCatalog.length) {
+            showAlert('No Library data was found in that import.');
+            return;
+        }
+
+        const importScope = getImportScopeFromEntries(projectEntries, assetEntries);
+        logLibrary('active', 'library.import', `Applying import packages with ${projectEntries.length} project${projectEntries.length === 1 ? '' : 's'} and ${assetEntries.length} asset${assetEntries.length === 1 ? '' : 's'}.`);
+        const shouldPromptReplace = allowReplacePrompt && importPackages.some((entry) => entry.kind === 'library-bundle' || entry.kind === 'asset-folder');
+        let replaceExisting = false;
+
+        if (shouldPromptReplace && hasStoredDataForScope(importScope)) {
+            const replaceMode = await promptReplaceMode({
+                scope: importScope,
+                projectCount: projectEntries.length,
+                assetCount: assetEntries.length
+            });
+            if (!replaceMode) return;
+            replaceExisting = replaceMode === 'replace';
+            if (replaceExisting) {
+                const saveChoice = await promptSaveBeforeReplace(importScope);
+                if (!saveChoice) return;
+                if (saveChoice === 'save') {
+                    const didSave = await saveLibraryWorkflow({
+                        defaultScope: importScope,
+                        defaultName: buildDefaultLibraryFilename(`${getScopeDefaultBaseName(importScope)} backup`)
+                    });
+                    if (!didSave) return;
+                }
+            }
+        }
+
+        if (replaceExisting) {
+            resetScopeUiState(importScope);
+            if (scopeIncludesProjects(importScope)) {
+                await actions.clearLibraryProjects?.();
+            }
+            if (scopeIncludesAssets(importScope)) {
+                await actions.clearLibraryAssets?.();
+            }
+        }
+
+        if (projectEntries.length) {
+            showProgress('Preparing Library import...', `${projectEntries.length} project${projectEntries.length === 1 ? '' : 's'}`, 0.02);
+            await nextPaint();
+            await actions.processLibraryPayloads(
+                projectEntries.map((entry) => entry.text),
+                projectEntries.map((entry) => entry.name),
+                ({ phase, count = 0, total = projectEntries.length, filename = '' }) => {
+                    if (phase === 'start') {
+                        showProgress('Rendering Library projects...', `0 of ${total}`, 0);
+                    } else if (phase === 'progress') {
+                        const safeFilename = filename ? ` | ${filename}` : '';
+                        showProgress('Rendering Library projects...', `${count} of ${total}${safeFilename}`, total ? (count / total) * (assetEntries.length ? 0.7 : 1) : 0);
+                    } else if (phase === 'complete') {
+                        showProgress(assetEntries.length ? 'Preparing asset import...' : 'Finalizing Library import...', assetEntries.length ? formatCountLabel(assetEntries.length, 'asset') : `${total} file${total === 1 ? '' : 's'}`, assetEntries.length ? 0.72 : 1);
+                    }
+                }
+            );
+        }
+
+        if (assetEntries.length) {
+            showProgress('Importing Library assets...', `0 of ${assetEntries.length}`, projectEntries.length ? 0.76 : 0.1);
+            await nextPaint();
+            await actions.importLibraryAssets?.(assetEntries);
+            showProgress('Finalizing asset import...', `${assetEntries.length} of ${assetEntries.length}`, 1);
+        }
+
+        const nextCatalog = normalizeTagList([
+            ...(replaceExisting ? getSurvivingTagsForReplace(importScope) : libraryTags),
+            ...importedCatalog
+        ]);
+        if (actions.setLibraryTagCatalog) {
+            await actions.setLibraryTagCatalog(nextCatalog);
+        }
+
+        await refresh();
+        logLibrary('success', 'library.import', `Library import applied ${projectEntries.length} project${projectEntries.length === 1 ? '' : 's'} and ${assetEntries.length} asset${assetEntries.length === 1 ? '' : 's'}.`);
+    }
+
+    async function parseAssetFolder(directoryHandle) {
+        const allFiles = await collectDirectoryFiles(directoryHandle);
+        const manifestEntry = allFiles.find((entry) => entry.handle.name === 'library-assets-manifest.json');
+        if (manifestEntry) {
+            const manifestFile = await manifestEntry.handle.getFile();
+            const manifestText = await manifestFile.text();
+            const parsed = JSON.parse(manifestText);
+            if (parsed?.type === LIBRARY_EXPORT_TYPE && parsed?.format === LIBRARY_ASSET_FOLDER_FORMAT) {
+                const assetEntries = [];
+                for (const [index, rawAsset] of (parsed.assets || []).entries()) {
+                    const relativePath = rawAsset.fileName || rawAsset.filename || '';
+                    if (!relativePath) continue;
+                    const fileHandle = await getNestedFileHandle(directoryHandle, relativePath).catch(() => null);
+                    if (!fileHandle) continue;
+                    const file = await fileHandle.getFile();
+                    const dataUrl = await blobToDataUrl(file);
+                    const inferredMeta = inferAssetFileMeta(file.name, file.type);
+                    const assetType = normalizeLibraryAssetType(rawAsset.assetType || inferredMeta?.assetType || 'image');
+                    const format = String(rawAsset.format || inferredMeta?.format || (assetType === 'model' ? 'glb' : 'png'));
+                    assetEntries.push({
+                        name: String(rawAsset.name || stripJsonExtension(file.name) || `Asset ${index + 1}`),
+                        tags: normalizeTagList(rawAsset.tags || []),
+                        asset: {
+                            ...rawAsset,
+                            assetType,
+                            format,
+                            dataUrl,
+                            mimeType: normalizeAssetMimeType(format, rawAsset.mimeType || file.type, assetType),
+                            origin: rawAsset.origin || 'folder-import'
+                        }
+                    });
+                    await maybeYieldToUi(index, 2);
+                }
+                return {
+                    kind: 'asset-folder',
+                    sourceFormat: LIBRARY_ASSET_FOLDER_FORMAT,
+                    bundleName: stripJsonExtension(parsed.name || directoryHandle.name || 'noise-studio-assets'),
+                    exportedAt: parsed.exportedAt || null,
+                    scope: 'assets',
+                    projectEntries: [],
+                    assetEntries,
+                    tags: normalizeTagList([
+                        ...(parsed.tags || []),
+                        ...assetEntries.flatMap((entry) => entry.tags || [])
+                    ])
+                };
+            }
+        }
+
+        const looseAssetEntries = [];
+        for (const [index, entry] of allFiles.entries()) {
+            const file = await entry.handle.getFile();
+            const meta = inferAssetFileMeta(file.name, file.type);
+            if (!meta) continue;
+            const dataUrl = await blobToDataUrl(file);
+            looseAssetEntries.push({
+                name: stripJsonExtension(file.name) || `Asset ${index + 1}`,
+                tags: [],
+                asset: {
+                    timestamp: Number(file.lastModified || Date.now()),
+                    name: stripJsonExtension(file.name) || `Asset ${index + 1}`,
+                    assetType: meta.assetType,
+                    format: meta.format,
+                    mimeType: meta.mimeType,
+                    dataUrl,
+                    width: 0,
+                    height: 0,
+                    origin: 'folder-import'
+                }
+            });
+            await maybeYieldToUi(index, 4);
+        }
+
+        return {
+            kind: 'asset-folder',
+            sourceFormat: 'folder-files',
+            bundleName: stripJsonExtension(directoryHandle.name || 'noise-studio-assets'),
+            exportedAt: null,
+            scope: 'assets',
+            projectEntries: [],
+            assetEntries: looseAssetEntries,
+            tags: []
+        };
+    }
+
+    async function importAssetFolder() {
+        if (!window.showDirectoryPicker) {
+            showAlert('Folder access is not supported in this browser.');
+            return;
+        }
+
+        try {
+            const directoryHandle = await window.showDirectoryPicker();
+            logLibrary('active', 'library.import', `Scanning asset folder "${directoryHandle.name || 'Assets'}" for import.`);
+            showProgress('Scanning asset folder...', directoryHandle.name || 'Assets', 0.05);
+            await nextPaint();
+            const importPackage = await parseAssetFolder(directoryHandle);
+            hideProgress();
+            if (!importPackage.assetEntries.length) {
+                showAlert('No supported image or 3D asset files were found in that folder.');
+                return;
+            }
+            await applyImportPackages([importPackage], { allowReplacePrompt: true });
+        } catch (error) {
+            if (error?.name === 'AbortError') return;
+            console.error(error);
+            logLibrary('error', 'library.import', error.message || 'Could not import that asset folder.');
+            showAlert(error.message || 'Could not import that asset folder.');
+        } finally {
+            hideProgress();
+        }
+    }
+
+    async function exportAssetFolder() {
+        if (!assetData.length) {
+            showAlert('There are no Assets to export.');
+            return;
+        }
+        if (!window.showDirectoryPicker) {
+            showAlert('Folder access is not supported in this browser.');
+            return;
+        }
+
+        try {
+            const directoryHandle = await window.showDirectoryPicker();
+            logLibrary('active', 'library.export', `Exporting ${assetData.length} asset${assetData.length === 1 ? '' : 's'} to folder "${directoryHandle.name}".`);
+            showProgress('Preparing asset folder export...', directoryHandle.name, 0.02);
+            await nextPaint();
+            const assetsDirectoryHandle = await directoryHandle.getDirectoryHandle('assets', { create: true });
+            const manifest = buildLibraryAssetFolderManifest({
+                assets: assetData,
+                tagCatalog: getTagCatalogForScope('assets'),
+                name: getScopeDefaultBaseName('assets')
+            });
+            const usedNames = new Map();
+            const manifestAssets = [];
+
+            for (let index = 0; index < assetData.length; index += 1) {
+                const asset = assetData[index];
+                const extension = getAssetFileExtension(asset);
+                const baseStem = sanitizeFileStem(stripJsonExtension(asset.name || `asset-${index + 1}`), `asset-${index + 1}`);
+                const duplicateCount = usedNames.get(baseStem) || 0;
+                usedNames.set(baseStem, duplicateCount + 1);
+                const fileStem = duplicateCount ? `${baseStem}-${duplicateCount + 1}` : baseStem;
+                const fileName = `${fileStem}.${extension}`;
+                const blob = await dataUrlToBlob(asset.dataUrl);
+                await writeDirectoryFile(assetsDirectoryHandle, fileName, blob);
+                manifestAssets.push({
+                    ...buildLibraryAssetExportPayload(asset),
+                    dataUrl: undefined,
+                    fileName: `assets/${fileName}`
+                });
+                showProgress('Exporting asset folder...', `${index + 1} of ${assetData.length}`, (index + 1) / Math.max(1, assetData.length));
+                await maybeYieldToUi(index, 2);
+            }
+
+            manifest.assets = manifestAssets;
+            await writeDirectoryFile(directoryHandle, 'library-assets-manifest.json', JSON.stringify(manifest, null, 2));
+            logLibrary('success', 'library.export', `Exported ${assetData.length} asset${assetData.length === 1 ? '' : 's'} to folder "${directoryHandle.name}".`);
+            showAlert(`Exported ${assetData.length} asset${assetData.length === 1 ? '' : 's'} to "${directoryHandle.name}".`, 'Assets Exported');
+        } catch (error) {
+            if (error?.name === 'AbortError') return;
+            console.error(error);
+            logLibrary('error', 'library.export', error.message || 'Could not export the asset folder.');
+            showAlert(error.message || 'Could not export that asset folder.');
+        } finally {
+            hideProgress();
+        }
+    }
+
     async function exportZip() {
         if (!libraryData.length) {
             showAlert('There are no Library projects to export.');
@@ -2096,7 +3274,9 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         }
 
         try {
+            logLibrary('active', 'library.export', `Creating a ZIP export for ${libraryData.length} Library project${libraryData.length === 1 ? '' : 's'}.`);
             showProgress('Creating Library ZIP...', `${libraryData.length} project${libraryData.length === 1 ? '' : 's'}`, 0.1);
+            await nextPaint();
             const zip = new window.JSZip();
             const usedNames = new Map();
 
@@ -2109,6 +3289,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                 const payload = buildLibraryProjectExportPayload(project);
                 zip.file(finalName, JSON.stringify(payload, null, 2));
                 showProgress('Creating Library ZIP...', `${index + 1} of ${libraryData.length}`, (index + 1) / libraryData.length);
+                await maybeYieldToUi(index, 3);
             }
 
             const blob = await zip.generateAsync({ type: 'blob' });
@@ -2117,9 +3298,11 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             link.href = url;
             link.download = 'noise-studio-library.zip';
             link.click();
+            logLibrary('success', 'library.export', 'Created Library ZIP export "noise-studio-library.zip".');
             setTimeout(() => URL.revokeObjectURL(url), 0);
         } catch (error) {
             console.error(error);
+            logLibrary('error', 'library.export', error.message || 'Could not create the Library ZIP export.');
             showAlert(`Could not export the Library ZIP: ${error.message}`);
         } finally {
             hideProgress();
@@ -2134,74 +3317,17 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         if (!files.length) return;
 
         try {
+            logLibrary('active', 'library.import', `Parsing ${files.length} uploaded Library file${files.length === 1 ? '' : 's'}.`);
             const importPackages = [];
             for (const file of files) {
                 const parsedPackage = await parseUploadFile(file);
                 if (!parsedPackage) return;
                 importPackages.push(parsedPackage);
             }
-
-            const allEntries = importPackages.flatMap((entry) => entry.entries || []);
-            const importedCatalog = normalizeTagList(importPackages.flatMap((entry) => entry.tags || []));
-            const containsLibraryBundle = importPackages.some((entry) => entry.kind === 'library-bundle');
-
-            if (!allEntries.length && !importedCatalog.length) {
-                showAlert('No Library data was found in those JSON files.');
-                return;
-            }
-
-            let replaceExisting = false;
-            if (libraryData.length && containsLibraryBundle) {
-                const replaceMode = await promptReplaceMode(allEntries.length);
-                if (!replaceMode) return;
-                replaceExisting = replaceMode === 'replace';
-                if (replaceExisting) {
-                    const saveChoice = await promptSaveBeforeReplace();
-                    if (!saveChoice) return;
-                    if (saveChoice === 'save') {
-                        const didSave = await saveLibraryWorkflow({ defaultName: buildDefaultLibraryFilename('noise-studio-library backup') });
-                        if (!didSave) return;
-                    }
-                }
-            }
-
-            if (replaceExisting) {
-                selectedProjectId = null;
-                clearProjectSelection();
-                closeDetail();
-                setFullscreenEnabled(false);
-                await actions.clearLibraryProjects?.();
-                await actions.setLibraryTagCatalog?.([]);
-            }
-
-            if (allEntries.length) {
-                await actions.processLibraryPayloads(
-                    allEntries.map((entry) => entry.text),
-                    allEntries.map((entry) => entry.name),
-                    ({ phase, count = 0, total = allEntries.length, filename = '' }) => {
-                        if (phase === 'start') {
-                            showProgress('Rendering Library projects...', `0 of ${total}`, 0);
-                        } else if (phase === 'progress') {
-                            const safeFilename = filename ? ` | ${filename}` : '';
-                            showProgress('Rendering Library projects...', `${count} of ${total}${safeFilename}`, total ? count / total : 0);
-                        } else if (phase === 'complete') {
-                            showProgress('Finalizing Library import...', `${total} file${total === 1 ? '' : 's'}`, 1);
-                        }
-                    }
-                );
-            }
-
-            const nextCatalog = normalizeTagList([
-                ...(replaceExisting ? [] : libraryTags),
-                ...importedCatalog
-            ]);
-            if (actions.setLibraryTagCatalog) {
-                await actions.setLibraryTagCatalog(nextCatalog);
-            }
-
-            await refresh();
+            await applyImportPackages(importPackages, { allowReplacePrompt: true });
         } catch (error) {
             console.error(error);
+            logLibrary('error', 'library.import', error.message || 'The Library JSON import failed.');
             showAlert(error.message || 'The Library JSON import failed.');
         } finally {
             hideProgress();
@@ -2209,67 +3335,91 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         }
     }
 
-    async function deleteProject(id) {
-        const project = libraryData.find((item) => item.id === id);
-        if (!project) return;
+    async function deleteEntry(id) {
+        const entry = getCurrentData().find((item) => item.id === id);
+        if (!entry) return;
 
         showModal({
-            text: `Delete "${project.name}" from the Library?`,
+            text: `Delete "${entry.name}" from the ${isAssetsPage() ? 'Assets' : 'Library'} page?`,
             confirmLabel: 'Delete',
             isDanger: true,
             onConfirm: async () => {
                 if (detailData?.id === id) closeDetail();
-                if (selectedProjectId === id) selectedProjectId = null;
-                if (selectedProjectIds.has(id)) {
-                    selectedProjectIds.delete(id);
-                    updateSelectToggle();
+                if (isAssetsPage()) {
+                    if (selectedAssetId === id) selectedAssetId = null;
+                    if (selectedAssetIds.has(id)) {
+                        selectedAssetIds.delete(id);
+                    }
+                } else {
+                    if (selectedProjectId === id) selectedProjectId = null;
+                    if (selectedProjectIds.has(id)) {
+                        selectedProjectIds.delete(id);
+                    }
                 }
-                await actions.deleteLibraryProject(id);
+                updateSelectToggle();
+                if (isAssetsPage()) {
+                    await actions.deleteLibraryAsset?.(id);
+                } else {
+                    await actions.deleteLibraryProject?.(id);
+                }
                 await refresh();
             }
         });
     }
 
-    async function deleteSelectedProjects() {
-        const selectedProjects = getSelectedProjects();
-        if (!selectedProjects.length) {
-            showAlert('Select one or more Library projects first.');
+    async function deleteSelectedEntries() {
+        const selectedEntries = getSelectedProjects();
+        if (!selectedEntries.length) {
+            showAlert(`Select one or more ${isAssetsPage() ? 'saved assets' : 'Library projects'} first.`);
             return;
         }
+        const itemLabel = isAssetsPage() ? 'asset' : 'project';
 
         showModal({
-            text: `Delete ${selectedProjects.length} selected project${selectedProjects.length === 1 ? '' : 's'} from the Library?`,
+            text: `Delete ${selectedEntries.length} selected ${itemLabel}${selectedEntries.length === 1 ? '' : 's'} from the ${isAssetsPage() ? 'Assets' : 'Library'} page?`,
             confirmLabel: 'Delete',
             isDanger: true,
             onConfirm: async () => {
-                const ids = selectedProjects.map((item) => item.id);
+                const ids = selectedEntries.map((item) => item.id);
                 if (detailData && ids.includes(detailData.id)) closeDetail();
-                if (selectedProjectId && ids.includes(selectedProjectId)) {
+                if (isAssetsPage()) {
+                    if (selectedAssetId && ids.includes(selectedAssetId)) {
+                        selectedAssetId = null;
+                    }
+                } else if (selectedProjectId && ids.includes(selectedProjectId)) {
                     selectedProjectId = null;
                 }
                 clearProjectSelection();
-                await actions.deleteLibraryProjects?.(ids);
+                if (isAssetsPage()) {
+                    await actions.deleteLibraryAssets?.(ids);
+                } else {
+                    await actions.deleteLibraryProjects?.(ids);
+                }
                 await refresh();
             }
         });
     }
 
     async function clearAll() {
-        if (!libraryData.length) {
-            showAlert('The Library is already empty.');
+        const currentData = getCurrentData();
+        if (!currentData.length) {
+            showAlert(isAssetsPage() ? 'The Assets page is already empty.' : 'The Library is already empty.');
             return;
         }
 
         showModal({
-            text: 'Clear every saved Library project? This cannot be undone.',
-            confirmLabel: 'Clear Library',
+            text: isAssetsPage()
+                ? 'Clear every saved asset from the Assets page? This cannot be undone.'
+                : 'Clear every saved Library project? This cannot be undone.',
+            confirmLabel: isAssetsPage() ? 'Clear Assets' : 'Clear Library',
             isDanger: true,
             onConfirm: async () => {
-                selectedProjectId = null;
-                clearProjectSelection();
-                closeDetail();
-                setFullscreenEnabled(false);
-                await actions.clearLibraryProjects();
+                resetScopeUiState(isAssetsPage() ? 'assets' : 'library');
+                if (isAssetsPage()) {
+                    await actions.clearLibraryAssets?.();
+                } else {
+                    await actions.clearLibraryProjects?.();
+                }
                 await refresh();
             }
         });
@@ -2277,8 +3427,19 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
 
     async function loadProjectIntoEditor(project) {
         if (!project) return;
-        const loaded = await actions.loadLibraryProject(project.payload, project.id, project.name);
-        if (loaded) closeDetail();
+        const targetLabel = project.projectType === 'stitch'
+            ? 'Stitch'
+            : project.projectType === '3d'
+                ? '3D'
+                : 'Editor';
+        showProgress('Loading Library project...', `Opening in ${targetLabel}`, 0.18);
+        await nextPaint();
+        try {
+            const loaded = await actions.loadLibraryProject(project.payload, project.id, project.name);
+            if (loaded) closeDetail();
+        } finally {
+            hideProgress();
+        }
     }
 
     function handleGlobalPointerDown(event) {
@@ -2362,8 +3523,18 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         if (actionNode) {
             const action = actionNode.dataset.libraryAction;
 
+            if (action === 'set-page-mode') {
+                setActivePageMode(actionNode.dataset.mode || 'library');
+                return;
+            }
+
             if (action === 'upload') {
                 await triggerUpload();
+                return;
+            }
+
+            if (action === 'import-folder') {
+                await importAssetFolder();
                 return;
             }
 
@@ -2392,13 +3563,18 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                 return;
             }
 
+            if (action === 'export-folder') {
+                await exportAssetFolder();
+                return;
+            }
+
             if (action === 'clear-all') {
                 await clearAll();
                 return;
             }
 
             if (action === 'delete-selected-projects') {
-                await deleteSelectedProjects();
+                await deleteSelectedEntries();
                 return;
             }
 
@@ -2410,7 +3586,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             }
 
             if (action === 'delete-project') {
-                await deleteProject(actionNode.dataset.libraryId);
+                await deleteEntry(actionNode.dataset.libraryId);
                 return;
             }
 
@@ -2466,7 +3642,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             if (action === 'remove-tag-from-selection') {
                 const tag = decodeTag(actionNode.dataset.libraryTag);
                 showModal({
-                    text: `Remove "${tag}" from the selected images? The tag itself will remain available in the Library.`,
+                    text: `Remove "${tag}" from the selected ${isAssetsPage() ? 'items' : 'projects'}? The tag itself will remain available in the Library.`,
                     confirmLabel: 'Remove Tag',
                     onConfirm: async () => {
                         await removeTagFromSelection(tag);
@@ -2478,10 +3654,10 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             if (action === 'remove-tag-from-focused') {
                 const tag = decodeTag(actionNode.dataset.libraryTag);
                 showModal({
-                    text: `Remove "${tag}" from this project? The tag itself will remain available in the Library.`,
+                    text: `Remove "${tag}" from this ${isAssetsPage() ? 'asset' : 'project'}? The tag itself will remain available in the Library.`,
                     confirmLabel: 'Remove Tag',
                     onConfirm: async () => {
-                        await removeTagFromFocusedProject(tag);
+                        await removeTagFromFocusedEntry(tag);
                     }
                 });
                 return;
@@ -2497,8 +3673,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
             }
 
             if (action === 'open-selected-detail') {
-                const project = getSelectedProject();
-                if (project) openDetailByData(project);
+                const entry = getSelectedProject();
+                if (entry) openDetailByData(entry);
                 return;
             }
 
@@ -2522,6 +3698,16 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
                 return;
             }
 
+            if (action === 'download-asset') {
+                downloadAssetFile(detailData || getSelectedProject());
+                return;
+            }
+
+            if (action === 'rename-asset') {
+                await renameFocusedAsset(detailData || getSelectedProject());
+                return;
+            }
+
             if (action === 'cancel-modal') {
                 await cancelModal();
                 return;
@@ -2537,19 +3723,21 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
         if (!item || !refs.grid.contains(item)) return;
 
         const index = Number(item.dataset.libraryIndex || 0);
-        const project = visibleLibraryData[index];
-        if (!project) return;
+        const entry = getVisibleCurrentData()[index];
+        if (!entry) return;
 
         if (isSelectMode) {
-            toggleProjectSelection(project.id);
+            toggleProjectSelection(entry.id);
             renderGrid();
             renderSidePanel();
             return;
         }
 
-        selectedProjectId = project.id;
-        currentIndex = index;
-        openDetailByData(project);
+        setSelectedPrimaryId(entry.id);
+        if (!isAssetsPage()) {
+            currentIndex = index;
+        }
+        openDetailByData(entry);
     });
 
     document.addEventListener('pointerdown', handleGlobalPointerDown, true);
@@ -2558,19 +3746,35 @@ export function createLibraryPanel(root, { actions, layerDefaults = {} }) {
     setHoverEnabled(false);
     setFullscreenEnabled(false);
     setSidePanelOpen(false);
+    updateToolbarState();
     renderSidePanel();
 
     return {
         activate() {
+            panelActive = true;
             root.style.display = 'block';
-            refresh().catch((error) => {
-                console.error(error);
-                showAlert('Could not load Library projects.');
+            logLibrary('info', 'library.sync', 'Library page activated.', {
+                dedupeKey: 'library-page-activated',
+                dedupeWindowMs: 160
             });
+            if (!hasRenderedLibrary || pendingRefreshWhileInactive) {
+                refresh().catch((error) => {
+                    console.error(error);
+                    showAlert('Could not load the Library page.');
+                });
+            } else {
+                applyViewState();
+            }
         },
         deactivate() {
+            panelActive = false;
             root.style.display = 'none';
+            logLibrary('info', 'library.sync', 'Library page hidden.', {
+                dedupeKey: 'library-page-hidden',
+                dedupeWindowMs: 160
+            });
             setSidePanelOpen(false);
+            clearAssetPreview();
         },
         refresh
     };

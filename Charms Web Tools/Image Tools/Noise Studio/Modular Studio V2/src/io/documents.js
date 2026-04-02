@@ -7,6 +7,41 @@ function downloadBlob(blob, filename) {
     URL.revokeObjectURL(url);
 }
 
+function normalizeStudioPreview(preview) {
+    if (!preview || typeof preview !== 'object' || !preview.imageData) {
+        return null;
+    }
+    return {
+        imageData: String(preview.imageData || ''),
+        width: Math.max(0, Number(preview.width) || 0),
+        height: Math.max(0, Number(preview.height) || 0),
+        updatedAt: Math.max(0, Number(preview.updatedAt) || 0)
+    };
+}
+
+function buildStudioPayload(state, {
+    includeSource = true,
+    preview = null
+} = {}) {
+    const payload = {
+        version: 'mns/v2',
+        kind: 'document',
+        mode: 'studio',
+        workspace: state.workspace,
+        source: includeSource && state.source?.imageData ? state.source : null,
+        palette: state.palette,
+        layerStack: state.layerStack,
+        selection: state.selection,
+        view: state.view,
+        export: state.export
+    };
+    const normalizedPreview = normalizeStudioPreview(preview);
+    if (normalizedPreview) {
+        payload.preview = normalizedPreview;
+    }
+    return payload;
+}
+
 export function serializePreset(state) {
     return {
         version: 'mns/v2',
@@ -21,34 +56,24 @@ export function serializePreset(state) {
     };
 }
 
-export function serializeDocument(state) {
-    return {
-        version: 'mns/v2',
-        kind: 'document',
-        mode: state.mode,
-        workspace: state.workspace,
-        source: state.source,
-        palette: state.palette,
-        layerStack: state.layerStack,
-        selection: state.selection,
-        view: state.view,
-        export: state.export
-    };
+export function serializeDocument(state, options = {}) {
+    return buildStudioPayload({
+        ...state,
+        mode: 'studio'
+    }, {
+        includeSource: true,
+        preview: options.preview || null
+    });
 }
 
-export function serializeState(state, includeImage = false) {
-    return {
-        version: 'mns/v2',
-        kind: 'document',
-        mode: 'studio',
-        workspace: state.workspace,
-        source: includeImage && state.source?.imageData ? state.source : null,
-        palette: state.palette,
-        layerStack: state.layerStack,
-        selection: state.selection,
-        view: state.view,
-        export: state.export
-    };
+export function serializeState(state, options = {}) {
+    const normalizedOptions = typeof options === 'boolean'
+        ? { includeSource: options }
+        : (options || {});
+    return buildStudioPayload(state, {
+        includeSource: normalizedOptions.includeSource !== false,
+        preview: normalizedOptions.preview || null
+    });
 }
 
 export function downloadPreset(state) {
@@ -56,13 +81,13 @@ export function downloadPreset(state) {
     downloadBlob(blob, 'noise-studio-preset.mns.json');
 }
 
-export function downloadDocument(state) {
-    const blob = new Blob([JSON.stringify(serializeDocument(state), null, 2)], { type: 'application/json' });
+export function downloadDocument(state, options = {}) {
+    const blob = new Blob([JSON.stringify(serializeDocument(state, options), null, 2)], { type: 'application/json' });
     downloadBlob(blob, 'noise-studio-document.mns.json');
 }
 
-export function downloadState(state, includeImage = false) {
-    const blob = new Blob([JSON.stringify(serializeState(state, includeImage), null, 2)], { type: 'application/json' });
+export function downloadState(state, options = {}) {
+    const blob = new Blob([JSON.stringify(serializeState(state, options), null, 2)], { type: 'application/json' });
     downloadBlob(blob, 'noise-studio-state.mns.json');
 }
 
