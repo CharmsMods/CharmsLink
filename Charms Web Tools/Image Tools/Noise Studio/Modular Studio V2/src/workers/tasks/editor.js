@@ -219,11 +219,15 @@ export const editorTaskHandlers = {
         const startedAt = now();
         const runtime = await getRuntime(context);
         context.assertNotCancelled();
-        const result = runtime.ok
+        const usedWasm = !!runtime.ok;
+        const result = usedWasm
             ? computeAnalysisVisualsWithRuntime(runtime, payload)
             : computeAnalysisVisualsJs(payload);
         const taskMs = Math.max(0, now() - startedAt);
-        context.log('info', `Computed Editor analysis visuals in ${Math.round(taskMs)}ms via ${runtime.ok ? runtime.selection : 'js-fallback'}.`);
+        if (!usedWasm && runtime?.reason) {
+            context.log('warning', `Editor analysis fell back to JS. ${runtime.reason}`);
+        }
+        context.log('info', `Computed Editor analysis visuals in ${Math.round(taskMs)}ms via ${usedWasm ? runtime.selection : 'js-fallback'}.`);
         const histogramBuffer = result.histogram.rgba.buffer.slice(result.histogram.rgba.byteOffset, result.histogram.rgba.byteOffset + result.histogram.rgba.byteLength);
         const vectorscopeBuffer = result.vectorscope.rgba.buffer.slice(result.vectorscope.rgba.byteOffset, result.vectorscope.rgba.byteOffset + result.vectorscope.rgba.byteLength);
         const paradeBuffer = result.parade.rgba.buffer.slice(result.parade.rgba.byteOffset, result.parade.rgba.byteOffset + result.parade.rgba.byteLength);
@@ -234,10 +238,10 @@ export const editorTaskHandlers = {
                 parade: { ...result.parade, rgba: paradeBuffer },
                 metrics: result.metrics,
                 runtime: {
-                    selection: runtime.ok ? runtime.selection : 'js-fallback',
+                    selection: usedWasm ? runtime.selection : 'js-fallback',
                     initMs: runtime.initMs || 0,
                     taskMs,
-                    fallbackReason: runtime.ok ? '' : (runtime.reason || '')
+                    fallbackReason: usedWasm ? '' : (runtime.reason || '')
                 }
             },
             transfer: [histogramBuffer, vectorscopeBuffer, paradeBuffer]
@@ -248,11 +252,15 @@ export const editorTaskHandlers = {
         const startedAt = now();
         const runtime = await getRuntime(context);
         context.assertNotCancelled();
-        const result = runtime.ok
+        const usedWasm = !!runtime.ok;
+        const result = usedWasm
             ? computeDiffPreviewWithRuntime(runtime, payload)
             : computeDiffPreviewJs(payload);
         const taskMs = Math.max(0, now() - startedAt);
-        context.log('info', `Computed the Editor diff preview in ${Math.round(taskMs)}ms via ${runtime.ok ? runtime.selection : 'js-fallback'}.`);
+        if (!usedWasm && runtime?.reason) {
+            context.log('warning', `Editor diff preview fell back to JS. ${runtime.reason}`);
+        }
+        context.log('info', `Computed the Editor diff preview in ${Math.round(taskMs)}ms via ${usedWasm ? runtime.selection : 'js-fallback'}.`);
         const rgbaBuffer = result.rgba.buffer.slice(result.rgba.byteOffset, result.rgba.byteOffset + result.rgba.byteLength);
         return {
             payload: {
@@ -260,10 +268,10 @@ export const editorTaskHandlers = {
                 height: result.height,
                 rgba: rgbaBuffer,
                 runtime: {
-                    selection: runtime.ok ? runtime.selection : 'js-fallback',
+                    selection: usedWasm ? runtime.selection : 'js-fallback',
                     initMs: runtime.initMs || 0,
                     taskMs,
-                    fallbackReason: runtime.ok ? '' : (runtime.reason || '')
+                    fallbackReason: usedWasm ? '' : (runtime.reason || '')
                 }
             },
             transfer: [rgbaBuffer]
@@ -279,6 +287,8 @@ export const editorTaskHandlers = {
         const runtime = await getRuntime(context);
         context.assertNotCancelled();
         let palette = [];
+        let selection = 'js-fallback';
+        let fallbackReason = '';
 
         if (runtime.ok && typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function') {
             const bitmap = await createImageBitmap(file);
@@ -301,22 +311,27 @@ export const editorTaskHandlers = {
                     height: targetHeight,
                     count: payload.count
                 });
+                selection = runtime.selection;
             } finally {
                 bitmap.close?.();
             }
         } else {
             palette = await extractPaletteFromFileJs(file, payload.count, { deterministic: true });
+            fallbackReason = runtime.ok
+                ? 'Palette extraction canvas decoding was unavailable in this environment.'
+                : (runtime.reason || 'Editor WASM runtime was unavailable.');
+            context.log('warning', `Editor palette extraction fell back to JS. ${fallbackReason}`);
         }
 
         const taskMs = Math.max(0, now() - startedAt);
-        context.log('info', `Extracted an Editor palette in ${Math.round(taskMs)}ms via ${runtime.ok ? runtime.selection : 'js-fallback'}.`);
+        context.log('info', `Extracted an Editor palette in ${Math.round(taskMs)}ms via ${selection}.`);
         return {
             palette,
             runtime: {
-                selection: runtime.ok ? runtime.selection : 'js-fallback',
+                selection,
                 initMs: runtime.initMs || 0,
                 taskMs,
-                fallbackReason: runtime.ok ? '' : (runtime.reason || '')
+                fallbackReason
             }
         };
     }

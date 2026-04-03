@@ -54,8 +54,14 @@ function tooltipMarkup(id, help) {
     `;
 }
 
-function renderSettingField(document, field) {
+function renderSettingField(document, field, runtimeDiagnostics = {}) {
     const value = document.settings?.[field.key];
+    const isRunning = document.analysis?.status === 'running';
+    const supportedDetectors = Array.isArray(runtimeDiagnostics?.supportedDetectors)
+        ? runtimeDiagnostics.supportedDetectors
+        : [];
+    const disableSift = field.key === 'featureDetector' && !supportedDetectors.includes('sift');
+    const disabled = isRunning || (field.key === 'analysisMaxDimension' && document.settings.useFullResolutionAnalysis);
     const labelRow = `
         <span class="stitch-setting-label">
             <span>${escapeHtml(field.label)}</span>
@@ -67,8 +73,11 @@ function renderSettingField(document, field) {
         return `
             <label class="stitch-setting">
                 ${labelRow}
-                <select data-stitch-setting="${field.key}">
-                    ${field.options.map((option) => `<option value="${option.value}" ${String(value) === option.value ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+                <select data-stitch-setting="${field.key}" ${isRunning ? 'disabled' : ''}>
+                    ${field.options.map((option) => {
+                        const optionDisabled = option.value === 'sift' && disableSift;
+                        return `<option value="${option.value}" ${String(value) === option.value ? 'selected' : ''} ${optionDisabled ? 'disabled' : ''}>${escapeHtml(option.label)}</option>`;
+                    }).join('')}
                 </select>
             </label>
         `;
@@ -77,7 +86,7 @@ function renderSettingField(document, field) {
     if (field.type === 'checkbox') {
         return `
             <label class="stitch-setting-checkbox">
-                <input type="checkbox" data-stitch-setting="${field.key}" ${value ? 'checked' : ''}>
+                <input type="checkbox" data-stitch-setting="${field.key}" ${value ? 'checked' : ''} ${isRunning ? 'disabled' : ''}>
                 <div class="stitch-setting-checkbox-content">
                     <span class="stitch-setting-label stitch-setting-label-checkbox">
                         <strong>${escapeHtml(field.label)}</strong>
@@ -91,7 +100,7 @@ function renderSettingField(document, field) {
     return `
         <label class="stitch-setting">
             ${labelRow}
-            <input type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}" data-stitch-setting="${field.key}" ${field.key === 'analysisMaxDimension' && document.settings.useFullResolutionAnalysis ? 'disabled' : ''}>
+            <input type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}" data-stitch-setting="${field.key}" ${disabled ? 'disabled' : ''}>
         </label>
     `;
 }
@@ -109,7 +118,7 @@ function getStageStatus(document) {
     const activeCandidate = document.candidates.find((candidate) => candidate.id === document.activeCandidateId) || null;
     const selected = getSelectedStitchInput(document);
 
-    if (analysis.status === 'running') return { text: analysis.warning || 'Running stitch analysis and scoring ranked candidates.', tone: 'info' };
+    if (analysis.status === 'running') return { text: analysis.progressMessage || 'Running stitch analysis and scoring ranked candidates.', tone: 'info' };
     if (analysis.error) return { text: analysis.error, tone: 'error' };
     if (analysis.warning) return { text: analysis.warning, tone: 'warning' };
     if (!document.inputs.length) return { text: 'Load images into Stitch to start building a composite.', tone: 'info' };
@@ -309,6 +318,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
     }
 
     function renderInputs(document) {
+        const isRunning = document.analysis?.status === 'running';
         const orderedInputs = [...document.inputs].sort((a, b) => {
             const placementA = getPlacementByInput(document, a.id);
             const placementB = getPlacementByInput(document, b.id);
@@ -321,10 +331,10 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                     <button type="button" class="mini-button" data-stitch-action="add-images">Add Images</button>
                     <button type="button" class="mini-button" data-stitch-action="new-project">New Stitch</button>
                 </div>
-                <div class="stitch-info-banner">Use this panel to load, reorder, hide, and lock the image stack while the viewport stays focused on the composite.</div>
+                <div class="stitch-info-banner">${isRunning ? 'Input changes are temporarily locked while Stitch analysis is running.' : 'Use this panel to load, reorder, hide, and lock the image stack while the viewport stays focused on the composite.'}</div>
                 ${orderedInputs.length ? `
                     <div class="stitch-input-list">
-                        ${orderedInputs.map((input) => {
+                        ${orderedInputs.map((input, index) => {
                             const placement = getPlacementByInput(document, input.id);
                             const selected = document.selection.inputId === input.id;
                             const badges = [
@@ -343,11 +353,11 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                                         </span>
                                     </button>
                                     <div class="stitch-input-actions">
-                                        <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}">${placement?.visible === false ? 'Show' : 'Hide'}</button>
-                                        <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}">${placement?.locked ? 'Unlock' : 'Lock'}</button>
-                                        <button type="button" class="mini-button" data-stitch-action="move-up" data-input-id="${input.id}">Up</button>
-                                        <button type="button" class="mini-button" data-stitch-action="move-down" data-input-id="${input.id}">Down</button>
-                                        <button type="button" class="mini-button is-danger" data-stitch-action="remove-input" data-input-id="${input.id}">Remove</button>
+                                        <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}" ${isRunning ? 'disabled' : ''}>${placement?.visible === false ? 'Show' : 'Hide'}</button>
+                                        <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}" ${isRunning ? 'disabled' : ''}>${placement?.locked ? 'Unlock' : 'Lock'}</button>
+                                        <button type="button" class="mini-button" data-stitch-action="move-up" data-input-id="${input.id}" ${(isRunning || index === 0) ? 'disabled' : ''}>Up</button>
+                                        <button type="button" class="mini-button" data-stitch-action="move-down" data-input-id="${input.id}" ${(isRunning || index === orderedInputs.length - 1) ? 'disabled' : ''}>Down</button>
+                                        <button type="button" class="mini-button is-danger" data-stitch-action="remove-input" data-input-id="${input.id}" ${isRunning ? 'disabled' : ''}>Remove</button>
                                     </div>
                                 </article>
                             `;
@@ -361,12 +371,14 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
     function renderAnalysis(document) {
         const analysis = document.analysis || {};
         const topCandidate = (document.candidates || [])[0] || null;
+        const runtimeDiagnostics = actions.getState?.()?.settings?.stitch?.diagnostics || {};
+        const isRunning = analysis.status === 'running';
 
         refs.analysisPanel.innerHTML = `
             <div class="stitch-stack">
                 <div class="stitch-button-row stitch-button-row-2">
-                    <button type="button" class="toolbar-button" data-stitch-action="run-analysis" ${document.inputs.length < 2 ? 'disabled' : ''}>${analysis.status === 'running' ? 'Analyzing...' : 'Run Analysis'}</button>
-                    <button type="button" class="mini-button" data-stitch-action="reset-candidate" ${document.activeCandidateId ? '' : 'disabled'}>Reset Candidate</button>
+                    <button type="button" class="toolbar-button" data-stitch-action="run-analysis" ${document.inputs.length < 2 || isRunning ? 'disabled' : ''}>${analysis.status === 'running' ? 'Analyzing...' : 'Run Analysis'}</button>
+                    <button type="button" class="mini-button" data-stitch-action="reset-candidate" ${document.activeCandidateId && !isRunning ? '' : 'disabled'}>Reset Candidate</button>
                 </div>
                 <div class="stitch-summary-card">
                     <div class="stitch-summary-row"><strong>Status</strong><span>${escapeHtml(analysis.status || 'idle')}</span></div>
@@ -374,6 +386,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                     <div class="stitch-summary-row"><strong>Candidates</strong><span>${document.candidates.length}</span></div>
                     ${topCandidate ? `<div class="stitch-summary-row"><strong>Top Result</strong><span>${escapeHtml(formatModelType(topCandidate.modelType))} | ${formatPercent(topCandidate.confidence || 0)}</span></div>` : ''}
                 </div>
+                ${analysis.progressMessage ? `<div class="stitch-analysis-note">${escapeHtml(analysis.progressMessage)}</div>` : ''}
                 ${analysis.warning ? `<div class="stitch-analysis-note is-warning">${escapeHtml(analysis.warning)}</div>` : ''}
                 ${analysis.error ? `<div class="stitch-analysis-note is-error">${escapeHtml(analysis.error)}</div>` : ''}
                 <div class="stitch-settings-stack">
@@ -382,7 +395,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                             <summary>${escapeHtml(group.title)}</summary>
                             <div class="stitch-foldout-body">
                                 <div class="stitch-setting-grid">
-                                    ${group.fields.map((field) => renderSettingField(document, field)).join('')}
+                                    ${group.fields.map((field) => renderSettingField(document, field, runtimeDiagnostics)).join('')}
                                 </div>
                             </div>
                         </details>
@@ -395,6 +408,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
     function renderSelection(document) {
         const input = getSelectedStitchInput(document);
         const placement = input ? getPlacementByInput(document, input.id) : null;
+        const isRunning = document.analysis?.status === 'running';
 
         if (!input || !placement) {
             refs.selectionPanel.innerHTML = '<div class="stitch-mini-empty">Select an image to move, rotate, scale, hide, or lock it.</div>';
@@ -424,15 +438,16 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                                 value="${field.key === 'rotation' ? formatNumber((placement.rotation || 0) * (180 / Math.PI), 1) : formatNumber(placement[field.key], field.key === 'scale' ? 2 : 0)}"
                                 data-stitch-placement="${field.key}"
                                 data-input-id="${input.id}"
+                                ${isRunning ? 'disabled' : ''}
                             >
                         </label>
                     `).join('')}
                 </div>
                 ${placement.warp ? `<div class="stitch-analysis-note">Auto warp: ${escapeHtml(formatModelType(placement.warp.type))} grid ${escapeHtml(String(placement.warp.cols))} x ${escapeHtml(String(placement.warp.rows))}</div>` : ''}
                 <div class="stitch-button-row stitch-button-row-3">
-                    <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}">${placement.visible === false ? 'Show' : 'Hide'}</button>
-                    <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}">${placement.locked ? 'Unlock' : 'Lock'}</button>
-                    <button type="button" class="mini-button" data-stitch-action="reset-selected">Reset</button>
+                    <button type="button" class="mini-button" data-stitch-action="toggle-visibility" data-input-id="${input.id}" ${isRunning ? 'disabled' : ''}>${placement.visible === false ? 'Show' : 'Hide'}</button>
+                    <button type="button" class="mini-button" data-stitch-action="toggle-lock" data-input-id="${input.id}" ${isRunning ? 'disabled' : ''}>${placement.locked ? 'Unlock' : 'Lock'}</button>
+                    <button type="button" class="mini-button" data-stitch-action="reset-selected" ${isRunning ? 'disabled' : ''}>Reset</button>
                 </div>
                 <details class="stitch-foldout">
                     <summary>Help</summary>
@@ -451,16 +466,17 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
     function renderCandidates(document) {
         const candidates = document.candidates || [];
         const activeCandidate = candidates.find((candidate) => candidate.id === document.activeCandidateId) || null;
+        const isRunning = document.analysis?.status === 'running';
 
         refs.candidatesPanel.innerHTML = `
             <div class="stitch-stack">
                 <div class="stitch-button-row stitch-button-row-2">
-                    <button type="button" class="mini-button" data-stitch-action="open-gallery" ${candidates.length ? '' : 'disabled'}>Open Gallery</button>
-                    <button type="button" class="mini-button" data-stitch-action="toggle-alternatives" ${candidates.length ? '' : 'disabled'}>${document.workspace.alternativesOpen === false ? 'Show List' : 'Hide List'}</button>
+                    <button type="button" class="mini-button" data-stitch-action="open-gallery" ${candidates.length && !isRunning ? '' : 'disabled'}>Open Gallery</button>
+                    <button type="button" class="mini-button" data-stitch-action="toggle-alternatives" ${candidates.length && !isRunning ? '' : 'disabled'}>${document.workspace.alternativesOpen === false ? 'Show List' : 'Hide List'}</button>
                 </div>
                 <div class="stitch-button-row stitch-button-row-2">
-                    <button type="button" class="mini-button" data-stitch-action="export-project" ${document.inputs.length ? '' : 'disabled'}>Export PNG</button>
-        <button type="button" class="mini-button" data-stitch-action="save-library" ${document.inputs.length ? '' : 'disabled'}>Save to Library</button>
+                    <button type="button" class="mini-button" data-stitch-action="export-project" ${document.inputs.length && !isRunning ? '' : 'disabled'}>Export PNG</button>
+        <button type="button" class="mini-button" data-stitch-action="save-library" ${document.inputs.length && !isRunning ? '' : 'disabled'}>Save to Library</button>
                 </div>
                 ${activeCandidate ? `
                     <div class="stitch-summary-card">
@@ -483,7 +499,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                                     </span>
                                 </button>
                                 <div class="stitch-candidate-actions">
-                                    <button type="button" class="mini-button" data-stitch-action="use-candidate" data-candidate-id="${candidate.id}">Use</button>
+                                    <button type="button" class="mini-button" data-stitch-action="use-candidate" data-candidate-id="${candidate.id}" ${isRunning ? 'disabled' : ''}>Use</button>
                                 </div>
                             </article>
                         `).join('')}
@@ -544,6 +560,9 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
         const signature = `${status.tone}|${status.text}`;
         if (signature !== lastStatusLogSignature) {
             lastStatusLogSignature = signature;
+            if (document.analysis?.status === 'running') {
+                return;
+            }
             logStitch(
                 status.tone === 'error'
                     ? 'error'
@@ -590,6 +609,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
     });
 
     refs.canvas.addEventListener('pointerdown', (event) => {
+        if (currentDocument.analysis?.status === 'running') return;
         const point = toCanvasPoint(event);
         const hit = stitchEngine.hitTest(currentDocument, point.x, point.y);
         if (!hit) {
@@ -641,6 +661,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
         const action = target.dataset.stitchAction;
         const inputId = target.dataset.inputId;
         const candidateId = target.dataset.candidateId;
+        const isRunning = currentDocument.analysis?.status === 'running';
 
         if (action === 'workspace-tab') {
             actions.setStitchSidebarView?.(target.dataset.sidebarView || 'inputs');
@@ -664,6 +685,9 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
         }
         if (action === 'close-gallery') {
             actions.setStitchGalleryOpen?.(false);
+            return;
+        }
+        if (isRunning && ['use-candidate', 'toggle-alternatives', 'remove-input', 'toggle-lock', 'toggle-visibility', 'move-up', 'move-down', 'reset-selected', 'reset-candidate', 'export-project', 'save-library'].includes(action)) {
             return;
         }
         if (action === 'use-candidate') {
@@ -727,6 +751,7 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
 
     root.addEventListener('change', (event) => {
         const target = event.target;
+        if (currentDocument.analysis?.status === 'running') return;
         if (target.matches('[data-stitch-setting]')) {
             actions.updateStitchSetting?.(
                 target.dataset.stitchSetting,

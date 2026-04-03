@@ -5,6 +5,7 @@ import { clientToImageUv, computePreviewTransform, getPointerRatio } from './pre
 import { createStitchWorkspace } from '../stitch/ui.js';
 import { createThreeDWorkspace } from '../3d/ui.js';
 import { createLogsPanel } from './logsPanel.js';
+import { createSettingsPanel } from './settingsPanel.js';
 import { createProgressOverlayController } from './progressOverlay.js';
 
 const GROUP_LABELS = {
@@ -756,32 +757,25 @@ function renderStudioToolbar(state) {
                 </label>
                 <button type="button" class="toolbar-button" data-action="save-state">Save</button>
                 <button type="button" class="toolbar-button" data-action="save-to-library">Save to Library</button>
-                <label class="tiny-toggle toolbar-toggle">
-                    <input id="themeToggle" type="checkbox" ${state.document.view.theme === 'dark' ? 'checked' : ''}>
-                    <span>Dark Mode</span>
-                </label>
             </div>
         </header>
     `;
 }
 
 function renderStitchToolbar(state) {
+    const isRunning = state.stitchDocument?.analysis?.status === 'running';
     return `
         <header class="toolbar">
             <div class="toolbar-cluster">
                 <button type="button" class="toolbar-button" data-action="stitch-new-project">New Stitch</button>
                 <button type="button" class="toolbar-button" data-action="stitch-add-images">Add Images</button>
-                <button type="button" class="toolbar-button" data-action="stitch-run-analysis" ${state.stitchDocument.inputs.length < 2 ? 'disabled' : ''}>Run Analysis</button>
-                <button type="button" class="toolbar-button" data-action="stitch-open-gallery" ${state.stitchDocument.candidates.length ? '' : 'disabled'}>Candidate Gallery</button>
+                <button type="button" class="toolbar-button" data-action="stitch-run-analysis" ${state.stitchDocument.inputs.length < 2 || isRunning ? 'disabled' : ''}>${isRunning ? 'Analyzing...' : 'Run Analysis'}</button>
+                <button type="button" class="toolbar-button" data-action="stitch-open-gallery" ${state.stitchDocument.candidates.length && !isRunning ? '' : 'disabled'}>Candidate Gallery</button>
             </div>
             <div class="toolbar-cluster toolbar-state-actions">
-                <button type="button" class="toolbar-button" data-action="stitch-export-current" ${state.stitchDocument.inputs.length ? '' : 'disabled'}>Export PNG</button>
-                <button type="button" class="toolbar-button" data-action="stitch-save-to-library" ${state.stitchDocument.inputs.length ? '' : 'disabled'}>Save to Library</button>
+                <button type="button" class="toolbar-button" data-action="stitch-export-current" ${state.stitchDocument.inputs.length && !isRunning ? '' : 'disabled'}>Export PNG</button>
+                <button type="button" class="toolbar-button" data-action="stitch-save-to-library" ${state.stitchDocument.inputs.length && !isRunning ? '' : 'disabled'}>Save to Library</button>
                 <button type="button" class="toolbar-button" data-action="stitch-reset-view">Fit View</button>
-                <label class="tiny-toggle toolbar-toggle">
-                    <input id="themeToggle" type="checkbox" ${state.document.view.theme === 'dark' ? 'checked' : ''}>
-                    <span>Dark Mode</span>
-                </label>
             </div>
         </header>
     `;
@@ -794,6 +788,8 @@ function renderSectionTabs(state, headerStatus = null) {
             ? 'stitch'
             : state.ui.activeSection === '3d'
                 ? '3d'
+                : state.ui.activeSection === 'settings'
+                    ? 'settings'
                 : state.ui.activeSection === 'logs'
                     ? 'logs'
                 : 'editor';
@@ -806,6 +802,7 @@ function renderSectionTabs(state, headerStatus = null) {
                 <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
                 <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
                 <button type="button" class="mode-button ${activeSection === '3d' ? 'is-active' : ''}" data-action="set-app-section" data-section="3d">3D</button>
+                <button type="button" class="mode-button ${activeSection === 'settings' ? 'is-active' : ''}" data-action="set-app-section" data-section="settings">Settings</button>
                 <button type="button" class="mode-button ${activeSection === 'logs' ? 'is-active' : ''}" data-action="set-app-section" data-section="logs">Logs</button>
             </div>
             <div class="section-header-status ${statusText ? `is-${statusTone}` : 'is-empty'}" aria-live="polite" title="${escapeHtml(statusText)}">
@@ -861,6 +858,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             <section class="app-section-panel" id="libraryPanel"></section>
             <section class="app-section-panel" id="stitchPanel"></section>
             <section class="app-section-panel" id="threedPanel"></section>
+            <section class="app-section-panel" id="settingsPanel"></section>
             <section class="app-section-panel" id="logsPanel"></section>
             <input id="imageInput" type="file" accept="image/*" hidden>
             <input id="stateInput" type="file" accept=".json,.mns.json" hidden>
@@ -901,6 +899,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         libraryPanel: root.querySelector('#libraryPanel'),
         stitchPanel: root.querySelector('#stitchPanel'),
         threedPanel: root.querySelector('#threedPanel'),
+        settingsPanel: root.querySelector('#settingsPanel'),
         logsPanel: root.querySelector('#logsPanel'),
         previewShell: root.querySelector('#previewShell'),
         previewEmpty: root.querySelector('#previewEmpty'),
@@ -984,10 +983,18 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         logger: extras.logger
     });
     refs.threedPanel.appendChild(threedPanel.root);
-    const logsPanel = createLogsPanel(refs.logsPanel, { logger: extras.logger });
+    const settingsPanel = createSettingsPanel(refs.settingsPanel, {
+        actions
+    });
+    const logsPanel = createLogsPanel(refs.logsPanel, {
+        logger: extras.logger,
+        settings: actions.getState?.()?.settings?.logs || null
+    });
     const unsubscribeLogEvents = extras.logger?.subscribeEvents?.((event) => {
         if (!event?.completed) return;
         if (event.status !== 'success' && event.status !== 'error') return;
+        const flashEffectsEnabled = actions.getState?.()?.settings?.logs?.completionFlashEffects !== false;
+        if (!flashEffectsEnabled) return;
         const activeSection = actions.getState?.()?.ui?.activeSection || latestState?.ui?.activeSection || 'editor';
         if (activeSection === 'logs') return;
         logsTabPulse = event.status === 'error' ? 'error' : 'success';
@@ -1871,6 +1878,12 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     function render(state) {
         latestState = state;
         const activeSection = state.ui.activeSection;
+        if (state.settings?.logs?.completionFlashEffects === false && logsTabPulse) {
+            if (logsTabPulseTimer) clearTimeout(logsTabPulseTimer);
+            logsTabPulse = '';
+            logsTabPulseMessage = '';
+            logsTabPulseTone = 'info';
+        }
         const isEditorActive = activeSection === 'editor';
         const hasSource = !!state.document.source.width && !!state.document.source.height;
         const processedPreview = hasProcessedPreview(state);
@@ -1883,6 +1896,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         document.documentElement.dataset.theme = state.document.view.theme === 'dark' ? 'dark' : 'light';
         renderSectionTabsSlot(state);
         applyLogsTabPulse();
+        logsPanel.setSettings?.(state.settings?.logs || null);
         refs.toolbarSlot.innerHTML = activeSection === 'editor'
             ? renderStudioToolbar(state)
             : activeSection === 'stitch'
@@ -1894,32 +1908,44 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         refs.libraryPanel.style.display = activeSection === 'library' ? 'block' : 'none';
         refs.stitchPanel.style.display = activeSection === 'stitch' ? 'block' : 'none';
         refs.threedPanel.style.display = activeSection === '3d' ? 'block' : 'none';
+        refs.settingsPanel.style.display = activeSection === 'settings' ? 'block' : 'none';
         refs.logsPanel.style.display = activeSection === 'logs' ? 'block' : 'none';
         if (activeSection !== lastActiveSection) {
             if (activeSection === 'library') {
                 libraryPanel.activate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
+                settingsPanel.deactivate();
                 logsPanel.deactivate();
             } else if (activeSection === 'stitch') {
                 libraryPanel.deactivate();
                 stitchPanel.activate();
                 threedPanel.deactivate();
+                settingsPanel.deactivate();
                 logsPanel.deactivate();
             } else if (activeSection === '3d') {
                 libraryPanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.activate();
+                settingsPanel.deactivate();
+                logsPanel.deactivate();
+            } else if (activeSection === 'settings') {
+                libraryPanel.deactivate();
+                stitchPanel.deactivate();
+                threedPanel.deactivate();
+                settingsPanel.activate();
                 logsPanel.deactivate();
             } else if (activeSection === 'logs') {
                 libraryPanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
+                settingsPanel.deactivate();
                 logsPanel.activate();
             } else {
                 libraryPanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
+                settingsPanel.deactivate();
                 logsPanel.deactivate();
             }
             lastActiveSection = activeSection;
@@ -2002,6 +2028,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         if (activeSection === '3d') {
             threedPanel.render(state);
         }
+        if (activeSection === 'settings') {
+            settingsPanel.render(state);
+        }
     }
 
     function destroy() {
@@ -2066,6 +2095,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             libraryPanel.refresh();
             threedPanel.refreshLibraryAssets?.();
         },
+        primeLibrary() {
+            libraryPanel.refresh({ forceInactive: true });
+        },
         openStitchPicker() {
             stitchPanel.openPicker?.();
         },
@@ -2102,6 +2134,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         destroy() {
             if (logsTabPulseTimer) clearTimeout(logsTabPulseTimer);
             unsubscribeLogEvents();
+            settingsPanel.destroy?.();
         }
     };
 }

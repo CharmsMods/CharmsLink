@@ -69,9 +69,9 @@ function snapshotWriteEvent(event) {
 }
 
 export function createLogEngine(options = {}) {
-    const recentLimit = Math.max(6, Math.round(Number(options.recentLimit) || 18));
+    let recentLimit = Math.max(6, Math.round(Number(options.recentLimit) || 18));
     const requestedHistoryLimit = Number(options.historyLimit);
-    const historyLimit = Number.isFinite(requestedHistoryLimit) && requestedHistoryLimit > 0
+    let historyLimit = Number.isFinite(requestedHistoryLimit) && requestedHistoryLimit > 0
         ? Math.max(recentLimit, Math.round(requestedHistoryLimit))
         : 0;
     const listeners = new Set();
@@ -287,6 +287,17 @@ export function createLogEngine(options = {}) {
         schedulePublish();
     }
 
+    function trimStoredEntries() {
+        processes.forEach((process) => {
+            if (process.entries.length > recentLimit) {
+                process.entries.splice(0, process.entries.length - recentLimit);
+            }
+            if (historyLimit > 0 && process.history.length > historyLimit) {
+                process.history.splice(0, process.history.length - historyLimit);
+            }
+        });
+    }
+
     function getSnapshot() {
         return [...processes.values()]
             .map(snapshotProcess)
@@ -328,6 +339,25 @@ export function createLogEngine(options = {}) {
         return [...header, ...lines].join('\n');
     }
 
+    function configure(nextOptions = {}) {
+        const nextRecentLimit = Object.prototype.hasOwnProperty.call(nextOptions, 'recentLimit')
+            ? Math.max(6, Math.round(Number(nextOptions.recentLimit) || recentLimit))
+            : recentLimit;
+        const requestedNextHistoryLimit = Object.prototype.hasOwnProperty.call(nextOptions, 'historyLimit')
+            ? Number(nextOptions.historyLimit)
+            : historyLimit;
+        const nextHistoryLimit = Number.isFinite(requestedNextHistoryLimit) && requestedNextHistoryLimit > 0
+            ? Math.max(nextRecentLimit, Math.round(requestedNextHistoryLimit))
+            : 0;
+        const didChange = nextRecentLimit !== recentLimit || nextHistoryLimit !== historyLimit;
+        recentLimit = nextRecentLimit;
+        historyLimit = nextHistoryLimit;
+        if (didChange) {
+            trimStoredEntries();
+            schedulePublish();
+        }
+    }
+
     return {
         write,
         info,
@@ -341,6 +371,13 @@ export function createLogEngine(options = {}) {
         getSnapshot,
         subscribe,
         subscribeEvents,
-        exportProcessText
+        exportProcessText,
+        configure,
+        getConfig() {
+            return {
+                recentLimit,
+                historyLimit
+            };
+        }
     };
 }

@@ -14,6 +14,14 @@ function ensureFactory(imported, label, selection) {
     return factory;
 }
 
+function applyModuleSearchParams(sourceUrl, targetUrl) {
+    if (!(sourceUrl instanceof URL) || !(targetUrl instanceof URL)) return targetUrl;
+    sourceUrl.searchParams.forEach((value, key) => {
+        targetUrl.searchParams.set(key, value);
+    });
+    return targetUrl;
+}
+
 export function validateEmscriptenExports(module, required = [], label = 'WASM module') {
     const missing = required.filter((name) => typeof module?.[name] !== 'function');
     if (missing.length) {
@@ -22,7 +30,7 @@ export function validateEmscriptenExports(module, required = [], label = 'WASM m
     return module;
 }
 
-export function createOptionalEmscriptenRuntimeManager({ label, variants = [], createApi }) {
+export function createOptionalEmscriptenRuntimeManager({ label, variants = [], createApi, validateApi = null }) {
     const cache = new Map();
 
     return async function loadRuntime(options = {}) {
@@ -51,10 +59,18 @@ export function createOptionalEmscriptenRuntimeManager({ label, variants = [], c
                     const baseUrl = new URL('.', moduleUrl.href);
                     const module = await factory({
                         locateFile(path) {
-                            return new URL(path, baseUrl).href;
+                            const nextUrl = new URL(path, baseUrl);
+                            applyModuleSearchParams(moduleUrl, nextUrl);
+                            return nextUrl.href;
                         }
                     });
                     const api = createApi(module, variant.selection);
+                    if (typeof validateApi === 'function') {
+                        await validateApi(api, {
+                            label,
+                            selection: variant.selection
+                        });
+                    }
                     return {
                         ok: true,
                         selection: variant.selection,

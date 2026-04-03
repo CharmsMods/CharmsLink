@@ -279,10 +279,7 @@ function normalizeItem(item = {}, index = 0) {
     return {
         ...base,
         asset,
-        material: normalizeMaterial(item.material, kind),
-        booleanCuts: (kind === 'model' || kind === 'primitive')
-            ? (Array.isArray(item.booleanCuts) ? item.booleanCuts : []).map((cut, cutIndex) => isBooleanCutGeometry(cut?.geometry) ? ({ id: String(cut.id || createId('cut')), mode: 'subtract', sourceName: String(cut.sourceName || `Cut ${cutIndex + 1}`), createdAt: round(cut.createdAt, 0, 0), geometry: clone(cut.geometry) }) : null).filter(Boolean)
-            : []
+        material: normalizeMaterial(item.material, kind)
     };
 }
 
@@ -324,6 +321,10 @@ export function createEmptyThreeDDocument() {
             fov: 50,
             near: 0.1,
             far: 2000,
+            flyMoveSpeed: 6,
+            flyLookSensitivity: 0.003,
+            gizmoScale: 1,
+            viewportHighResCap: true,
             presets: []
         },
         render: {
@@ -386,6 +387,12 @@ export function normalizeThreeDDocument(document) {
         fov: num(source.view?.fov, base.view.fov, 15, 120),
         near: num(source.view?.near, base.view.near, 0.01, 100),
         far: num(source.view?.far, base.view.far, 10, 10000),
+        flyMoveSpeed: num(source.view?.flyMoveSpeed, base.view.flyMoveSpeed, 0.25, 64),
+        flyLookSensitivity: num(source.view?.flyLookSensitivity, base.view.flyLookSensitivity, 0.0005, 0.03),
+        gizmoScale: num(source.view?.gizmoScale, base.view.gizmoScale, 0.4, 4),
+        viewportHighResCap: typeof source.view?.viewportHighResCap === 'boolean'
+            ? source.view.viewportHighResCap
+            : base.view.viewportHighResCap,
         presets: (Array.isArray(source.view?.presets) ? source.view.presets : []).map((preset, index) => normalizePreset(preset, index, base.view))
     };
     return {
@@ -444,6 +451,11 @@ export function normalizeThreeDDocument(document) {
 
 export function serializeThreeDDocument(document) {
     return clone(normalizeThreeDDocument(document));
+}
+
+export function countLegacyThreeDBooleanCuts(document) {
+    const items = Array.isArray(document?.scene?.items) ? document.scene.items : [];
+    return items.reduce((total, item) => total + (Array.isArray(item?.booleanCuts) ? item.booleanCuts.length : 0), 0);
 }
 
 export function isThreeDDocumentPayload(payload) {

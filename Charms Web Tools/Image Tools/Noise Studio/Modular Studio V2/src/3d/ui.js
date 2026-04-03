@@ -34,10 +34,6 @@ function isMaterialItem(item) {
     return item?.kind === 'model' || item?.kind === 'primitive' || item?.kind === 'image-plane';
 }
 
-function isSliceCompatibleItem(item) {
-    return item?.kind === 'model' || item?.kind === 'primitive';
-}
-
 function isTextItem(item) {
     return item?.kind === 'text';
 }
@@ -62,7 +58,7 @@ function formatDuration(durationMs = 0) {
 }
 
 function describeItemKind(item) {
-    const baseLabel = item.kind === 'light'
+    return item.kind === 'light'
         ? item.light?.lightType || 'light'
         : item.kind === 'image-plane'
             ? 'image plane'
@@ -72,9 +68,7 @@ function describeItemKind(item) {
                     ? `${item.text?.mode === 'extruded' ? '3d' : 'flat'} text`
                     : item.kind === 'shape-2d'
                         ? `${item.shape2d?.type || 'shape'} 2d`
-                : item.asset?.format || 'model';
-    const cutCount = Number(item?.booleanCuts?.length || 0);
-    return cutCount > 0 ? `${baseLabel}, ${cutCount} cut${cutCount === 1 ? '' : 's'}` : baseLabel;
+                        : item.asset?.format || 'model';
 }
 
 function formatRenderModeLabel(mode) {
@@ -445,21 +439,6 @@ export function createThreeDWorkspace(actions, store) {
                             <button type="button" class="toolbar-button" data-threed-action="reset-transform" style="flex:1;">Reset</button>
                             <button type="button" class="toolbar-button" data-threed-action="delete-item" style="flex:1;">Delete</button>
                         </div>
-                        <div data-threed-role="slice-fields" style="display:none; flex-direction:column; gap:10px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
-                            <div style="display:flex; justify-content:space-between; gap:12px;">
-                                <span>Stored Cuts</span>
-                                <strong data-threed-role="slice-count">0</strong>
-                            </div>
-                            <label style="display:flex; flex-direction:column; gap:6px;">
-                                <span>Cutter Object</span>
-                                <select class="custom-select" data-threed-role="slice-cutter"></select>
-                            </label>
-                            <div class="info-banner" style="margin:0;">Position another model or primitive where you want the subtraction, then click Slice. The cutter is captured as a snapshot, so you can move or delete it later. Reset Cuts restores the original uncut object.</div>
-                            <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
-                                <button type="button" class="secondary-button" data-threed-action="apply-slice">Slice</button>
-                                <button type="button" class="toolbar-button" data-threed-action="reset-slices">Reset Cuts</button>
-                            </div>
-                        </div>
                         <div data-threed-role="light-fields" style="display:none; flex-direction:column; gap:10px; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
                             <label style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
                                 <span>Light Color</span>
@@ -634,9 +613,6 @@ export function createThreeDWorkspace(actions, store) {
         renderJobSamples: root.querySelector('[data-threed-role="render-job-samples"]'),
         renderJobSize: root.querySelector('[data-threed-role="render-job-size"]'),
         itemName: root.querySelector('[data-threed-role="item-name"]'),
-        sliceFields: root.querySelector('[data-threed-role="slice-fields"]'),
-        sliceCount: root.querySelector('[data-threed-role="slice-count"]'),
-        sliceCutter: root.querySelector('[data-threed-role="slice-cutter"]'),
         lightFields: root.querySelector('[data-threed-role="light-fields"]'),
         lightColor: root.querySelector('[data-threed-role="light-color"]'),
         lightIntensity: root.querySelector('[data-threed-role="light-intensity"]'),
@@ -1385,7 +1361,6 @@ export function createThreeDWorkspace(actions, store) {
     let uiMode = 'edit';
     let renderDialogOpen = false;
     let renderPreviewCanvas = null;
-    let sliceCutterId = '';
     let contextMenuPath = [];
     let contextMenuAnchor = null;
     let lastContextMenuOpenAt = 0;
@@ -1817,39 +1792,6 @@ export function createThreeDWorkspace(actions, store) {
         refs.lightTarget.value = selected.light?.targetItemId || '';
     }
 
-    function getSliceCutterCandidates(state, selected) {
-        return (state.threeDDocument?.scene?.items || [])
-            .filter((item) => isSliceCompatibleItem(item) && item.id !== selected?.id);
-    }
-
-    function renderSliceOptions(state, selected) {
-        if (!isSliceCompatibleItem(selected)) {
-            refs.sliceCount.textContent = '0';
-            refs.sliceCutter.innerHTML = '<option value="">Select a solid object</option>';
-            refs.sliceCutter.value = '';
-            sliceCutterId = '';
-            return;
-        }
-
-        const candidates = getSliceCutterCandidates(state, selected);
-        refs.sliceCount.textContent = String(selected?.booleanCuts?.length || 0);
-        if (!candidates.length) {
-            refs.sliceCutter.innerHTML = '<option value="">Add another model or primitive first</option>';
-            refs.sliceCutter.value = '';
-            sliceCutterId = '';
-            return;
-        }
-
-        if (!candidates.some((item) => item.id === sliceCutterId)) {
-            sliceCutterId = candidates[0].id;
-        }
-
-        refs.sliceCutter.innerHTML = candidates.map((item) => `
-            <option value="${item.id}">${escapeHtml(item.name)}</option>
-        `).join('');
-        refs.sliceCutter.value = sliceCutterId;
-    }
-
     function renderTextFontOptions(state, selected) {
         if (!refs.textFontAsset) return;
         const fonts = state.threeDDocument?.assets?.fonts || [];
@@ -2056,15 +1998,6 @@ export function createThreeDWorkspace(actions, store) {
                 submenu: [
                     { id: 'shape-square', label: 'Square' },
                     { id: 'shape-circle', label: 'Circle' }
-                ]
-            });
-        }
-        if (isSliceCompatibleItem(item)) {
-            entries.push({
-                id: 'slice-actions',
-                label: 'Cuts',
-                submenu: [
-                    { id: 'cuts-reset', label: 'Reset Cuts' }
                 ]
             });
         }
@@ -2286,33 +2219,6 @@ export function createThreeDWorkspace(actions, store) {
         } else if (action === 'delete-item') {
             const selected = getSelectedItem(store.getState());
             if (selected) actions.deleteThreeDItem(selected.id);
-        } else if (action === 'apply-slice') {
-            const state = store.getState();
-            const selected = getSelectedItem(state);
-            const cutterId = refs.sliceCutter?.value || sliceCutterId || '';
-            const cutter = (state.threeDDocument?.scene?.items || []).find((item) => item.id === cutterId) || null;
-            if (!isSliceCompatibleItem(selected)) return;
-            if (!cutterId || !isSliceCompatibleItem(cutter)) {
-                setStatus('Add another model or primitive to use as a cutter first.', 'warning');
-                return;
-            }
-            setStatus(`Slicing ${selected.name} with ${cutter.name}...`, 'info');
-            (async () => {
-                const liveEngine = hydrateEngine();
-                await liveEngine.queueSync(store.getState().threeDDocument);
-                const snapshot = await liveEngine.captureBooleanCutSnapshot(selected.id, cutterId);
-                actions.applyThreeDBooleanSlice?.(selected.id, snapshot);
-                setStatus(`Sliced ${selected.name} with ${snapshot.sourceName}. Reset Cuts restores the original shape.`, 'success');
-            })().catch((error) => {
-                console.error(error);
-                setStatus(error?.message || 'Could not apply that slice.', 'error');
-            });
-        } else if (action === 'reset-slices') {
-            const selected = getSelectedItem(store.getState());
-            if (isSliceCompatibleItem(selected) && (selected.booleanCuts?.length || 0) > 0) {
-                actions.resetThreeDItemBooleanSlices?.(selected.id);
-                setStatus(`Reset all stored cuts on ${selected.name}.`, 'success');
-            }
         } else if (action === 'reset-camera') {
             actions.resetThreeDCamera?.();
         } else if (action === 'save-camera-preset') {
@@ -2365,7 +2271,7 @@ export function createThreeDWorkspace(actions, store) {
                 closeContextMenu();
                 return;
             }
-            if (entry === 'material-preset' || entry === 'text-actions' || entry === 'shape-actions' || entry === 'slice-actions') {
+            if (entry === 'material-preset' || entry === 'text-actions' || entry === 'shape-actions') {
                 contextMenuPath = contextMenuPath[0] === entry ? [] : [entry];
                 renderContextMenus(state);
                 return;
@@ -2399,7 +2305,6 @@ export function createThreeDWorkspace(actions, store) {
             } else if (entry === 'text-detach') actions.detachThreeDTextSurface?.(item.id);
             else if (entry === 'shape-square') actions.updateThreeDShape?.(item.id, { type: 'square' });
             else if (entry === 'shape-circle') actions.updateThreeDShape?.(item.id, { type: 'circle' });
-            else if (entry === 'cuts-reset') actions.resetThreeDItemBooleanSlices?.(item.id);
         }
     });
 
@@ -2727,10 +2632,6 @@ export function createThreeDWorkspace(actions, store) {
             actions.updateThreeDLight(selected.id, { targetItemId: event.target.value || null });
         }
     });
-    refs.sliceCutter.addEventListener('change', (event) => {
-        sliceCutterId = event.target.value || '';
-    });
-
     refs.materialPreset.addEventListener('change', (event) => {
         const selected = getSelectedItem(store.getState());
         if (isMaterialItem(selected)) {
@@ -3034,6 +2935,13 @@ export function createThreeDWorkspace(actions, store) {
     function hydrateEngine() {
         if (engine) return engine;
         engine = new ThreeDEngine(refs.canvasContainer);
+        engine.onAssetPipelineMessage = (payload) => {
+            logThreeD(payload?.level || 'info', payload?.processId || '3d.assets', payload?.message || '', {
+                dedupeKey: payload?.dedupeKey,
+                dedupeWindowMs: payload?.dedupeWindowMs
+            });
+        };
+        engine.reportCompressedAssetPipelineStatus?.();
         engine.onSelectionChanged = (itemId) => {
             previewTransform = null;
             closeContextMenu();
@@ -3278,13 +3186,6 @@ export function createThreeDWorkspace(actions, store) {
                 refs.lightTargetFields.style.display = 'none';
             }
 
-            const selectedCanSlice = isSliceCompatibleItem(selected);
-            const sliceCandidates = selectedCanSlice ? getSliceCutterCandidates(state, selected) : [];
-            const hasSliceCandidates = sliceCandidates.length > 0;
-            const hasStoredCuts = (selected?.booleanCuts?.length || 0) > 0;
-            refs.sliceFields.style.display = selectedCanSlice ? 'flex' : 'none';
-            renderSliceOptions(state, selected);
-
             const showMaterialFields = isMaterialItem(selected);
             refs.materialFields.style.display = showMaterialFields ? 'flex' : 'none';
             refs.emissiveFields.style.display = showMaterialFields && selectedMaterial?.preset === 'emissive' ? 'flex' : 'none';
@@ -3405,12 +3306,6 @@ export function createThreeDWorkspace(actions, store) {
                     node.disabled = renderLocked || !hasSelection || selectionLocked;
                 });
             });
-            root.querySelectorAll('[data-threed-action="apply-slice"]').forEach((node) => {
-                node.disabled = renderLocked || selectionLocked || !selectedCanSlice || !hasSliceCandidates;
-            });
-            root.querySelectorAll('[data-threed-action="reset-slices"]').forEach((node) => {
-                node.disabled = renderLocked || selectionLocked || !selectedCanSlice || !hasStoredCuts;
-            });
             ['upload-texture', 'clear-texture'].forEach((actionName) => {
                 root.querySelectorAll(`[data-threed-action="${actionName}"]`).forEach((node) => {
                     node.disabled = renderLocked || selectionLocked || !selectedIsMaterial;
@@ -3423,7 +3318,6 @@ export function createThreeDWorkspace(actions, store) {
             refs.lightColor.disabled = renderLocked || selectionLocked || !selectedIsLight;
             refs.lightIntensity.disabled = renderLocked || selectionLocked || !selectedIsLight;
             refs.lightTarget.disabled = renderLocked || selectionLocked || !lightSupportsTarget;
-            refs.sliceCutter.disabled = renderLocked || selectionLocked || !selectedCanSlice || !hasSliceCandidates;
             refs.itemName.disabled = renderLocked || selectionLocked || !hasSelection;
             [...transformInputs.position, ...transformInputs.rotation, ...transformInputs.scale].forEach((input) => {
                 input.disabled = renderLocked || selectionLocked || !hasSelection;

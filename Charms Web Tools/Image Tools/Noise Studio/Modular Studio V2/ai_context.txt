@@ -2314,3 +2314,348 @@ Current Library UI integration behavior:
 12. `scripts/build-wasm.mjs`
 13. `native/editor-wasm/editor_kernels.cpp`
 14. `native/library-wasm/library_codec.cpp`
+
+## 2026-04-02: WASM finalization + 3D cut removal pass
+
+### Worker and WASM cache/versioning
+
+- `src/appAssetVersion.js` now uses `2026-04-02-wasm-finalization-2`
+- `src/main.js` now appends that shared asset version token to worker URLs
+- the WASM runtime wrappers in `src/wasm/` already use versioned module URLs, so worker scripts and `.mjs`/`.wasm` shims now roll together after updates
+
+### Editor and Library WASM hardening state
+
+- `src/wasm/editorRuntime.js` and `src/wasm/libraryRuntime.js` already run small self-tests before marking the runtime usable
+- `src/workers/tasks/editor.js` and `src/workers/tasks/appLibrary.js` now report explicit backend selection and fallback reasons instead of silently dropping to JS
+- backend reporting now consistently distinguishes:
+  - `simd`
+  - `baseline`
+  - `js-fallback`
+
+### Secure Library export/import behavior
+
+- `src/library/secureTransfer.js` is now the single shared source of truth for secure export/import packaging logic
+- secure export/import now runs as a two-path worker pipeline:
+  - fast path: worker + WASM codec when available
+  - compatibility path: worker + JS/native codec
+- `src/ui/libraryPanel.js` now implements `Ask Before Fallback`
+  - if the fast path is unavailable, self-test fails, payload size is too large, or the fast path throws, the UI offers a compatibility rerun instead of failing immediately
+  - if the user declines fallback, the operation cancels cleanly without being logged as a hard failure
+- new secure exports are single-copy only
+- secure imports remain backward-compatible with older duplicate-copy exports
+- shared secure export trimming now strips transient preview/render data before compression/encryption/base64 packaging
+
+### Library export/import logging
+
+- secure Library export/import now logs stage-level progress from the worker, including:
+  - bundle normalization
+  - JSON size estimate
+  - compressed size
+  - encrypted size
+  - base64 start/completion
+  - fallback prompt shown / accepted / declined
+
+### 3D cut feature status
+
+- the old 3D object-cutting / subtraction feature has been removed from the active app
+- removed from:
+  - the 3D inspector UI
+  - the 3D context/selection menu actions
+  - the active Three.js engine boolean/CSG path
+  - the import map entry for `three-bvh-csg`
+- old saved scenes can still be loaded, but `normalizeThreeDDocument()` now drops legacy `booleanCuts`
+- when a Library-loaded 3D scene loses stored cuts on restore, the user now gets a warning notice/log entry explaining that 3D cuts are no longer supported
+
+### 3D compressed asset loading
+
+- `src/3d/engine.js` now initializes local vendored `DRACOLoader` and `KTX2Loader`
+- vendored decoder/transcoder assets now live under:
+  - `src/vendor/three/addons/loaders/DRACOLoader.js`
+  - `src/vendor/three/addons/loaders/KTX2Loader.js`
+  - `src/vendor/three/addons/utils/WorkerPool.js`
+  - `src/vendor/three/addons/libs/draco/*`
+  - `src/vendor/three/addons/libs/basis/*`
+  - `src/vendor/three/addons/libs/ktx-parse.module.js`
+  - `src/vendor/three/addons/libs/zstddec.module.js`
+- current 3D decoder behavior:
+  - DRACO availability is detected during engine init
+  - KTX2 availability is detected against the active renderer
+  - the 3D UI logs decoder readiness once when the engine hydrates
+  - if a model actually uses `KHR_draco_mesh_compression` or `KHR_texture_basisu`, the 3D log stream reports that compressed path usage
+
+### Current 3D boundaries after this pass
+
+- still main-thread:
+  - Three.js scene hydration
+  - viewport rendering
+  - path tracing
+  - final render export
+- now removed instead of optimized:
+  - boolean cut/subtraction workflows
+- now improved for load-time performance:
+  - compressed glTF decode path via local DRACO / KTX2 support
+
+### Settings tab architecture
+
+- a top-level `Settings` section now exists in the universal tab bar, immediately to the left of `Logs`
+- the active settings tab category is tracked in app UI state as `ui.settingsCategory`
+- supported Settings categories:
+  - `general`
+  - `library`
+  - `editor`
+  - `stitch`
+  - `3d`
+  - `logs`
+- `Stitch` is intentionally a placeholder-only category in this phase
+
+### Settings persistence and schema
+
+- app settings now live in a dedicated settings domain, not inside project documents
+- persisted storage key:
+  - `noise-studio:app-settings:v1`
+- schema/version source:
+  - `src/settings/defaults.js`
+  - `src/settings/schema.js`
+  - `src/settings/persistence.js`
+- settings are normalized before use and persisted back to `localStorage` after every accepted change
+- settings export/import uses a dedicated normalized document shape:
+  - `kind: "noise-studio-settings"`
+  - `version`
+  - `exportedAt`
+  - `exportedFrom`
+  - `settings`
+- imported settings files can now be parsed from raw JSON text as well as pre-parsed objects
+
+### Settings precedence rules
+
+- app settings are authoritative over the runtime defaults they own
+- Editor app settings override the relevant imported/saved Editor view JSON values after normalization:
+  - `highQualityPreview`
+  - `hoverCompareEnabled`
+  - `isolateActiveLayerChain`
+  - `layerPreviewsOpen`
+  - theme
+- new `bgPatcher` layer instances also inherit the configured transparency checker tone
+- Stitch currently only inherits the app-wide theme from Settings
+- 3D settings are split into two layers:
+  - app preference overrides applied to current/live 3D view state
+  - defaults for new scenes and explicit “apply defaults to current scene” actions
+- Logs settings apply to the logging engine and Logs UI, not to saved project data
+
+### Settings-driven runtime behavior
+
+- `general.theme`
+  - removed the old dark-mode toggle from the Editor/Stitch toolbar
+  - now drives site theme through the Settings domain
+- `general.saveImageOnSave`
+  - Editor state JSON save can now also save a companion processed PNG
+  - 3D scene JSON save can now also save a companion preview PNG
+- `general.maxBackgroundWorkers`
+  - clamps the existing worker broker through runtime configuration
+- `library.autoLoadOnStartup`
+  - primes the Library in the background on startup without forcing section focus
+- `library.defaultViewLayout`
+  - drives Library grid/list default rendering
+- `library.defaultSortKey` / `library.defaultSortDirection`
+  - drive Library default sort state
+- `library.assetPreviewQuality`
+  - drives the 3D asset detail preview quality
+- `library.secureExportByDefault`
+  - preselects secure export in the Library export workflow
+- `library.requireTagOnImport`
+  - injects a tag-selection modal into Library import flows before saving incoming projects
+- `editor.autoExtractPaletteOnLoad`
+  - triggers palette extraction automatically after opening an image in the Editor
+- `threeD.preferences.*`
+  - now mirror the active 3D viewport/navigation/helper/snapping preferences
+- `threeD.defaults.*`
+  - now drive new-scene defaults and the explicit apply-defaults-to-current-scene action
+- `logs.recentLimit` / `logs.historyLimit`
+  - reconfigure the shared log engine live
+- `logs.autoClearSuccessMs`
+  - schedules timed cleanup of successful process cards
+- `logs.maxUiCards`
+  - prunes the oldest non-active process cards when the configured cap is exceeded
+- `logs.completionFlashEffects`
+  - now gates both the Logs-tab completion wash and the hidden Logs-button pulse
+- `logs.levelFilter`
+  - filters the Logs panel to all messages or warnings/errors only
+- `logs.compactMessages`
+  - toggles identical-consecutive message compaction in the Logs panel UI
+
+### Settings diagnostics
+
+- the Settings tab now surfaces a diagnostics block driven by:
+  - detected CPU core count
+  - worker capability snapshot
+  - asset/app version
+  - applied worker limit
+  - storage estimate
+- storage estimate uses `navigator.storage.estimate()` when available
+- storage-pressure warnings now compare usage ratio against the configured Library threshold and emit both a notice and a settings log warning
+
+### Settings maintenance workflows
+
+- Library maintenance is now exposed through the Settings tab and logged under `settings.library`
+- implemented maintenance actions:
+  - purge rendered previews from saved Editor Library projects
+  - heal missing Library previews / derived assets
+  - cleanup orphaned project-linked assets
+  - clear cached project/asset previews
+  - wipe Library projects
+  - wipe Assets Library entries
+- these workflows:
+  - log progress and completion
+  - yield cooperatively so they do not hard-freeze the UI
+  - reset Library backfill completion flags when caches/previews are purged so repair actions can rebuild data correctly
+
+## 2026-04-03 Stitch rehabilitation pass
+
+### Stitch worker ownership and runtime boundaries
+
+- Stitch now uses two broker-managed worker domains:
+  - `stitch`
+    - `prepare-input-files`
+    - `prepare-analysis-inputs`
+    - `classify-scene-mode`
+    - `analyze-screenshot`
+    - `build-candidate-previews`
+  - `stitch-opencv`
+    - `self-test-photo-runtime`
+    - `analyze-photo`
+- the OpenCV photo path is now broker-managed through `src/workers/stitchOpencv.worker.js`
+- `stitch-opencv` is intentionally a `classic` worker domain because the vendored OpenCV runtime still boots through `importScripts(...)`
+- the classic broker adapter loads `src/stitch/opencv-worker.js` with the shared asset-version query string so worker/runtime cache busting matches the rest of the site
+- the OpenCV worker still exists as a standalone runtime bridge, but the production Stitch path now goes through the shared broker
+
+### Stitch runtime-only state
+
+- `stitchDocument.analysis` now has runtime-only fields:
+  - `progressMessage`
+  - `runId`
+- `progressMessage`
+  - is the only field used for live progress/status text during a run
+  - is not persisted
+- `runId`
+  - is incremented per analysis run so stale results can be ignored cleanly
+  - is not persisted
+- `analysis.warning`
+  - is now reserved for actual warnings only
+  - is no longer reused as a progress transport
+
+### Stitch invalidation and stale-result rules
+
+- Stitch analysis is invalidated on:
+  - input add
+  - input remove
+  - explicit rerun
+  - analysis-setting changes in the Stitch workspace
+- invalidation clears:
+  - candidates
+  - active candidate id
+  - gallery-open state
+  - runtime progress text
+  - backend/runtime diagnostics for the previous run
+  - preview URLs via the existing preview cleanup path
+- preview generation remains brokered and replaceable through `stitch.build-candidate-previews`
+
+### Stitch logs and process IDs
+
+- Stitch now uses dedicated process IDs:
+  - `stitch.import`
+  - `stitch.analysis`
+  - `stitch.preview`
+  - `stitch.export`
+  - `stitch.settings`
+  - `stitch.worker`
+- `stitch.import`
+  - input file preparation / load
+- `stitch.analysis`
+  - analysis start, progress, backend choice, and final state
+- `stitch.preview`
+  - candidate preview generation
+- `stitch.export`
+  - Stitch PNG export
+- `stitch.settings`
+  - live Stitch setting changes and apply-defaults actions
+- `stitch.worker`
+  - OpenCV runtime probe / readiness / detector details
+
+### Stitch settings precedence
+
+- `settings.stitch` is now real and split into:
+  - `defaults`
+  - `diagnostics`
+- `settings.stitch.defaults.*`
+  - apply to new Stitch documents
+  - apply to the explicit “Apply Defaults To Current Stitch Project” action
+  - do not silently mutate loaded/imported/current Stitch projects just because app settings changed
+- `settings.stitch.diagnostics.*`
+  - are read-only runtime diagnostics
+  - are refreshed by manual probe and by analysis/runtime results
+- current Stitch workspace controls remain the source of truth for the active project during editing
+
+### Stitch settings UI and diagnostics
+
+- the Settings tab Stitch category is now implemented
+- it exposes persisted defaults for:
+  - scene mode
+  - blend mode
+  - warp mode
+  - mesh density
+  - warp distribution
+  - analysis size
+  - full-resolution analysis
+  - feature detector
+  - max features
+  - match ratio
+  - RANSAC iterations
+  - inlier threshold
+  - max candidates
+- it also exposes runtime diagnostics for:
+  - worker availability
+  - WASM availability
+  - runtime availability
+  - supported detectors
+  - last runtime selection
+  - last fallback reason
+- the Settings tab also adds Stitch-specific actions:
+  - `Apply Defaults To Current Stitch Project`
+  - `Probe Photo Runtime`
+
+### Stitch UI behavior changes
+
+- the live Stitch workspace now:
+  - shows `analysis.progressMessage` while running
+  - keeps `analysis.warning` for actual warnings only
+  - disables mutation-heavy actions during a running analysis:
+    - candidate selection
+    - reorder / remove
+    - lock / visibility toggles
+    - placement edits
+    - reset candidate / reset selected
+    - export / save-to-library
+  - blocks viewport dragging while analysis is running
+- the feature-detector controls in both the Stitch tab and the Settings tab now disable `SIFT` unless the OpenCV runtime reports SIFT support
+
+### Stitch diagnostics / probe behavior
+
+- manual and analysis-driven runtime sync now update `settings.stitch.diagnostics`
+- runtime readiness is based on:
+  - worker availability
+  - WASM availability
+  - OpenCV runtime load success
+  - homography support being present in the loaded runtime
+- optical flow support is still tracked by the runtime summary, but homography availability is treated as the minimum requirement for photo-mode readiness
+
+### Stitch export and regression matrix
+
+- Stitch PNG export now logs through `stitch.export` and records elapsed time on success
+- added regression checklist file:
+  - `Plan Files/Stitch Regression Matrix.md`
+- the matrix covers:
+  - screenshot-only routing
+  - easy photo pair
+  - hard photo pair
+  - weak-overlap failure set
+  - mixed auto-mode routing

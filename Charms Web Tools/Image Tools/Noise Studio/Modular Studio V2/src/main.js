@@ -12,7 +12,6 @@ import {
     applyCandidateToDocument,
     coerceStitchSettingValue,
     computeCompositeBounds,
-    createEmptyStitchDocument,
     createStitchInputId,
     getPlacementByInput,
     normalizeStitchDocument,
@@ -24,6 +23,7 @@ import {
 import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
 import {
+    countLegacyThreeDBooleanCuts,
     createEmptyThreeDDocument,
     createThreeDAssetId,
     createThreeDCameraPresetId,
@@ -48,8 +48,14 @@ import { createBootstrapMetrics } from './perf/bootstrapMetrics.js';
 import { createBootShell } from './ui/bootShell.js';
 import { computeAnalysisVisualsJs, computeDiffPreviewJs, extractPaletteFromFileJs } from './editor/backgroundCompute.js';
 import { extractPaletteFromImageSource } from './editor/palette.js';
+import { APP_ASSET_VERSION, withAssetVersion } from './appAssetVersion.js';
+import { createDefaultAppSettings } from './settings/defaults.js';
+import { applyEditorSettingsToDocument, applyEditorSettingsToLayerInstance, applyStitchSettingsToDocument, applyThemeToStitchDocument, applyThreeDSettingsToDocument, createSettingsDrivenStitchDocument, createSettingsDrivenThreeDDocument } from './settings/apply.js';
+import { loadPersistedAppSettings, persistAppSettings, buildSettingsExportPayload, parseImportedSettingsPayload } from './settings/persistence.js';
+import { normalizeAppSettings, normalizeSettingsCategory } from './settings/schema.js';
 import {
     buildSecureLibraryExportRecord as buildSecureLibraryExportRecordData,
+    createSecureLibraryCompatibilityError,
     resolveSecureLibraryImportRecord as resolveSecureLibraryImportRecordData
 } from './library/secureTransfer.js';
 
@@ -386,10 +392,6 @@ function createThreeDPrimitiveItem(primitiveType = 'cube') {
         },
         material: createDefaultThreeDMaterial()
     };
-}
-
-function isThreeDBooleanCompatibleItem(item) {
-    return item?.kind === 'model' || item?.kind === 'primitive';
 }
 
 function getThreeDCanvasSpawn(view = {}) {
@@ -1077,9 +1079,37 @@ function appendStitchInputs(documentState, newInputs) {
         analysis: {
             ...normalized.analysis,
             status: 'idle',
+            progressMessage: '',
+            runId: 0,
             warning: normalized.inputs.length
                 ? 'Run the analysis again to include the newly added images.'
                 : '',
+            error: '',
+            backend: '',
+            diagnostics: [],
+            previews: {}
+        }
+    });
+}
+
+function invalidateStitchAnalysis(documentState, options = {}) {
+    const normalized = normalizeStitchDocument(documentState);
+    const nextWarning = typeof options.warning === 'string' ? options.warning : normalized.analysis.warning;
+    return normalizeStitchDocument({
+        ...normalized,
+        candidates: [],
+        activeCandidateId: null,
+        workspace: {
+            ...normalized.workspace,
+            galleryOpen: false,
+            alternativesOpen: normalized.workspace.alternativesOpen !== false
+        },
+        analysis: {
+            ...normalized.analysis,
+            status: 'idle',
+            progressMessage: '',
+            runId: 0,
+            warning: nextWarning,
             error: '',
             backend: '',
             diagnostics: [],
@@ -1156,7 +1186,7 @@ function createEmptyBatchState() {
 function getInitialActiveSection() {
     try {
         const section = new URL(window.location.href).searchParams.get('section');
-        if (section === 'library' || section === 'stitch' || section === '3d' || section === 'logs') return section;
+        if (section === 'library' || section === 'stitch' || section === '3d' || section === 'settings' || section === 'logs') return section;
         return 'editor';
     } catch (_error) {
         return 'editor';
@@ -1169,6 +1199,7 @@ function syncSectionUrl(section) {
         if (section === 'library') url.searchParams.set('section', 'library');
         else if (section === 'stitch') url.searchParams.set('section', 'stitch');
         else if (section === '3d') url.searchParams.set('section', '3d');
+        else if (section === 'settings') url.searchParams.set('section', 'settings');
         else if (section === 'logs') url.searchParams.set('section', 'logs');
         else url.searchParams.delete('section');
         window.history.replaceState(null, '', url);
@@ -1177,9 +1208,10 @@ function syncSectionUrl(section) {
     }
 }
 
-function createInitialState() {
+function createInitialState(settings = createDefaultAppSettings()) {
+    const normalizedSettings = normalizeAppSettings(settings);
     return {
-        document: {
+        document: applyEditorSettingsToDocument({
             version: 'mns/v2',
             kind: 'document',
             mode: 'studio',
@@ -1191,9 +1223,9 @@ function createInitialState() {
             view: createDefaultViewState(),
             export: { keepFolderStructure: false, playFps: 10 },
             batch: createEmptyBatchState()
-        },
-        stitchDocument: createEmptyStitchDocument('light'),
-        threeDDocument: createEmptyThreeDDocument(),
+        }, normalizedSettings),
+        stitchDocument: createSettingsDrivenStitchDocument(normalizedSettings),
+        threeDDocument: createSettingsDrivenThreeDDocument(normalizedSettings),
             ui: {
                 activeSection: getInitialActiveSection(),
                 compareOpen: false,
@@ -1201,8 +1233,10 @@ function createInitialState() {
                 jsonCompareResults: [],
                 jsonCompareView: 'grid',
                 jsonCompareIndex: 0,
-                loadImageOnOpen: true
+                loadImageOnOpen: true,
+                settingsCategory: 'general'
             },
+            settings: normalizedSettings,
             notice: null,
             eyedropperTarget: null
         };
@@ -1304,16 +1338,36 @@ async function extractPaletteFromFileFallback(file, count) {
 }
 
 async function buildSecureLibraryExportRecordFallback(bundle, options = {}) {
+    if (String(options.compatibilityMode || '').toLowerCase() !== 'js') {
+        throw createSecureLibraryCompatibilityError(
+            'The secure Library export fast path is unavailable without the background worker runtime.',
+            {
+                stage: 'runtime-init',
+                fallbackReason: 'Library worker or WASM runtime was unavailable.',
+                compatibilityMode: 'js'
+            }
+        );
+    }
     const startedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
-    const record = await buildSecureLibraryExportRecordData(bundle, options);
+    const recordPackage = await buildSecureLibraryExportRecordData(bundle, options);
     const taskMs = Math.max(0, (typeof performance?.now === 'function' ? performance.now() : Date.now()) - startedAt);
     return {
-        record,
+        ...recordPackage,
         runtime: createJsFallbackRuntime(taskMs, 'Library worker or WASM runtime was unavailable.')
     };
 }
 
-async function resolveSecureLibraryImportRecordFallback(parsed, passphrase) {
+async function resolveSecureLibraryImportRecordFallback(parsed, passphrase, options = {}) {
+    if (String(options.compatibilityMode || '').toLowerCase() !== 'js') {
+        throw createSecureLibraryCompatibilityError(
+            'The secure Library import fast path is unavailable without the background worker runtime.',
+            {
+                stage: 'runtime-init',
+                fallbackReason: 'Library worker or WASM runtime was unavailable.',
+                compatibilityMode: 'js'
+            }
+        );
+    }
     const startedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
     const resolved = await resolveSecureLibraryImportRecordData(parsed, passphrase);
     const taskMs = Math.max(0, (typeof performance?.now === 'function' ? performance.now() : Date.now()) - startedAt);
@@ -1328,16 +1382,29 @@ window.addEventListener('DOMContentLoaded', async () => {
     const bootShell = createBootShell(root, {
         detail: 'Preparing the app shell...'
     });
+    let activeSettings = loadPersistedAppSettings({
+        diagnostics: {
+            detectedCpuCores: Math.max(0, Math.round(Number(globalThis.navigator?.hardwareConcurrency) || 0)),
+            assetVersion: APP_ASSET_VERSION
+        }
+    });
+    document.documentElement.dataset.theme = activeSettings.general.theme === 'dark' ? 'dark' : 'light';
     const bootMetrics = createBootstrapMetrics();
     const logger = createLogEngine({
-        recentLimit: 18,
-        historyLimit: 0
+        recentLimit: activeSettings.logs.recentLimit,
+        historyLimit: activeSettings.logs.historyLimit
     });
     const PROCESS_LABELS = {
         'app.bootstrap': 'App Startup',
         'app.performance': 'Performance',
         'app.navigation': 'Navigation',
         'app.notice': 'Notices',
+        'settings.general': 'Settings',
+        'settings.library': 'Library Settings',
+        'settings.editor': 'Editor Settings',
+        'settings.stitch': 'Stitch Settings',
+        'settings.3d': '3D Settings',
+        'settings.logs': 'Logs Settings',
         'editor.files': 'Editor Files',
         'editor.export': 'Editor Export',
         'library.projects': 'Library Projects',
@@ -1346,7 +1413,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         'library.import': 'Library Import',
         'library.export': 'Library Export',
         'stitch.workspace': 'Stitch Workspace',
+        'stitch.import': 'Stitch Import',
         'stitch.analysis': 'Stitch Analysis',
+        'stitch.preview': 'Stitch Preview',
+        'stitch.export': 'Stitch Export',
+        'stitch.settings': 'Stitch Settings',
+        'stitch.worker': 'Stitch Runtime',
         '3d.workspace': '3D Workspace',
         '3d.assets': '3D Assets',
         '3d.render': '3D Render'
@@ -1362,6 +1434,201 @@ window.addEventListener('DOMContentLoaded', async () => {
     let paletteExtractionImage = null;
     let paletteExtractionOwner = null;
     let stitchAnalysisToken = 0;
+    let lastPersistedSettings = JSON.stringify(activeSettings);
+    const logAutoClearTimers = new Map();
+
+    function buildSettingsDiagnostics(overrides = {}) {
+        const detectedCpuCores = Math.max(0, Math.round(Number(workerCapabilities?.hardwareConcurrency || globalThis.navigator?.hardwareConcurrency) || 0));
+        const requestedWorkerLimit = Number(activeSettings?.general?.maxBackgroundWorkers || 0);
+        const appliedWorkerLimit = requestedWorkerLimit > 0
+            ? requestedWorkerLimit
+            : Number(backgroundTasks?.getConfig?.().maxConcurrentTasks || 0);
+        return {
+            detectedCpuCores,
+            workerCapabilities: { ...(workerCapabilities || {}) },
+            assetVersion: APP_ASSET_VERSION,
+            workerLimitApplied: appliedWorkerLimit,
+            storageEstimate: overrides.storageEstimate ?? activeSettings?.diagnostics?.storageEstimate ?? null
+        };
+    }
+
+    function buildStitchSettingsDiagnostics(overrides = {}) {
+        const current = activeSettings?.stitch?.diagnostics || createDefaultAppSettings().stitch.diagnostics;
+        return {
+            workerAvailable: overrides.workerAvailable ?? current.workerAvailable ?? !!workerCapabilities?.worker,
+            wasmAvailable: overrides.wasmAvailable ?? current.wasmAvailable ?? !!workerCapabilities?.wasm,
+            runtimeAvailable: overrides.runtimeAvailable ?? current.runtimeAvailable ?? false,
+            supportedDetectors: Array.isArray(overrides.supportedDetectors)
+                ? overrides.supportedDetectors
+                : (Array.isArray(current.supportedDetectors) ? current.supportedDetectors : []),
+            lastRuntimeSelection: String(overrides.lastRuntimeSelection ?? current.lastRuntimeSelection ?? ''),
+            lastFallbackReason: String(overrides.lastFallbackReason ?? current.lastFallbackReason ?? '')
+        };
+    }
+
+    function syncStitchSettingsDiagnostics(overrides = {}, meta = {}) {
+        return updateSettingsState((current) => ({
+            ...current,
+            stitch: {
+                ...(current.stitch || {}),
+                diagnostics: buildStitchSettingsDiagnostics(overrides)
+            }
+        }), {
+            ...meta,
+            render: false,
+            renderStitch: false,
+            skipViewRender: meta.skipViewRender ?? false
+        });
+    }
+
+    function clearLogAutoClearTimer(processId) {
+        const timer = logAutoClearTimers.get(processId);
+        if (!timer) return;
+        clearTimeout(timer);
+        logAutoClearTimers.delete(processId);
+    }
+
+    function scheduleLogAutoClear(processId, delayMs) {
+        clearLogAutoClearTimer(processId);
+        if (!(delayMs > 0) || !processId) return;
+        const timer = setTimeout(() => {
+            logAutoClearTimers.delete(processId);
+            const process = logger.getSnapshot().find((entry) => entry.id === processId);
+            if (process?.status === 'success') {
+                logger.clearProcess(processId);
+            }
+        }, delayMs);
+        logAutoClearTimers.set(processId, timer);
+    }
+
+    function enforceLogCardLimit(limit = activeSettings?.logs?.maxUiCards || 0) {
+        const maxCards = Math.max(0, Math.round(Number(limit) || 0));
+        if (!(maxCards > 0)) return;
+        const snapshot = logger.getSnapshot();
+        if (snapshot.length <= maxCards) return;
+        const removable = snapshot
+            .filter((process) => process.status !== 'active')
+            .sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+        let overflow = snapshot.length - maxCards;
+        for (const process of removable) {
+            if (overflow <= 0) break;
+            logger.clearProcess(process.id);
+            clearLogAutoClearTimer(process.id);
+            overflow -= 1;
+        }
+    }
+
+    function syncLogHousekeeping() {
+        const snapshot = logger.getSnapshot();
+        const processIds = new Set(snapshot.map((process) => process.id));
+        [...logAutoClearTimers.keys()].forEach((processId) => {
+            if (!processIds.has(processId)) {
+                clearLogAutoClearTimer(processId);
+            }
+        });
+        const autoClearMs = Math.max(0, Number(activeSettings?.logs?.autoClearSuccessMs || 0));
+        snapshot.forEach((process) => {
+            if (process.status === 'success' && autoClearMs > 0) {
+                scheduleLogAutoClear(process.id, autoClearMs);
+            } else {
+                clearLogAutoClearTimer(process.id);
+            }
+        });
+        enforceLogCardLimit(activeSettings?.logs?.maxUiCards || 0);
+    }
+
+    logger.subscribeEvents?.((event) => {
+        if (!event?.processId) return;
+        if (event.status === 'success') {
+            const autoClearMs = Math.max(0, Number(activeSettings?.logs?.autoClearSuccessMs || 0));
+            if (autoClearMs > 0) {
+                scheduleLogAutoClear(event.processId, autoClearMs);
+            }
+        } else {
+            clearLogAutoClearTimer(event.processId);
+        }
+        enforceLogCardLimit(activeSettings?.logs?.maxUiCards || 0);
+    });
+
+    function normalizeSettingsForState(nextSettings, overrides = {}) {
+        return normalizeAppSettings(nextSettings, {
+            diagnostics: buildSettingsDiagnostics(overrides),
+            stitchDiagnostics: buildStitchSettingsDiagnostics(overrides.stitchDiagnostics || {})
+        });
+    }
+
+    function cloneSettingsValue(value) {
+        return JSON.parse(JSON.stringify(value));
+    }
+
+    function updateSettingsPathValue(settings, path, value) {
+        const segments = String(path || '').split('.').filter(Boolean);
+        if (!segments.length) return settings;
+        const next = cloneSettingsValue(settings);
+        let cursor = next;
+        for (let index = 0; index < segments.length - 1; index += 1) {
+            const segment = segments[index];
+            cursor[segment] = cursor[segment] && typeof cursor[segment] === 'object'
+                ? { ...cursor[segment] }
+                : {};
+            cursor = cursor[segment];
+        }
+        cursor[segments[segments.length - 1]] = value;
+        return next;
+    }
+
+    function applySettingsToLiveState(state, nextSettings) {
+        const nextLayerStack = (state?.document?.layerStack || []).map((instance) => applyEditorSettingsToLayerInstance(instance, nextSettings));
+        return {
+            ...state,
+            settings: nextSettings,
+            document: applyEditorSettingsToDocument({
+                ...state.document,
+                layerStack: nextLayerStack
+            }, nextSettings),
+            stitchDocument: applyStitchSettingsToDocument(state.stitchDocument, nextSettings, 'current'),
+            threeDDocument: applyThreeDSettingsToDocument(state.threeDDocument, nextSettings, 'current')
+        };
+    }
+
+    function syncSettingsPersistence(nextSettings) {
+        const serialized = JSON.stringify(nextSettings);
+        if (serialized === lastPersistedSettings) return;
+        persistAppSettings(nextSettings);
+        lastPersistedSettings = serialized;
+    }
+
+    function applySettingsRuntime(nextSettings) {
+        logger.configure?.({
+            recentLimit: nextSettings.logs.recentLimit,
+            historyLimit: nextSettings.logs.historyLimit
+        });
+        backgroundTasks?.configure?.({
+            maxConcurrentTasks: nextSettings.general.maxBackgroundWorkers > 0
+                ? nextSettings.general.maxBackgroundWorkers
+                : 0
+        });
+        document.documentElement.dataset.theme = nextSettings.general.theme === 'dark' ? 'dark' : 'light';
+        syncLogHousekeeping();
+    }
+
+    function updateSettingsState(mutator, meta = {}) {
+        const baseSettings = store ? store.getState().settings : activeSettings;
+        const proposed = typeof mutator === 'function' ? mutator(baseSettings) : mutator;
+        const normalized = normalizeSettingsForState(proposed, meta.diagnostics || {});
+        activeSettings = normalized;
+        applySettingsRuntime(normalized);
+        if (store) {
+            store.setState((state) => applySettingsToLiveState(state, normalized), {
+                render: meta.render ?? false,
+                renderStitch: meta.renderStitch ?? false,
+                skipViewRender: meta.skipViewRender ?? false
+            });
+        }
+        syncSettingsPersistence(normalized);
+        return normalized;
+    }
+
     bootMetrics.mark('dom-content-loaded', 'DOMContentLoaded fired.');
 
     function setEditorProgress(payload = null) {
@@ -1470,7 +1737,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     function registerWorkerDomains() {
         if (!backgroundTasks) return;
         backgroundTasks.registerDomain('app-library', {
-            workerUrl: new URL('./workers/appLibrary.worker.js', import.meta.url),
+            workerUrl: withAssetVersion(new URL('./workers/appLibrary.worker.js', import.meta.url)),
             supportsTask(task, capabilities) {
                 if (task === 'prepare-asset-record') {
                     return !!capabilities.createImageBitmap && !!capabilities.offscreenCanvas2d;
@@ -1502,17 +1769,19 @@ window.addEventListener('DOMContentLoaded', async () => {
                     return buildSecureLibraryExportRecordFallback(payload.bundle, {
                         secureMode: payload.secureMode,
                         passphrase: payload.passphrase || '',
-                        duplicateCopies: !!payload.duplicateCopies
+                        compatibilityMode: payload.compatibilityMode || 'fast'
                     });
                 }
                 if (task === 'resolve-secure-library-import-record') {
-                    return resolveSecureLibraryImportRecordFallback(payload.parsed, payload.passphrase || '');
+                    return resolveSecureLibraryImportRecordFallback(payload.parsed, payload.passphrase || '', {
+                        compatibilityMode: payload.compatibilityMode || 'fast'
+                    });
                 }
                 throw new Error(`Unknown app-library task "${task}".`);
             }
         });
         backgroundTasks.registerDomain('editor', {
-            workerUrl: new URL('./workers/editor.worker.js', import.meta.url),
+            workerUrl: withAssetVersion(new URL('./workers/editor.worker.js', import.meta.url)),
             supportsTask(task, capabilities) {
                 if (task === 'compute-analysis-visuals') {
                     return !!capabilities.offscreenCanvas2d;
@@ -1539,16 +1808,28 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         });
         backgroundTasks.registerDomain('stitch', {
-            workerUrl: new URL('./workers/stitch.worker.js', import.meta.url),
+            workerUrl: withAssetVersion(new URL('./workers/stitch.worker.js', import.meta.url)),
             supportsTask(task, capabilities) {
                 if (task === 'prepare-input-files') {
                     return !!capabilities.createImageBitmap;
+                }
+                if (task === 'prepare-analysis-inputs' || task === 'build-candidate-previews') {
+                    return !!capabilities.createImageBitmap && !!capabilities.offscreenCanvas2d;
                 }
                 return true;
             },
             fallback(task, payload, context) {
                 if (task === 'analyze-screenshot') {
                     return analyzePreparedStitchInputs(payload.document, payload.preparedInputs);
+                }
+                if (task === 'prepare-analysis-inputs') {
+                    return (stitchEngine || new StitchEngine()).buildPreparedInputs(payload.document);
+                }
+                if (task === 'classify-scene-mode') {
+                    return (stitchEngine || new StitchEngine()).classifySceneMode(payload.preparedInputs, { preferWorker: false });
+                }
+                if (task === 'build-candidate-previews') {
+                    return (stitchEngine || new StitchEngine()).buildCandidatePreviewMap(payload.document);
                 }
                 if (task === 'prepare-input-files') {
                     return createStitchInputsFromFilesFallback(payload.files, {
@@ -1560,8 +1841,38 @@ window.addEventListener('DOMContentLoaded', async () => {
                 throw new Error(`Unknown stitch task "${task}".`);
             }
         });
+        backgroundTasks.registerDomain('stitch-opencv', {
+            workerUrl: withAssetVersion(new URL('./workers/stitchOpencv.worker.js', import.meta.url)),
+            type: 'classic',
+            supportsTask(task, capabilities) {
+                if (task === 'self-test-photo-runtime') {
+                    return !!capabilities.worker;
+                }
+                return !!capabilities.worker && !!capabilities.wasm;
+            },
+            fallback(task) {
+                if (task === 'self-test-photo-runtime') {
+                    return {
+                        runtime: buildStitchSettingsDiagnostics({
+                            workerAvailable: !!workerCapabilities?.worker,
+                            wasmAvailable: !!workerCapabilities?.wasm,
+                            runtimeAvailable: false,
+                            supportedDetectors: [],
+                            lastRuntimeSelection: '',
+                            lastFallbackReason: 'Photo analysis requires Worker and WebAssembly support for OpenCV.js.'
+                        }),
+                        summary: {
+                            ready: false,
+                            error: 'Photo analysis requires Worker and WebAssembly support for OpenCV.js.',
+                            supportedDetectors: []
+                        }
+                    };
+                }
+                throw new Error('Photo analysis requires browser Worker and WebAssembly support for OpenCV.js.');
+            }
+        });
         backgroundTasks.registerDomain('three', {
-            workerUrl: new URL('./workers/three.worker.js', import.meta.url),
+            workerUrl: withAssetVersion(new URL('./workers/three.worker.js', import.meta.url)),
             supportsTask(task, capabilities) {
                 if (task === 'prepare-image-plane-files') {
                     return !!capabilities.createImageBitmap;
@@ -1609,23 +1920,33 @@ window.addEventListener('DOMContentLoaded', async () => {
     backgroundTasks = createBackgroundTaskBroker({
         capabilities: workerCapabilities,
         onEvent: handleWorkerEvent,
-        onTaskMetric: (metric) => bootMetrics.trackWorkerTask(metric)
+        onTaskMetric: (metric) => bootMetrics.trackWorkerTask(metric),
+        maxConcurrentTasks: activeSettings.general.maxBackgroundWorkers > 0 ? activeSettings.general.maxBackgroundWorkers : 0
     });
     registerWorkerDomains();
+    activeSettings = normalizeSettingsForState(activeSettings);
+    applySettingsRuntime(activeSettings);
+    logProcess('info', 'app.bootstrap', `Asset version ${APP_ASSET_VERSION} loaded for workers and WASM modules.`, {
+        dedupeKey: `asset-version:${APP_ASSET_VERSION}`,
+        dedupeWindowMs: 500
+    });
     logProcess('info', 'app.bootstrap', `Worker capabilities ready: ${[
         workerCapabilities.worker ? 'worker' : null,
         workerCapabilities.moduleWorker ? 'module-worker' : null,
         workerCapabilities.wasm ? 'wasm' : null,
+        workerCapabilities.wasmSimd ? 'wasm-simd' : null,
         workerCapabilities.offscreenCanvas2d ? 'offscreen-2d' : null,
         workerCapabilities.offscreenCanvasWebgl2 ? 'offscreen-webgl2' : null,
         workerCapabilities.compressionStreams ? 'compression-streams' : null,
         workerCapabilities.fileSystemAccess ? 'fs-access' : null,
-        workerCapabilities.createImageBitmap ? 'image-bitmap' : null
+        workerCapabilities.createImageBitmap ? 'image-bitmap' : null,
+        workerCapabilities.hardwareConcurrency ? `${workerCapabilities.hardwareConcurrency} cores` : null
     ].filter(Boolean).join(', ') || 'fallback-only'}.`, {
         dedupeKey: 'worker-capabilities-ready',
         dedupeWindowMs: 500
     });
     window.__modularStudioPerformance = {
+        assetVersion: APP_ASSET_VERSION,
         capabilities: workerCapabilities,
         snapshot() {
             return bootMetrics.snapshot();
@@ -1642,7 +1963,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         replayOnWorkerCrash: true,
         maxCrashReplays: 2
     });
-    store = createStore(createInitialState());
+    store = createStore(createInitialState(activeSettings));
     engine = new NoiseStudioEngine(registry, {
         onNotice: (text, type = 'info') => setNotice(text, type),
         computeAnalysisVisuals: (payload, options = {}) => backgroundTasks.runTask('editor', 'compute-analysis-visuals', payload, {
@@ -1828,6 +2149,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                 ? 'stitch'
                 : section === '3d'
                     ? '3d'
+                    : section === 'settings'
+                        ? 'settings'
                     : section === 'logs'
                     ? 'logs'
                         : 'editor';
@@ -1839,10 +2162,23 @@ window.addEventListener('DOMContentLoaded', async () => {
             });
         }
         if (nextSection !== currentSection) {
-            logProcess('info', 'app.navigation', `Switched to ${nextSection === '3d' ? '3D' : nextSection === 'logs' ? 'Logs' : nextSection.charAt(0).toUpperCase() + nextSection.slice(1)}.`, {
+            const sectionLabel = nextSection === '3d'
+                ? '3D'
+                : nextSection === 'logs'
+                    ? 'Logs'
+                    : nextSection === 'settings'
+                        ? 'Settings'
+                        : nextSection.charAt(0).toUpperCase() + nextSection.slice(1);
+            logProcess('info', 'app.navigation', `Switched to ${sectionLabel}.`, {
                 dedupeKey: `section:${nextSection}`,
                 dedupeWindowMs: 80
             });
+            if (nextSection === 'settings') {
+                logProcess('info', 'settings.general', 'Opened the Settings tab.', {
+                    dedupeKey: 'settings-tab-open',
+                    dedupeWindowMs: 160
+                });
+            }
         }
         store.setState((state) => ({
             ...state,
@@ -2398,7 +2734,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             files: files || []
         }, {
             priority: 'user-visible',
-            processId: 'stitch.workspace',
+            processId: 'stitch.import',
             scope: 'section:stitch',
             replaceKey: 'section:stitch:prepare-input-files',
             replaceActive: true,
@@ -2420,7 +2756,84 @@ window.addEventListener('DOMContentLoaded', async () => {
     async function buildStitchPreviewMap(documentState) {
         const normalized = normalizeStitchDocument(documentState);
         if (!normalized.candidates.length) return {};
+        if (backgroundTasks) {
+            return backgroundTasks.runTask('stitch', 'build-candidate-previews', {
+                document: normalized
+            }, {
+                priority: 'background',
+                processId: 'stitch.preview',
+                scope: 'section:stitch',
+                replaceKey: 'section:stitch:candidate-previews',
+                replaceActive: true,
+                replayOnWorkerCrash: true,
+                maxCrashReplays: 1
+            });
+        }
         return stitchEngine.buildCandidatePreviewMap(normalized);
+    }
+
+    async function runStitchPhotoRuntimeProbe(options = {}) {
+        if (!backgroundTasks) {
+            const diagnostics = buildStitchSettingsDiagnostics({
+                workerAvailable: !!workerCapabilities?.worker,
+                wasmAvailable: !!workerCapabilities?.wasm,
+                runtimeAvailable: false,
+                supportedDetectors: [],
+                lastRuntimeSelection: '',
+                lastFallbackReason: 'The shared worker broker is unavailable.'
+            });
+            syncStitchSettingsDiagnostics(diagnostics, { skipViewRender: true });
+            if (options.log !== false) {
+                logProcess('warning', 'stitch.worker', diagnostics.lastFallbackReason);
+            }
+            return diagnostics;
+        }
+        try {
+            const result = await backgroundTasks.runTask('stitch-opencv', 'self-test-photo-runtime', {}, {
+                priority: options.priority || 'background',
+                processId: 'stitch.worker',
+                scope: 'section:stitch',
+                replaceKey: 'section:stitch:photo-runtime-probe',
+                replaceActive: true,
+                replayOnWorkerCrash: false
+            });
+            const diagnostics = buildStitchSettingsDiagnostics(result?.runtime || {});
+            syncStitchSettingsDiagnostics(diagnostics, { skipViewRender: true });
+            return diagnostics;
+        } catch (error) {
+            const diagnostics = buildStitchSettingsDiagnostics({
+                workerAvailable: !!workerCapabilities?.worker,
+                wasmAvailable: !!workerCapabilities?.wasm,
+                runtimeAvailable: false,
+                supportedDetectors: [],
+                lastRuntimeSelection: '',
+                lastFallbackReason: error?.message || 'The Stitch photo runtime probe failed.'
+            });
+            syncStitchSettingsDiagnostics(diagnostics, { skipViewRender: true });
+            if (options.log !== false) {
+                logProcess('warning', 'stitch.worker', diagnostics.lastFallbackReason, {
+                    dedupeKey: `stitch-worker-probe:${diagnostics.lastFallbackReason}`,
+                    dedupeWindowMs: 400
+                });
+            }
+            return diagnostics;
+        }
+    }
+
+    function syncStitchDiagnosticsFromAnalysisResult(result = null, options = {}) {
+        const normalizedResult = result && typeof result === 'object' ? result : {};
+        const runtime = normalizedResult.runtime && typeof normalizedResult.runtime === 'object'
+            ? normalizedResult.runtime
+            : {};
+        const backend = String(normalizedResult.backend || runtime.lastRuntimeSelection || '').trim();
+        const warning = String(normalizedResult.warning || '').trim();
+        const diagnostics = buildStitchSettingsDiagnostics({
+            ...runtime,
+            lastRuntimeSelection: backend || runtime.lastRuntimeSelection || '',
+            lastFallbackReason: normalizedResult.lastFallbackReason ?? runtime.lastFallbackReason ?? (warning && backend === 'opencv-wasm' ? warning : '')
+        });
+        syncStitchSettingsDiagnostics(diagnostics, options);
+        return diagnostics;
     }
 
     async function createThreeDModelItemsFromFilesFallback(files, options = {}) {
@@ -2768,6 +3181,132 @@ window.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
+    function getSettingsProcessIdForPath(path = '') {
+        const normalized = String(path || '');
+        if (normalized.startsWith('library.')) return 'settings.library';
+        if (normalized.startsWith('editor.')) return 'settings.editor';
+        if (normalized.startsWith('stitch.')) return 'settings.stitch';
+        if (normalized.startsWith('threeD.')) return 'settings.3d';
+        if (normalized.startsWith('logs.')) return 'settings.logs';
+        return 'settings.general';
+    }
+
+    function shouldRenderForSettingsPath(path = '') {
+        const normalized = String(path || '');
+        return normalized === 'editor.defaultHighQualityPreview'
+            || normalized === 'editor.isolateActiveLayerChain'
+            || normalized === 'editor.transparencyCheckerTone';
+    }
+
+    function shouldRenderStitchForSettingsPath(path = '') {
+        return String(path || '') === 'general.theme';
+    }
+
+    function describeSettingValue(value) {
+        if (typeof value === 'boolean') return value ? 'enabled' : 'disabled';
+        if (value == null || value === '') return 'default';
+        return String(value);
+    }
+
+    function applyCurrentThreeDDefaults(document, settings = activeSettings) {
+        const normalized = normalizeThreeDDocument(document);
+        const defaults = settings?.threeD?.defaults || {};
+        return normalizeThreeDDocument({
+            ...normalized,
+            render: {
+                ...normalized.render,
+                samplesTarget: Number(defaults.samplesTarget ?? normalized.render.samplesTarget) || normalized.render.samplesTarget,
+                bounces: Number(defaults.bounces ?? normalized.render.bounces) || normalized.render.bounces,
+                transmissiveBounces: Number(defaults.transmissiveBounces ?? normalized.render.transmissiveBounces) || normalized.render.transmissiveBounces,
+                filterGlossyFactor: Number(defaults.filterGlossyFactor ?? normalized.render.filterGlossyFactor) || 0,
+                denoiseEnabled: !!defaults.denoiseEnabled,
+                denoiseSigma: Number(defaults.denoiseSigma ?? normalized.render.denoiseSigma) || normalized.render.denoiseSigma,
+                denoiseThreshold: Number(defaults.denoiseThreshold ?? normalized.render.denoiseThreshold) || normalized.render.denoiseThreshold,
+                denoiseKSigma: Number(defaults.denoiseKSigma ?? normalized.render.denoiseKSigma) || normalized.render.denoiseKSigma,
+                toneMapping: defaults.toneMapping || normalized.render.toneMapping,
+                currentSamples: 0
+            }
+        });
+    }
+
+    async function readStorageEstimate() {
+        if (!navigator.storage?.estimate) return null;
+        try {
+            const estimate = await navigator.storage.estimate();
+            const usage = Math.max(0, Number(estimate?.usage || 0));
+            const quota = Math.max(0, Number(estimate?.quota || 0));
+            return {
+                usage,
+                quota,
+                ratio: quota > 0 ? Math.min(1, usage / quota) : 0
+            };
+        } catch (_error) {
+            return null;
+        }
+    }
+
+    function formatStorageBytes(value = 0) {
+        const bytes = Math.max(0, Number(value) || 0);
+        if (!bytes) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let size = bytes;
+        let index = 0;
+        while (size >= 1024 && index < units.length - 1) {
+            size /= 1024;
+            index += 1;
+        }
+        return `${size.toFixed(size >= 10 || index === 0 ? 0 : 1).replace(/\.0$/, '')} ${units[index]}`;
+    }
+
+    function resetLibraryBackfillState() {
+        studioProjectPreviewBackfillComplete = false;
+        derivedStudioAssetBackfillComplete = false;
+        imageAssetPreviewBackfillComplete = false;
+    }
+
+    function warnIfStoragePressureHigh(storageEstimate, settings = activeSettings) {
+        if (!storageEstimate || !(storageEstimate.quota > 0)) return false;
+        const threshold = Number(settings?.library?.storagePressureThreshold || 0.8);
+        if (storageEstimate.ratio < threshold) return false;
+        const message = `Library storage is at ${Math.round(storageEstimate.ratio * 100)}% of the browser quota (${formatStorageBytes(storageEstimate.usage)} of ${formatStorageBytes(storageEstimate.quota)}).`;
+        logProcess('warning', 'settings.library', message, {
+            dedupeKey: `storage-pressure:${Math.round(storageEstimate.ratio * 100)}`,
+            dedupeWindowMs: 4000
+        });
+        setNotice(message, 'warning', 7000);
+        return true;
+    }
+
+    async function maybeSaveCompanionImageOnSave(blob, fileName, options = {}) {
+        if (!(blob instanceof Blob)) {
+            return { status: 'skipped' };
+        }
+        const result = await saveBlobLocally(blob, fileName, {
+            title: options.title || 'Save Companion PNG',
+            buttonLabel: options.buttonLabel || 'Save PNG',
+            filters: [{ name: 'PNG Image', extensions: ['png'] }]
+        });
+        if (didSaveFile(result)) {
+            logProcess('success', options.processId || 'editor.export', options.successMessage || `Saved a companion image${describeSavedLocation(result)}.`);
+            return {
+                status: 'saved',
+                ...result
+            };
+        }
+        if (wasSaveCancelled(result)) {
+            logProcess('info', options.processId || 'editor.export', options.cancelMessage || 'Cancelled the companion image save dialog.');
+            return {
+                status: 'cancelled',
+                ...result
+            };
+        }
+        logProcess('warning', options.processId || 'editor.export', result?.error || options.errorMessage || 'Could not save the companion image.');
+        return {
+            status: 'failed',
+            ...result
+        };
+    }
+
     const actions = {
         getState() {
             return store.getState();
@@ -2777,6 +3316,351 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async requestTextDialog(options = {}) {
             return requestAppTextDialog(view, options);
+        },
+        setSettingsCategory(category) {
+            const normalizedCategory = normalizeSettingsCategory(category);
+            store.setState((state) => ({
+                ...state,
+                ui: {
+                    ...state.ui,
+                    settingsCategory: normalizedCategory
+                }
+            }), { render: false });
+            logProcess('info', getSettingsProcessIdForPath(normalizedCategory === '3d' ? 'threeD' : normalizedCategory), `Opened the ${normalizedCategory === '3d' ? '3D' : normalizedCategory.charAt(0).toUpperCase() + normalizedCategory.slice(1)} settings category.`, {
+                dedupeKey: `settings-category:${normalizedCategory}`,
+                dedupeWindowMs: 120
+            });
+        },
+        async updateAppSetting(path, value) {
+            const processId = getSettingsProcessIdForPath(path);
+            const normalized = updateSettingsState((current) => updateSettingsPathValue(current, path, value), {
+                render: shouldRenderForSettingsPath(path),
+                renderStitch: shouldRenderStitchForSettingsPath(path)
+            });
+            logProcess('success', processId, `Set ${path} to ${describeSettingValue(value)}.`, {
+                dedupeKey: `setting:${path}:${JSON.stringify(value)}`,
+                dedupeWindowMs: 80
+            });
+            if (path.startsWith('library.')) {
+                view?.refreshLibrary?.();
+            }
+            return normalized;
+        },
+        async resetSettingsCategory(category) {
+            const normalizedCategory = normalizeSettingsCategory(category);
+            const defaults = createDefaultAppSettings();
+            const confirmed = await requestAppConfirmDialog(view, {
+                title: 'Reset Category Settings',
+                text: `Reset the ${normalizedCategory === '3d' ? '3D' : normalizedCategory} settings category back to its defaults?`,
+                confirmLabel: 'Reset Category',
+                cancelLabel: 'Cancel',
+                isDanger: true
+            });
+            if (!confirmed) return false;
+            updateSettingsState((current) => ({
+                ...current,
+                [normalizedCategory === '3d' ? 'threeD' : normalizedCategory]: cloneSettingsValue(defaults[normalizedCategory === '3d' ? 'threeD' : normalizedCategory])
+            }), {
+                render: normalizedCategory === 'editor',
+                renderStitch: normalizedCategory === 'general'
+            });
+            logProcess('success', getSettingsProcessIdForPath(normalizedCategory === '3d' ? 'threeD' : normalizedCategory), `Reset the ${normalizedCategory === '3d' ? '3D' : normalizedCategory} settings category to defaults.`);
+            if (normalizedCategory === 'library') {
+                view?.refreshLibrary?.();
+            }
+            return true;
+        },
+        async resetAllSettings() {
+            const confirmed = await requestAppConfirmDialog(view, {
+                title: 'Reset All Settings',
+                text: 'Reset every settings category back to defaults?',
+                confirmLabel: 'Reset All',
+                cancelLabel: 'Cancel',
+                isDanger: true
+            });
+            if (!confirmed) return false;
+            updateSettingsState(createDefaultAppSettings(), {
+                render: true,
+                renderStitch: true
+            });
+            logProcess('success', 'settings.general', 'Reset all app settings to defaults.');
+            view?.refreshLibrary?.();
+            return true;
+        },
+        async exportSettings() {
+            const payload = buildSettingsExportPayload(store.getState().settings);
+            const result = await saveJsonLocally(payload, 'noise-studio-settings.json', {
+                title: 'Save Settings JSON',
+                buttonLabel: 'Save JSON',
+                filters: [{ name: 'Settings JSON', extensions: ['json'] }]
+            });
+            if (didSaveFile(result)) {
+                logProcess('success', 'settings.general', `Exported settings to "${result.fileName || 'noise-studio-settings.json'}".`);
+            } else if (wasSaveCancelled(result)) {
+                logProcess('info', 'settings.general', 'Cancelled the settings export dialog.');
+            } else {
+                logProcess('error', 'settings.general', result?.error || 'Could not export the settings JSON.');
+            }
+            return result;
+        },
+        async importSettingsFile(file) {
+            if (!file) return { status: 'cancelled' };
+            try {
+                const parsed = parseImportedSettingsPayload(await file.text(), { diagnostics: buildSettingsDiagnostics() });
+                updateSettingsState(parsed, {
+                    render: true,
+                    renderStitch: true
+                });
+                logProcess('success', 'settings.general', `Imported settings from "${file.name}".`);
+                view?.refreshLibrary?.();
+                return { status: 'success' };
+            } catch (error) {
+                logProcess('error', 'settings.general', error?.message || 'Could not import the settings file.');
+                setNotice(error?.message || 'Could not import the settings file.', 'error', 7000);
+                return { status: 'failed', error: error?.message || 'Import failed.' };
+            }
+        },
+        async refreshSettingsDiagnostics() {
+            const storageEstimate = await readStorageEstimate();
+            updateSettingsState((current) => current, {
+                diagnostics: { storageEstimate }
+            });
+            warnIfStoragePressureHigh(storageEstimate);
+            logProcess('info', 'settings.library', storageEstimate
+                ? `Updated storage diagnostics: ${formatStorageBytes(storageEstimate.usage)} used of ${formatStorageBytes(storageEstimate.quota)}.`
+                : 'Storage diagnostics are unavailable in this browser.', {
+                dedupeKey: `settings-storage:${storageEstimate?.usage || 0}:${storageEstimate?.quota || 0}`,
+                dedupeWindowMs: 250
+            });
+            return storageEstimate;
+        },
+        async runLibraryMaintenance(kind = '') {
+            const maintenanceKind = String(kind || '').trim().toLowerCase();
+            if (!maintenanceKind) {
+                return { status: 'cancelled', message: 'No maintenance action was requested.' };
+            }
+
+            const descriptions = {
+                'purge-rendered-previews': {
+                    title: 'Purge Rendered Images',
+                    text: 'Remove embedded rendered previews from saved Editor Library projects? Original images and project settings will be left intact.',
+                    confirmLabel: 'Purge',
+                    start: 'Purging embedded rendered previews from saved Editor Library projects.',
+                    progress: 'Removing embedded rendered previews from saved Editor projects...',
+                    success: (count) => count
+                        ? `Purged embedded rendered previews from ${count} saved Editor project${count === 1 ? '' : 's'}.`
+                        : 'No saved Editor projects had embedded rendered previews to purge.'
+                },
+                'heal-rendered-previews': {
+                    title: 'Heal Missing Images',
+                    text: 'Rebuild missing Library previews and derived assets in the background?',
+                    confirmLabel: 'Heal',
+                    start: 'Healing missing Library previews and derived assets.',
+                    progress: 'Rebuilding missing Library previews and derived assets...',
+                    success: () => 'Library preview healing completed.'
+                },
+                'cleanup-orphaned-assets': {
+                    title: 'Cleanup Orphaned Assets',
+                    text: 'Remove saved assets that still point to missing Library projects?',
+                    confirmLabel: 'Cleanup',
+                    start: 'Scanning the Assets Library for orphaned project-linked assets.',
+                    progress: 'Removing orphaned project-linked assets...',
+                    success: (count) => count
+                        ? `Removed ${count} orphaned asset${count === 1 ? '' : 's'} from the Assets Library.`
+                        : 'No orphaned project-linked assets were found.'
+                },
+                'clear-cache': {
+                    title: 'Clear Library Cache',
+                    text: 'Clear cached previews and rendered images from saved Library records? This keeps the core project and asset data.',
+                    confirmLabel: 'Clear Cache',
+                    start: 'Clearing cached Library previews and rendered images.',
+                    progress: 'Removing cached Library previews...',
+                    success: (_count, extra = {}) => `Cleared cached previews from ${extra.projectCount || 0} project${(extra.projectCount || 0) === 1 ? '' : 's'} and ${extra.assetCount || 0} asset${(extra.assetCount || 0) === 1 ? '' : 's'}.`
+                },
+                'wipe-library': {
+                    title: 'Wipe Library',
+                    text: 'Delete every saved Library project? This cannot be undone.',
+                    confirmLabel: 'Wipe Library',
+                    start: 'Deleting every saved Library project.',
+                    progress: 'Deleting saved Library projects...',
+                    success: (count) => count
+                        ? `Deleted ${count} saved Library project${count === 1 ? '' : 's'}.`
+                        : 'The Library was already empty.'
+                },
+                'wipe-assets': {
+                    title: 'Wipe Assets',
+                    text: 'Delete every saved asset from the Assets Library? This cannot be undone.',
+                    confirmLabel: 'Wipe Assets',
+                    start: 'Deleting every saved asset from the Assets Library.',
+                    progress: 'Deleting saved Assets Library entries...',
+                    success: (count) => count
+                        ? `Deleted ${count} saved asset${count === 1 ? '' : 's'}.`
+                        : 'The Assets Library was already empty.'
+                }
+            };
+
+            const config = descriptions[maintenanceKind];
+            if (!config) {
+                return { status: 'failed', message: 'That maintenance action is not supported.' };
+            }
+
+            const confirmed = await requestAppConfirmDialog(view, {
+                title: config.title,
+                text: config.text,
+                confirmLabel: config.confirmLabel,
+                cancelLabel: 'Cancel',
+                isDanger: maintenanceKind !== 'heal-rendered-previews'
+            });
+            if (!confirmed) {
+                logProcess('info', 'settings.library', `Cancelled "${config.title}".`);
+                return { status: 'cancelled', message: `${config.title} cancelled.` };
+            }
+
+            logProcess('active', 'settings.library', config.start);
+            setNotice(config.progress, 'info', 0);
+            await nextPaint();
+
+            try {
+                let changedCount = 0;
+                let extraSummary = {};
+
+                if (maintenanceKind === 'purge-rendered-previews') {
+                    const projectRecords = await getAllLibraryProjectRecords();
+                    const studioProjects = projectRecords.filter((entry) => getLibraryProjectType(entry) === 'studio');
+                    for (let index = 0; index < studioProjects.length; index += 1) {
+                        const record = studioProjects[index];
+                        const payload = record?.payload && typeof record.payload === 'object'
+                            ? { ...record.payload }
+                            : record.payload;
+                        const hadPreview = !!record?.blob || !!payload?.preview;
+                        if (payload && typeof payload === 'object' && payload.preview) {
+                            delete payload.preview;
+                        }
+                        if (hadPreview) {
+                            await saveToLibraryDB({
+                                ...record,
+                                blob: null,
+                                payload
+                            });
+                            changedCount += 1;
+                        }
+                        if (studioProjects.length) {
+                            logProgressProcess('settings.library', `Purging rendered previews... ${index + 1}/${studioProjects.length}`, (index + 1) / studioProjects.length, {
+                                dedupeKey: `settings-library-purge:${index}`
+                            });
+                        }
+                        await maybeYieldToUi(index, 3);
+                    }
+                    resetLibraryBackfillState();
+                    if (changedCount) {
+                        notifyLibraryChanged();
+                    }
+                } else if (maintenanceKind === 'heal-rendered-previews') {
+                    resetLibraryBackfillState();
+                    await ensureStudioProjectPayloadPreviewsBackfilled();
+                    await ensureDerivedStudioAssetsBackfilled();
+                    await ensureLibraryImageAssetPreviewsBackfilled();
+                } else if (maintenanceKind === 'cleanup-orphaned-assets') {
+                    const [projectRecords, assetRecords] = await Promise.all([
+                        getAllLibraryProjectRecords(),
+                        getAllLibraryAssetRecords()
+                    ]);
+                    const knownProjectIds = new Set(projectRecords.map((entry) => String(entry.id || '')).filter(Boolean));
+                    for (let index = 0; index < assetRecords.length; index += 1) {
+                        const asset = assetRecords[index];
+                        if (asset.sourceProjectId && !knownProjectIds.has(String(asset.sourceProjectId))) {
+                            await deleteFromLibraryDB(asset.id);
+                            changedCount += 1;
+                        }
+                        if (assetRecords.length) {
+                            logProgressProcess('settings.library', `Checking project-linked assets... ${index + 1}/${assetRecords.length}`, (index + 1) / assetRecords.length, {
+                                dedupeKey: `settings-library-orphans:${index}`
+                            });
+                        }
+                        await maybeYieldToUi(index, 4);
+                    }
+                    if (changedCount) {
+                        notifyLibraryChanged();
+                    }
+                } else if (maintenanceKind === 'clear-cache') {
+                    const [projectRecords, assetRecords] = await Promise.all([
+                        getAllLibraryProjectRecords(),
+                        getAllLibraryAssetRecords()
+                    ]);
+                    let clearedProjectCount = 0;
+                    let clearedAssetCount = 0;
+                    for (let index = 0; index < projectRecords.length; index += 1) {
+                        const record = projectRecords[index];
+                        const payload = record?.payload && typeof record.payload === 'object'
+                            ? { ...record.payload }
+                            : record.payload;
+                        const hadPreview = !!record?.blob || !!payload?.preview;
+                        if (payload && typeof payload === 'object' && payload.preview) {
+                            delete payload.preview;
+                        }
+                        if (hadPreview) {
+                            await saveToLibraryDB({
+                                ...record,
+                                blob: null,
+                                payload
+                            });
+                            clearedProjectCount += 1;
+                        }
+                        await maybeYieldToUi(index, 3);
+                    }
+                    for (let index = 0; index < assetRecords.length; index += 1) {
+                        const asset = assetRecords[index];
+                        if (asset.previewDataUrl) {
+                            await saveToLibraryDB({
+                                ...asset,
+                                previewDataUrl: ''
+                            });
+                            clearedAssetCount += 1;
+                        }
+                        if (assetRecords.length) {
+                            logProgressProcess('settings.library', `Clearing cached asset previews... ${index + 1}/${assetRecords.length}`, (index + 1) / assetRecords.length, {
+                                dedupeKey: `settings-library-clear-cache:${index}`
+                            });
+                        }
+                        await maybeYieldToUi(index, 4);
+                    }
+                    changedCount = clearedProjectCount + clearedAssetCount;
+                    extraSummary = {
+                        projectCount: clearedProjectCount,
+                        assetCount: clearedAssetCount
+                    };
+                    resetLibraryBackfillState();
+                    if (changedCount) {
+                        notifyLibraryChanged();
+                    }
+                } else if (maintenanceKind === 'wipe-library') {
+                    const projectRecords = await getAllLibraryProjectRecords();
+                    changedCount = projectRecords.length;
+                    await actions.clearLibraryProjects();
+                    resetLibraryBackfillState();
+                } else if (maintenanceKind === 'wipe-assets') {
+                    const assetRecords = await getAllLibraryAssetRecords();
+                    changedCount = assetRecords.length;
+                    await actions.clearLibraryAssets();
+                    resetLibraryBackfillState();
+                }
+
+                const storageEstimate = await readStorageEstimate();
+                updateSettingsState((current) => current, {
+                    diagnostics: { storageEstimate }
+                });
+                warnIfStoragePressureHigh(storageEstimate);
+                const successMessage = config.success(changedCount, extraSummary);
+                logProcess('success', 'settings.library', successMessage);
+                setNotice(successMessage, 'success', 5200);
+                return { status: 'success', message: successMessage };
+            } catch (error) {
+                console.error(error);
+                const message = error?.message || `Could not finish "${config.title}".`;
+                logProcess('error', 'settings.library', message);
+                setNotice(message, 'error', 7000);
+                return { status: 'failed', message };
+            }
         },
         setActiveSection(section) {
             commitActiveSection(section);
@@ -2796,21 +3680,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             }));
         },
         setTheme(enabled) {
-            const theme = enabled ? 'dark' : 'light';
-            updateDocument((document) => ({
-                ...document,
-                view: {
-                    ...document.view,
-                    theme
-                }
-            }), { render: false });
-            updateStitchDocument((document) => ({
-                ...document,
-                view: {
-                    ...document.view,
-                    theme
-                }
-            }), { renderStitch: true, skipViewRender: false });
+            return actions.updateAppSetting('general.theme', enabled ? 'dark' : 'light');
         },
         setBatchOpen(open) {
             if (!open) stopPlayback();
@@ -2830,7 +3700,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                         };
                     }
                 }
-                const next = createLayerInstance(registry, layerId, document.layerStack);
+                const next = applyEditorSettingsToLayerInstance(
+                    createLayerInstance(registry, layerId, document.layerStack),
+                    store.getState().settings
+                );
                 const layerStack = reindexStack(registry, [...document.layerStack, next]);
                 return {
                     ...document,
@@ -2884,7 +3757,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (!original) return document;
                 const layer = registry.byId[original.layerId];
                 if (layer?.supportsMultiInstance === false) return document;
-                const duplicate = createLayerInstance(registry, original.layerId, document.layerStack);
+                const duplicate = applyEditorSettingsToLayerInstance(
+                    createLayerInstance(registry, original.layerId, document.layerStack),
+                    store.getState().settings
+                );
                 duplicate.params = structuredClone(original.params);
                 duplicate.enabled = original.enabled;
                 duplicate.visible = original.visible;
@@ -3114,16 +3990,17 @@ window.addEventListener('DOMContentLoaded', async () => {
             }, { render: false });
         },
         setHighQualityPreview(enabled) {
-            updateDocument((document) => ({ ...document, view: { ...document.view, highQualityPreview: enabled } }));
+            return actions.updateAppSetting('editor.defaultHighQualityPreview', !!enabled);
         },
         setHoverCompareEnabled(enabled) {
-            updateDocument((document) => ({ ...document, view: { ...document.view, hoverCompareEnabled: enabled } }), { render: false });
+            return actions.updateAppSetting('editor.hoverCompareOriginal', !!enabled);
         },
         setRenderUpToActiveLayer(enabled) {
-            updateDocument((document) => ({ ...document, view: { ...document.view, isolateActiveLayerChain: !!enabled } }));
+            return actions.updateAppSetting('editor.isolateActiveLayerChain', !!enabled);
         },
         toggleLayerPreviews() {
-            updateDocument((document) => ({ ...document, view: { ...document.view, layerPreviewsOpen: !document.view.layerPreviewsOpen, layerPreviewIndex: 0 } }));
+            const current = !!store.getState().settings?.editor?.layerPreviewsOpen;
+            return actions.updateAppSetting('editor.layerPreviewsOpen', !current);
         },
         cycleLayerPreview() {
             updateDocument((document) => ({ ...document, view: { ...document.view, layerPreviewIndex: (document.view.layerPreviewIndex || 0) + 1 } }));
@@ -3146,8 +4023,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         async newStitchProject() {
             if (!await ensureProjectCanBeReplaced('stitch', 'starting a new stitch project')) return;
             stitchAnalysisToken += 1;
-            const theme = store.getState().stitchDocument.view?.theme || store.getState().document.view?.theme || 'light';
-            updateStitchDocument(() => createEmptyStitchDocument(theme), { renderStitch: true });
+            clearWorkspaceProgress('stitch');
+            updateStitchDocument(() => createSettingsDrivenStitchDocument(store.getState().settings), { renderStitch: true });
             clearActiveLibraryOrigin('stitch');
             commitActiveSection('stitch');
             logProcess('success', 'stitch.workspace', 'Started a new Stitch project.');
@@ -3158,7 +4035,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async openStitchImages(files) {
             const totalFiles = (files || []).filter((file) => isLikelyImageFile(file)).length;
-            logProcess('active', 'stitch.workspace', `Importing ${totalFiles || files.length} image${(totalFiles || files.length) === 1 ? '' : 's'} into Stitch.`);
+            logProcess('active', 'stitch.import', `Importing ${totalFiles || files.length} image${(totalFiles || files.length) === 1 ? '' : 's'} into Stitch.`);
             await showWorkspaceProgress('stitch', {
                 title: 'Importing Images',
                 message: totalFiles
@@ -3178,7 +4055,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                             message: message || `Reading "${file?.name || 'image'}"...`,
                             progress: ratio
                         });
-                        logProgressProcess('stitch.workspace', message || `Reading "${file?.name || 'image'}"...`, ratio, {
+                        logProgressProcess('stitch.import', message || `Reading "${file?.name || 'image'}"...`, ratio, {
                             dedupeKey: `stitch-import:${file?.name || index}:${Math.round(ratio * 1000)}`,
                             dedupeWindowMs: 80
                         });
@@ -3186,7 +4063,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 });
                 if (!nextInputs.length) {
                     clearWorkspaceProgress('stitch');
-                    logProcess('warning', 'stitch.workspace', failures.length
+                    logProcess('warning', 'stitch.import', failures.length
                         ? `Could not add any Stitch inputs. ${failures.length} file${failures.length === 1 ? '' : 's'} failed to load.`
                         : 'Stitch image import was opened without any readable files.');
                     if (failures.length) {
@@ -3210,7 +4087,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 updateStitchDocument((document) => appendStitchInputs(document, nextInputs), { renderStitch: true });
                 commitActiveSection('stitch');
                 clearWorkspaceProgress('stitch');
-                logProcess(failures.length ? 'warning' : 'success', 'stitch.workspace', failures.length
+                logProcess(failures.length ? 'warning' : 'success', 'stitch.import', failures.length
                     ? `Added ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'} and skipped ${failures.length} unreadable file${failures.length === 1 ? '' : 's'}.`
                     : `Added ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'}.`);
                 setNotice(
@@ -3223,7 +4100,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             } catch (error) {
                 clearWorkspaceProgress('stitch');
                 if (isAbortError(error)) return;
-                logProcess('error', 'stitch.workspace', error?.message || 'Could not import the selected Stitch images.');
+                logProcess('error', 'stitch.import', error?.message || 'Could not import the selected Stitch images.');
                 setNotice(error?.message || 'Could not import the selected Stitch images.', 'error', 7000);
             }
         },
@@ -3238,6 +4115,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     analysis: {
                         ...document.analysis,
                         status: 'idle',
+                        progressMessage: '',
+                        runId: 0,
                         warning: snapshot.inputs.length ? 'Only one image is loaded, so overlap analysis cannot run yet.' : 'Add two or more images to analyze a stitch.',
                         error: '',
                         backend: '',
@@ -3249,20 +4128,28 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
 
             const token = ++stitchAnalysisToken;
+            if ((snapshot.settings?.sceneMode || 'auto') !== 'screenshot') {
+                await runStitchPhotoRuntimeProbe({ log: false, priority: 'user-visible' });
+            }
             await showWorkspaceProgress('stitch', {
                 title: 'Running Analysis',
                 message: `Preparing Stitch analysis for ${snapshot.inputs.length} image${snapshot.inputs.length === 1 ? '' : 's'}...`,
                 progress: 0.06
             });
-            updateStitchDocument((document) => ({
+            updateStitchDocument((document) => normalizeStitchDocument({
                 ...document,
+                candidates: [],
+                activeCandidateId: null,
                 workspace: {
                     ...document.workspace,
-                    galleryOpen: false
+                    galleryOpen: false,
+                    alternativesOpen: document.workspace?.alternativesOpen !== false
                 },
                 analysis: {
                     ...document.analysis,
                     status: 'running',
+                    progressMessage: '',
+                    runId: token,
                     warning: '',
                     error: '',
                     backend: '',
@@ -3302,25 +4189,42 @@ window.addEventListener('DOMContentLoaded', async () => {
                             progress: ratio
                         });
                         updateStitchDocument((document) => {
-                            if (document.analysis?.status !== 'running') return document;
-                            return {
+                            if (document.analysis?.status !== 'running' || document.analysis?.runId !== token) return document;
+                            return normalizeStitchDocument({
                                 ...document,
                                 analysis: {
                                     ...document.analysis,
-                                    warning: message
+                                    progressMessage: message
                                 }
-                            };
+                            });
                         }, { renderStitch: true });
                     }
                 });
                 if (token !== stitchAnalysisToken) return;
+                syncStitchDiagnosticsFromAnalysisResult(result, {
+                    render: false,
+                    renderStitch: false,
+                    skipViewRender: false
+                });
+                if (result.backend) {
+                    logProcess('info', 'stitch.analysis', `Stitch selected the ${result.backend === 'opencv-wasm' ? 'photo/OpenCV' : 'screenshot'} backend.`, {
+                        dedupeKey: `stitch-backend:${token}:${result.backend}`,
+                        dedupeWindowMs: 120
+                    });
+                }
+                if (result.detectorLabel) {
+                    logProcess('info', 'stitch.worker', `Stitch photo analysis used ${result.detectorLabel} features.`, {
+                        dedupeKey: `stitch-detector:${token}:${result.detectorLabel}`,
+                        dedupeWindowMs: 120
+                    });
+                }
                 setStitchProgress({
                     active: true,
                     title: 'Running Analysis',
                     message: 'Rendering candidate previews for the gallery...',
                     progress: 0.9
                 });
-                logProcess('info', 'stitch.analysis', 'Rendering candidate previews for the gallery.', {
+                logProcess('active', 'stitch.preview', 'Rendering candidate previews for the gallery.', {
                     dedupeKey: `stitch-preview-build:${token}`,
                     dedupeWindowMs: 80
                 });
@@ -3366,6 +4270,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         previews: {}
                     }
                 });
+                const previewStartedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
                 const previews = await buildStitchPreviewMap(nextDocument);
                 if (token !== stitchAnalysisToken) {
                     clearWorkspaceProgress('stitch');
@@ -3381,16 +4286,29 @@ window.addEventListener('DOMContentLoaded', async () => {
                 });
                 updateStitchDocument(() => nextDocument, { renderStitch: true });
                 clearWorkspaceProgress('stitch');
+                logProcess('success', 'stitch.preview', `Rendered ${Object.keys(previews || {}).length} Stitch candidate preview${Object.keys(previews || {}).length === 1 ? '' : 's'} in ${Math.max(0, Math.round((typeof performance?.now === 'function' ? performance.now() : Date.now()) - previewStartedAt))}ms.`);
                 logProcess(result.warning ? 'warning' : 'success', 'stitch.analysis', result.warning || 'Stitch analysis completed and candidates are ready.');
                 setNotice(result.warning || 'Stitch analysis is ready.', result.warning ? 'warning' : 'success');
             } catch (error) {
                 if (token !== stitchAnalysisToken) return;
                 clearWorkspaceProgress('stitch');
+                syncStitchDiagnosticsFromAnalysisResult({
+                    runtime: error?.details?.runtime || null,
+                    backend: '',
+                    warning: '',
+                    lastFallbackReason: error?.details?.fallbackReason || error?.message || 'The Stitch analysis failed.'
+                }, {
+                    render: false,
+                    renderStitch: false,
+                    skipViewRender: false
+                });
                 updateStitchDocument((document) => ({
                     ...document,
                     analysis: {
                         ...document.analysis,
                         status: 'error',
+                        progressMessage: '',
+                        runId: 0,
                         error: error?.message || 'The stitch analysis failed.',
                         warning: '',
                         backend: '',
@@ -3433,6 +4351,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         chooseStitchCandidate(candidateId) {
             if (!candidateId) return;
+            if (store.getState().stitchDocument?.analysis?.status === 'running') return;
             updateStitchDocument((document) => ({
                 ...applyCandidateToDocument(document, candidateId),
                 workspace: {
@@ -3452,6 +4371,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async removeStitchInput(inputId) {
             if (!inputId) return;
+            if (store.getState().stitchDocument?.analysis?.status === 'running') return;
             stitchAnalysisToken += 1;
             updateStitchDocument((document) => {
                 const normalized = normalizeStitchDocument(document);
@@ -3460,24 +4380,16 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const nextSelection = normalized.selection.inputId === inputId
                     ? { inputId: nextInputs[0]?.id || null }
                     : normalized.selection;
-                return normalizeStitchDocument({
+                return invalidateStitchAnalysis({
                     ...normalized,
                     inputs: nextInputs,
                     placements: nextPlacements,
-                    candidates: [],
-                    activeCandidateId: null,
-                    selection: nextSelection,
-                    analysis: {
-                        ...normalized.analysis,
-                        status: 'idle',
-                        warning: nextInputs.length > 1 ? 'Run the analysis again after removing images.' : '',
-                        error: '',
-                        backend: '',
-                        diagnostics: [],
-                        previews: {}
-                    }
+                    selection: nextSelection
+                }, {
+                    warning: nextInputs.length > 1 ? 'Run the analysis again after removing images.' : ''
                 });
             }, { renderStitch: true });
+            logProcess('info', 'stitch.import', 'Removed an input image from the Stitch workspace.');
         },
         toggleStitchInputLock(inputId) {
             if (!inputId) return;
@@ -3491,30 +4403,32 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         reorderStitchInput(inputId, direction) {
             if (!inputId || !direction) return;
+            if (store.getState().stitchDocument?.analysis?.status === 'running') return;
             updateStitchDocument((document) => updateStitchInputOrderHelper(document, inputId, direction), { renderStitch: true });
         },
         updateStitchPlacement(inputId, patch, meta = { renderStitch: true }) {
             if (!inputId || !patch || typeof patch !== 'object') return;
+            if (store.getState().stitchDocument?.analysis?.status === 'running') return;
             updateStitchDocument((document) => updateStitchPlacementHelper(document, inputId, patch), meta);
         },
         updateStitchSetting(key, value) {
             if (!key) return;
-            updateStitchDocument((document) => ({
+            const nextValue = coerceStitchSettingValue(key, value);
+            updateStitchDocument((document) => invalidateStitchAnalysis({
                 ...document,
                 settings: {
                     ...document.settings,
-                    [key]: coerceStitchSettingValue(key, value)
-                },
-                analysis: {
-                    ...document.analysis,
-                    status: 'idle',
-                    warning: key === 'useFullResolutionAnalysis' && value
-                        ? 'Full-resolution analysis is enabled. It can be slower, but it may help on screenshots and UI captures.'
-                        : 'Stitch settings changed. Run the analysis again to refresh the ranked candidates.',
-                    error: '',
-                    backend: ''
+                    [key]: nextValue
                 }
+            }, {
+                warning: key === 'useFullResolutionAnalysis' && nextValue
+                    ? 'Full-resolution analysis is enabled. It can be slower, but it may help on screenshots and UI captures.'
+                    : 'Stitch settings changed. Run the analysis again to refresh the ranked candidates.'
             }), { renderStitch: true });
+            logProcess('success', 'stitch.settings', `Set Stitch ${key} to ${describeSettingValue(nextValue)}.`, {
+                dedupeKey: `stitch-setting:${key}:${JSON.stringify(nextValue)}`,
+                dedupeWindowMs: 80
+            });
         },
         resetSelectedStitchPlacement() {
             const documentState = normalizeStitchDocument(store.getState().stitchDocument);
@@ -3559,16 +4473,17 @@ window.addEventListener('DOMContentLoaded', async () => {
         async exportStitchProject() {
             const documentState = normalizeStitchDocument(store.getState().stitchDocument);
             if (!documentState.inputs.length) {
-                logProcess('warning', 'stitch.workspace', 'Blocked Stitch PNG export because the workspace has no inputs.');
+                logProcess('warning', 'stitch.export', 'Blocked Stitch PNG export because the workspace has no inputs.');
                 setNotice('Add images to the Stitch workspace before exporting.', 'warning');
                 return;
             }
+            const exportStartedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
             await showWorkspaceProgress('stitch', {
                 title: 'Exporting PNG',
                 message: 'Rendering the stitched composite to PNG...',
                 progress: 0.16
             });
-            logProcess('active', 'stitch.workspace', 'Rendering the stitched composite to PNG.');
+            logProcess('active', 'stitch.export', 'Rendering the stitched composite to PNG.');
             try {
                 const blob = await stitchEngine.exportPngBlob(documentState);
                 const baseName = getSuggestedStitchProjectName(documentState).replace(/\.[^/.]+$/, '') || 'stitch-project';
@@ -3585,18 +4500,18 @@ window.addEventListener('DOMContentLoaded', async () => {
                 });
                 clearWorkspaceProgress('stitch');
                 if (wasSaveCancelled(saveResult)) {
-                    logProcess('info', 'stitch.workspace', 'Cancelled the Stitch PNG save dialog.');
+                    logProcess('info', 'stitch.export', 'Cancelled the Stitch PNG save dialog.');
                     setNotice('Stitch PNG save cancelled.', 'info', 4200);
                     return;
                 }
                 if (!didSaveFile(saveResult)) {
                     throw new Error(saveResult?.error || 'Could not save the Stitch PNG.');
                 }
-                logProcess('success', 'stitch.workspace', `Exported Stitch PNG "${baseName}-stitched.png".`);
+                logProcess('success', 'stitch.export', `Exported Stitch PNG "${baseName}-stitched.png" in ${Math.max(0, Math.round((typeof performance?.now === 'function' ? performance.now() : Date.now()) - exportStartedAt))}ms.`);
                 setNotice('Stitch PNG export complete.', 'success');
             } catch (error) {
                 clearWorkspaceProgress('stitch');
-                logProcess('error', 'stitch.workspace', error?.message || 'Could not export the Stitch PNG.');
+                logProcess('error', 'stitch.export', error?.message || 'Could not export the Stitch PNG.');
                 setNotice(error?.message || 'Could not export the Stitch PNG.', 'error', 7000);
             }
         },
@@ -3988,6 +4903,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
             await deleteDerivedStudioAssetsByProjectIds(clearedProjectIds);
             clearActiveLibraryOrigin();
+            resetLibraryBackfillState();
             notifyLibraryChanged();
         },
         async renameLibraryAsset(id, name) {
@@ -4074,6 +4990,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (!isLibraryAssetRecord(entry)) continue;
                 await deleteFromLibraryDB(entry.id);
             }
+            resetLibraryBackfillState();
             notifyLibraryChanged();
         },
         async buildSecureLibraryExportRecord(bundle, options = {}) {
@@ -4084,7 +5001,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 bundle,
                 secureMode: options.secureMode || 'compressed',
                 passphrase: options.passphrase || '',
-                duplicateCopies: !!options.duplicateCopies
+                compatibilityMode: options.compatibilityMode || 'fast'
             };
             const result = backgroundTasks
                 ? await backgroundTasks.runTask('app-library', 'build-secure-library-export-record', request, {
@@ -4097,21 +5014,22 @@ window.addEventListener('DOMContentLoaded', async () => {
                 })
                 : await buildSecureLibraryExportRecordFallback(bundle, request);
             if (result?.runtime?.selection) {
-                logProcess('info', 'library.export', `Secure Library export packaging used ${result.runtime.selection}.`, {
+                logProcess(result.runtime.selection === 'js-fallback' ? 'warning' : 'info', 'library.export', `Secure Library export packaging used ${result.runtime.selection}.${result.runtime.fallbackReason ? ` ${result.runtime.fallbackReason}` : ''}`, {
                     dedupeKey: `library-export-runtime:${result.runtime.selection}`,
                     dedupeWindowMs: 400
                 });
             }
             return result;
         },
-        async resolveSecureLibraryImportRecord(parsed, passphrase = '') {
+        async resolveSecureLibraryImportRecord(parsed, passphrase = '', options = {}) {
             if (!parsed || typeof parsed !== 'object') {
                 throw new Error('No secure Library import payload was provided.');
             }
             const result = backgroundTasks
                 ? await backgroundTasks.runTask('app-library', 'resolve-secure-library-import-record', {
                     parsed,
-                    passphrase: passphrase || ''
+                    passphrase: passphrase || '',
+                    compatibilityMode: options.compatibilityMode || 'fast'
                 }, {
                     priority: 'user-visible',
                     processId: 'library.import',
@@ -4120,9 +5038,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                     replaceActive: true,
                     replayOnWorkerCrash: false
                 })
-                : await resolveSecureLibraryImportRecordFallback(parsed, passphrase || '');
+                : await resolveSecureLibraryImportRecordFallback(parsed, passphrase || '', {
+                    compatibilityMode: options.compatibilityMode || 'fast'
+                });
             if (result?.runtime?.selection) {
-                logProcess('info', 'library.import', `Secure Library import decoding used ${result.runtime.selection}.`, {
+                logProcess(result.runtime.selection === 'js-fallback' ? 'warning' : 'info', 'library.import', `Secure Library import decoding used ${result.runtime.selection}.${result.runtime.fallbackReason ? ` ${result.runtime.fallbackReason}` : ''}`, {
                     dedupeKey: `library-import-runtime:${result.runtime.selection}`,
                     dedupeWindowMs: 400
                 });
@@ -4249,7 +5169,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             stopPlayback();
             paletteExtractionImage = null;
             paletteExtractionOwner = null;
-            updateDocument((document) => ({
+            updateDocument((document) => applyEditorSettingsToDocument({
                 ...document,
                 source: { width: 0, height: 0, name: '', imageData: null },
                 layerStack: [],
@@ -4257,7 +5177,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 selection: { layerInstanceId: null },
                 workspace: { ...document.workspace, batchOpen: false },
                 batch: createEmptyBatchState()
-            }), { render: false });
+            }, store.getState().settings), { render: false });
             clearActiveLibraryOrigin('studio');
             engine.requestRender(store.getState().document);
             logProcess('success', 'editor.files', 'Started a new Editor project.');
@@ -4297,6 +5217,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                 clearActiveLibraryOrigin('studio');
                 engine.requestRender(store.getState().document);
+                if (store.getState().settings.editor.autoExtractPaletteOnLoad) {
+                    logProcess('info', 'settings.editor', `Auto-extracting a palette from "${file.name}" because Editor auto palette extraction is enabled.`, {
+                        dedupeKey: `auto-palette:${file.name}`,
+                        dedupeWindowMs: 120
+                    });
+                    await actions.extractPaletteFromFile(file);
+                }
                 setEditorProgress({
                     active: true,
                     title: 'Loading Image',
@@ -4367,7 +5294,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const preservedSource = state.document.source;
                 store.setState((current) => ({
                     ...current,
-                    document: {
+                    document: applyEditorSettingsToDocument({
                         ...current.document,
                         ...payloadWithoutPreview,
                         version: 'mns/v2',
@@ -4376,12 +5303,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                         workspace: normalizeWorkspace('studio', payloadWithoutPreview.workspace || current.document.workspace, !!selection.layerInstanceId),
                         source: preservedSource,
                         palette: payloadWithoutPreview.palette || current.document.palette,
-                        layerStack,
+                        layerStack: layerStack.map((instance) => applyEditorSettingsToLayerInstance(instance, store.getState().settings)),
                         selection,
                         view: normalizeViewState({ ...current.document.view, ...(payloadWithoutPreview.view || {}) }),
                         export: { ...current.document.export, ...(payloadWithoutPreview.export || {}) },
                         batch: createEmptyBatchState()
-                    }
+                    }, store.getState().settings)
                 }), { render: engine.hasImage() && !(shouldLoadImage && embeddedSource) });
                 clearActiveLibraryOrigin('studio');
 
@@ -4457,6 +5384,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         async saveState() {
             const state = store.getState();
             let preview = null;
+            let previewBlob = null;
             await showWorkspaceProgress('studio', {
                 title: 'Saving State',
                 message: 'Preparing the Editor state JSON...',
@@ -4471,7 +5399,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         message: 'Capturing the latest rendered preview for the state file...',
                         progress: 0.46
                     });
-                    ({ preview } = await captureStudioDocumentSnapshot(engine, state.document));
+                    ({ preview, blob: previewBlob } = await captureStudioDocumentSnapshot(engine, state.document));
                 } catch (error) {
                     console.error(error);
                     clearWorkspaceProgress('studio');
@@ -4502,6 +5430,24 @@ window.addEventListener('DOMContentLoaded', async () => {
                 logProcess('error', 'editor.export', saveResult?.error || 'Could not save the current state JSON.');
                 setNotice(saveResult?.error || 'Could not save the current state JSON.', 'error', 7000);
                 return;
+            }
+
+            let companionImageResult = null;
+            if (state.settings.general.saveImageOnSave && previewBlob instanceof Blob) {
+                setEditorProgress({
+                    active: true,
+                    title: 'Saving State',
+                    message: 'Saving the companion processed PNG...',
+                    progress: 0.93
+                });
+                const baseName = stripProjectExtension(saveResult.fileName || state.document.source.name || 'noise-studio-state');
+                companionImageResult = await maybeSaveCompanionImageOnSave(previewBlob, `${baseName}-processed.png`, {
+                    title: 'Save Companion Editor PNG',
+                    processId: 'editor.export',
+                    successMessage: 'Saved the companion processed PNG for the Editor state JSON.',
+                    cancelMessage: 'Cancelled the companion processed PNG save dialog after saving the state JSON.',
+                    errorMessage: 'Could not save the companion processed PNG.'
+                });
             }
 
             let libraryProject = null;
@@ -4548,7 +5494,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return;
             }
             logProcess('success', 'editor.export', 'Saved self-contained state JSON from the Editor.');
-            setNotice('State saved locally and synced to Library.', 'success');
+            setNotice(companionImageResult?.status === 'failed'
+                ? 'State saved and synced to Library, but the companion processed PNG could not be saved.'
+                : 'State saved locally and synced to Library.', companionImageResult?.status === 'failed' ? 'warning' : 'success');
         },
         setLoadImageOnOpen(value) {
             store.setState((state) => ({ ...state, ui: { ...state.ui, loadImageOnOpen: value } }), { render: false });
@@ -4668,6 +5616,23 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (!didSaveFile(saveResult)) {
                     throw new Error(saveResult?.error || 'Could not save the 3D scene JSON.');
                 }
+                let companionImageResult = null;
+                if (store.getState().settings.general.saveImageOnSave && capture.blob instanceof Blob) {
+                    setThreeDProgress({
+                        active: true,
+                        title: 'Saving 3D JSON',
+                        message: 'Saving the companion 3D preview PNG...',
+                        progress: 0.94
+                    });
+                    const baseName = stripProjectExtension(saveResult.fileName || suggestedName);
+                    companionImageResult = await maybeSaveCompanionImageOnSave(capture.blob, `${baseName}-preview.png`, {
+                        title: 'Save Companion 3D Preview PNG',
+                        processId: '3d.export',
+                        successMessage: 'Saved the companion 3D preview PNG for the scene JSON.',
+                        cancelMessage: 'Cancelled the companion 3D preview PNG save dialog after saving the scene JSON.',
+                        errorMessage: 'Could not save the companion 3D preview PNG.'
+                    });
+                }
                 setThreeDProgress({
                     active: true,
                     title: 'Saving 3D JSON',
@@ -4688,7 +5653,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                     setNotice('3D scene JSON saved locally, but the matching Library project could not be updated.', 'warning', 7000);
                     return saveResult;
                 }
-                setNotice('3D scene JSON saved locally and synced to Library.', 'success');
+                setNotice(companionImageResult?.status === 'failed'
+                    ? '3D scene JSON saved and synced to Library, but the companion preview PNG could not be saved.'
+                    : '3D scene JSON saved locally and synced to Library.', companionImageResult?.status === 'failed' ? 'warning' : 'success');
                 return saveResult;
             } catch (error) {
                 clearWorkspaceProgress('3d');
@@ -5066,7 +6033,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         async newThreeDProject() {
             if (!ensureThreeDSceneUnlocked('starting a new 3D scene')) return;
             if (!await ensureProjectCanBeReplaced('3d', 'starting a new 3D scene')) return;
-            updateThreeDDocument(() => createEmptyThreeDDocument());
+            updateThreeDDocument(() => createSettingsDrivenThreeDDocument(store.getState().settings));
             clearActiveLibraryOrigin('3d');
             commitActiveSection('3d');
             logProcess('success', '3d.workspace', 'Started a new 3D scene.');
@@ -5535,6 +6502,21 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         updateThreeDSceneSettings(patch = {}) {
             if (!ensureThreeDSceneUnlocked('changing 3D scene settings')) return;
+            const settingsPatch = {};
+            if (Object.prototype.hasOwnProperty.call(patch, 'showGrid')) settingsPatch.showGrid = !!patch.showGrid;
+            if (Object.prototype.hasOwnProperty.call(patch, 'showAxes')) settingsPatch.showAxes = !!patch.showAxes;
+            if (Object.keys(settingsPatch).length) {
+                updateSettingsState((current) => ({
+                    ...current,
+                    threeD: {
+                        ...current.threeD,
+                        preferences: {
+                            ...current.threeD.preferences,
+                            ...settingsPatch
+                        }
+                    }
+                }));
+            }
             updateThreeDDocument((document) => ({
                 ...document,
                 scene: {
@@ -5577,6 +6559,22 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         updateThreeDView(patch = {}) {
             if (!ensureThreeDSceneUnlocked('moving the 3D camera')) return;
+            const settingsPatch = {};
+            ['cameraMode', 'navigationMode', 'wheelMode', 'snapTranslationStep', 'snapRotationDegrees', 'fov', 'near', 'far', 'flyMoveSpeed', 'flyLookSensitivity', 'gizmoScale', 'viewportHighResCap'].forEach((key) => {
+                if (Object.prototype.hasOwnProperty.call(patch, key)) settingsPatch[key] = patch[key];
+            });
+            if (Object.keys(settingsPatch).length) {
+                updateSettingsState((current) => ({
+                    ...current,
+                    threeD: {
+                        ...current.threeD,
+                        preferences: {
+                            ...current.threeD.preferences,
+                            ...settingsPatch
+                        }
+                    }
+                }));
+            }
             updateThreeDDocument((document) => ({
                 ...document,
                 view: {
@@ -5587,6 +6585,22 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         configureThreeDCanvasView(patch = {}, snapshot = null) {
             if (!ensureThreeDSceneUnlocked('changing the 3D camera view')) return;
+            const settingsPatch = {};
+            ['cameraMode', 'navigationMode', 'wheelMode', 'snapTranslationStep', 'snapRotationDegrees', 'fov', 'near', 'far', 'flyMoveSpeed', 'flyLookSensitivity', 'gizmoScale', 'viewportHighResCap'].forEach((key) => {
+                if (Object.prototype.hasOwnProperty.call(patch, key)) settingsPatch[key] = patch[key];
+            });
+            if (Object.keys(settingsPatch).length) {
+                updateSettingsState((current) => ({
+                    ...current,
+                    threeD: {
+                        ...current.threeD,
+                        preferences: {
+                            ...current.threeD.preferences,
+                            ...settingsPatch
+                        }
+                    }
+                }));
+            }
             updateThreeDDocument((document) => {
                 const normalized = normalizeThreeDDocument(document);
                 let nextView = {
@@ -5624,7 +6638,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         resetThreeDCamera() {
             if (!ensureThreeDSceneUnlocked('resetting the 3D camera')) return;
-            const defaults = createEmptyThreeDDocument().view;
+            const defaults = applyThreeDSettingsToDocument(createEmptyThreeDDocument(), store.getState().settings, 'current').view;
             updateThreeDDocument((document) => ({
                 ...document,
                 view: {
@@ -5810,64 +6824,6 @@ window.addEventListener('DOMContentLoaded', async () => {
                 position: [0, 0, 0],
                 rotation: [0, 0, 0],
                 scale: [1, 1, 1]
-            });
-        },
-        applyThreeDBooleanSlice(itemId, cutSnapshot = null) {
-            if (!itemId || !cutSnapshot?.geometry) return;
-            if (!ensureThreeDSceneUnlocked('applying a boolean slice')) return;
-            updateThreeDDocument((document) => {
-                const normalized = normalizeThreeDDocument(document);
-                const target = normalized.scene.items.find((item) => item.id === itemId);
-                if (!isThreeDBooleanCompatibleItem(target)) return normalized;
-                return {
-                    ...normalized,
-                    scene: {
-                        ...normalized.scene,
-                        items: normalized.scene.items.map((item) => item.id === itemId
-                            ? {
-                                ...item,
-                                booleanCuts: [
-                                    ...(Array.isArray(item.booleanCuts) ? item.booleanCuts : []),
-                                    {
-                                        ...cutSnapshot,
-                                        mode: 'subtract'
-                                    }
-                                ]
-                            }
-                            : item)
-                    },
-                    render: {
-                        ...normalized.render,
-                        currentSamples: 0
-                    }
-                };
-            });
-        },
-        resetThreeDItemBooleanSlices(itemId) {
-            if (!itemId) return;
-            if (!ensureThreeDSceneUnlocked('resetting boolean slices')) return;
-            updateThreeDDocument((document) => {
-                const normalized = normalizeThreeDDocument(document);
-                const target = normalized.scene.items.find((item) => item.id === itemId);
-                if (!isThreeDBooleanCompatibleItem(target) || !(target.booleanCuts || []).length) {
-                    return normalized;
-                }
-                return {
-                    ...normalized,
-                    scene: {
-                        ...normalized.scene,
-                        items: normalized.scene.items.map((item) => item.id === itemId
-                            ? {
-                                ...item,
-                                booleanCuts: []
-                            }
-                            : item)
-                    },
-                    render: {
-                        ...normalized.render,
-                        currentSamples: 0
-                    }
-                };
             });
         },
         duplicateThreeDItem(itemId) {
@@ -6179,6 +7135,38 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ...patch
                 }
             }), meta);
+        },
+        async applyCurrentStitchDefaults() {
+            const settings = store.getState().settings;
+            stitchAnalysisToken += 1;
+            clearWorkspaceProgress('stitch');
+            updateStitchDocument((document) => invalidateStitchAnalysis(
+                applyStitchSettingsToDocument(document, settings, 'apply-defaults'),
+                { warning: 'Applied the saved Stitch defaults to the current project. Run the analysis again to refresh candidates.' }
+            ), { renderStitch: true });
+            logProcess('success', 'stitch.settings', 'Applied the saved Stitch defaults to the current project.');
+            setNotice('Applied the saved Stitch defaults to the current project.', 'success', 4200);
+            return true;
+        },
+        async probeStitchPhotoRuntime() {
+            const diagnostics = await runStitchPhotoRuntimeProbe({ log: true, priority: 'user-visible' });
+            if (diagnostics.runtimeAvailable) {
+                logProcess('success', 'stitch.worker', `Stitch photo runtime is ready. Supported detectors: ${(diagnostics.supportedDetectors || []).join(', ') || 'none reported'}.`, {
+                    dedupeKey: `stitch-worker-ready:${(diagnostics.supportedDetectors || []).join(',')}`,
+                    dedupeWindowMs: 240
+                });
+                setNotice('Stitch photo runtime is ready.', 'success', 4200);
+            } else {
+                setNotice(diagnostics.lastFallbackReason || 'The Stitch photo runtime is unavailable.', 'warning', 6000);
+            }
+            return diagnostics;
+        },
+        async applyCurrentThreeDDefaults() {
+            if (!ensureThreeDSceneUnlocked('applying 3D render defaults')) return false;
+            updateThreeDDocument((document) => applyCurrentThreeDDefaults(document, store.getState().settings));
+            logProcess('success', 'settings.3d', 'Applied the saved 3D render defaults to the current scene.');
+            setNotice('Applied the saved 3D render defaults to the current scene.', 'success', 4200);
+            return true;
         }
     };
 
@@ -6205,10 +7193,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             validatePayload(rawPayload) {
                 const normalized = stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload));
                 const validated = validateImportPayload(normalized, 'document');
-                return {
+                return applyEditorSettingsToDocument({
                     ...validated,
-                    layerStack: reindexStack(registry, validated.layerStack || [])
-                };
+                    layerStack: reindexStack(registry, validated.layerStack || []).map((instance) => applyEditorSettingsToLayerInstance(instance, store.getState().settings))
+                }, store.getState().settings);
             },
             async captureDocument(document, payload = null) {
                 const basePayload = payload || buildLibraryPayload(document);
@@ -6269,13 +7257,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                     await engine.loadImage(image, validated.source);
                 }
                 const runtimePayload = stripStudioPreview(validated);
-                updateDocument((document) => ({
+                updateDocument((document) => applyEditorSettingsToDocument({
                     ...document,
                     ...runtimePayload,
                     layerStack: runtimePayload.layerStack,
                     source: runtimePayload.source || document.source,
                     workspace: normalizeWorkspace('studio', runtimePayload.workspace || document.workspace, !!runtimePayload.selection?.layerInstanceId)
-                }), { render: true });
+                }, store.getState().settings), { render: true });
                 setActiveLibraryOrigin('studio', libraryId, libraryName);
                 commitActiveSection('editor');
                 logProcess('success', 'library.projects', `Loaded "${libraryName || 'project'}" from the Library into Editor.`);
@@ -6304,7 +7292,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             },
             validatePayload(rawPayload) {
                 const normalized = stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload));
-                return normalizeStitchDocument(validateImportPayload(normalized, 'stitch-document'));
+                return applyThemeToStitchDocument(normalizeStitchDocument(validateImportPayload(normalized, 'stitch-document')), store.getState().settings);
             },
             async captureDocument(document) {
                 const normalized = normalizeStitchDocument(document);
@@ -6377,9 +7365,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             serializeDocument(document) {
                 return buildThreeDLibraryPayload(document);
             },
+            countLegacyCuts(rawPayload) {
+                return countLegacyThreeDBooleanCuts(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload)));
+            },
             validatePayload(rawPayload) {
                 const normalized = normalizeThreeDDocument(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload)));
-                return {
+                return applyThreeDSettingsToDocument({
                     ...normalized,
                     render: {
                         ...normalized.render,
@@ -6388,7 +7379,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     renderJob: {
                         ...createEmptyThreeDDocument().renderJob
                     }
-                };
+                }, store.getState().settings, 'current');
             },
             async captureDocument(document) {
                 const normalized = normalizeThreeDDocument(document);
@@ -6454,6 +7445,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             },
             async restorePayload(rawPayload, libraryId = null, libraryName = null) {
                 if (!ensureThreeDSceneUnlocked(`loading "${libraryName || 'this 3D Library project'}"`)) return false;
+                const legacyCutCount = this.countLegacyCuts(rawPayload);
                 const validated = this.validatePayload(rawPayload);
                 store.setState((current) => ({ ...current, threeDDocument: validated }), { render: false });
                 setActiveLibraryOrigin('3d', libraryId, libraryName);
@@ -6463,6 +7455,14 @@ window.addEventListener('DOMContentLoaded', async () => {
                 } catch (error) {
                     console.error(error);
                     logProcess('warning', 'library.assets', error?.message || 'Could not backfill scene assets while loading a 3D Library project.');
+                }
+                if (legacyCutCount > 0) {
+                    const cutLabel = `${legacyCutCount} legacy cut${legacyCutCount === 1 ? '' : 's'}`;
+                    logProcess('warning', '3d.workspace', `Removed ${cutLabel} while loading "${libraryName || 'project'}". 3D cuts are no longer supported.`, {
+                        dedupeKey: `legacy-3d-cuts:${libraryId || libraryName || legacyCutCount}`,
+                        dedupeWindowMs: 500
+                    });
+                    setNotice(`Removed ${cutLabel} from "${libraryName || 'project'}" because 3D cuts are no longer supported.`, 'warning', 7000);
                 }
                 logProcess('success', 'library.projects', `Loaded "${libraryName || 'project'}" from the Library into 3D.`);
                 setNotice(`Loaded "${libraryName || 'project'}" from Library.`, 'success');
@@ -6474,6 +7474,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     setBootStage('workspace init', 'Building workspace UI shells.');
     view = createWorkspaceUI(root, registry, actions, { stitchEngine, logger });
     bootMetrics.mark('workspace-ui-ready', 'Workspace UI shells are mounted.');
+    readStorageEstimate().then((storageEstimate) => {
+        if (!storageEstimate) return;
+        updateSettingsState((current) => current, {
+            diagnostics: { storageEstimate },
+            skipViewRender: false
+        });
+        warnIfStoragePressureHigh(storageEstimate);
+    }).catch(() => {});
+    if (activeSettings.library.autoLoadOnStartup) {
+        logProcess('info', 'settings.library', 'Priming the Library in the background on startup because Library auto-load is enabled.', {
+            dedupeKey: 'settings-library-autoload',
+            dedupeWindowMs: 1500
+        });
+        view.primeLibrary?.();
+    }
     setBootStage('editor engine init', 'Initializing the Editor render engine.');
     await engine.init(view.getRenderRefs().canvas);
     engine.attachRefs(view.getRenderRefs());

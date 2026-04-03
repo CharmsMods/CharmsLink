@@ -59,7 +59,23 @@ function compactEntries(entries = []) {
     return compacted;
 }
 
-export function createLogsPanel(root, { logger = null } = {}) {
+function normalizePanelSettings(settings = {}) {
+    return {
+        maxUiCards: Math.max(0, Math.round(Number(settings.maxUiCards) || 0)),
+        levelFilter: settings.levelFilter === 'warnings-errors' ? 'warnings-errors' : 'all',
+        compactMessages: settings.compactMessages !== false,
+        completionFlashEffects: settings.completionFlashEffects !== false
+    };
+}
+
+function filterEntries(entries = [], levelFilter = 'all') {
+    if (levelFilter !== 'warnings-errors') {
+        return Array.isArray(entries) ? entries : [];
+    }
+    return (Array.isArray(entries) ? entries : []).filter((entry) => entry?.level === 'warning' || entry?.level === 'error');
+}
+
+export function createLogsPanel(root, { logger = null, settings = null } = {}) {
     root.innerHTML = `
         <style data-logs-panel-style>
             .logs-shell{position:relative;height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);background:#090909;color:#f5f1e8;overflow:hidden}
@@ -164,13 +180,35 @@ export function createLogsPanel(root, { logger = null } = {}) {
     let renderQueued = false;
     let snapshot = Array.isArray(logger?.getSnapshot?.()) ? logger.getSnapshot() : [];
     let completionQueue = [];
+    let panelSettings = normalizePanelSettings(settings);
 
     function render() {
         renderQueued = false;
         pendingRender = false;
-        const processes = Array.isArray(snapshot) ? snapshot : [];
+        const sourceProcesses = Array.isArray(snapshot) ? snapshot : [];
+        const filteredProcesses = sourceProcesses
+            .map((process) => {
+                const entries = filterEntries(process.entries || [], panelSettings.levelFilter);
+                if (panelSettings.levelFilter === 'warnings-errors' && !entries.length) {
+                    return null;
+                }
+                return {
+                    ...process,
+                    entries,
+                    lastMessage: entries.length
+                        ? entries[entries.length - 1]?.message || process.lastMessage || ''
+                        : process.lastMessage || ''
+                };
+            })
+            .filter(Boolean);
+        const processes = panelSettings.maxUiCards > 0
+            ? filteredProcesses.slice(0, panelSettings.maxUiCards)
+            : filteredProcesses;
         if (refs.count) {
-            refs.count.textContent = `${processes.length} process${processes.length === 1 ? '' : 'es'}`;
+            const suffix = processes.length === 1 ? '' : 'es';
+            refs.count.textContent = processes.length !== sourceProcesses.length
+                ? `${processes.length}/${sourceProcesses.length} visible process${suffix}`
+                : `${processes.length} process${suffix}`;
         }
         if (!refs.grid) return;
         if (!processes.length) {
@@ -186,8 +224,15 @@ export function createLogsPanel(root, { logger = null } = {}) {
         }
         refs.grid.innerHTML = processes.map((process) => {
             const progress = process.progress == null ? null : Math.max(0, Math.min(1, Number(process.progress) || 0));
-            const compactedEntries = compactEntries(process.entries || []);
-            const lines = compactedEntries.slice().reverse().map((entry) => `
+            const displayEntries = panelSettings.compactMessages
+                ? compactEntries(process.entries || [])
+                : (process.entries || []).map((entry) => ({
+                    ...entry,
+                    count: 1,
+                    firstTimestamp: entry.timestamp,
+                    lastTimestamp: entry.timestamp
+                }));
+            const lines = displayEntries.slice().reverse().map((entry) => `
                 <div class="log-line" data-level="${escapeHtml(entry.level || 'info')}">
                     <span class="log-line-time">${escapeHtml(
                         entry.count > 1
@@ -269,6 +314,7 @@ export function createLogsPanel(root, { logger = null } = {}) {
     }
 
     function playCompletionEffect(event) {
+        if (!panelSettings.completionFlashEffects) return;
         const tone = event?.status === 'error' ? 'error' : event?.status === 'success' ? 'success' : '';
         if (!tone || !event?.processId) return;
         spawnScreenFlash(event.processId, tone);
@@ -350,6 +396,10 @@ export function createLogsPanel(root, { logger = null } = {}) {
         destroy() {
             unsubscribe();
             unsubscribeEvents();
+        },
+        setSettings(nextSettings = {}) {
+            panelSettings = normalizePanelSettings(nextSettings);
+            scheduleRender();
         },
         handleLogEvent(event) {
             if (!active || !event?.completed) return;

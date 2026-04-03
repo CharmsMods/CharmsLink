@@ -47,7 +47,7 @@ function dataUrlToText(dataUrl) {
 }
 
 export class ThreeDAssetPreview {
-    constructor(host) {
+    constructor(host, options = {}) {
         this.host = host;
         this.loader = new GLTFLoader();
         this.scene = new THREE.Scene();
@@ -83,12 +83,26 @@ export class ThreeDAssetPreview {
         this.currentRoot = null;
         this.destroyed = false;
         this.loadToken = 0;
+        this.quality = 'balanced';
         this.animate = this.animate.bind(this);
         this.handleResize = this.handleResize.bind(this);
         this.resizeObserver = new ResizeObserver(this.handleResize);
         this.resizeObserver.observe(this.host);
+        this.setQuality(options.quality || 'balanced');
         this.handleResize();
         this.animate();
+    }
+
+    setQuality(value) {
+        const normalized = String(value || '').toLowerCase();
+        this.quality = normalized === 'performance' || normalized === 'quality' ? normalized : 'balanced';
+        this.handleResize();
+    }
+
+    getPixelRatioCap() {
+        if (this.quality === 'performance') return 1;
+        if (this.quality === 'quality') return 2;
+        return 1.5;
     }
 
     handleResize() {
@@ -97,7 +111,7 @@ export class ThreeDAssetPreview {
         const height = Math.max(1, Math.round(this.host.clientHeight || 1));
         this.camera.aspect = width / Math.max(1, height);
         this.camera.updateProjectionMatrix();
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.getPixelRatioCap()));
         this.renderer.setSize(width, height, false);
         this.renderNow();
     }
@@ -171,6 +185,6 @@ export class ThreeDAssetPreview {
     }
 }
 
-export function createThreeDAssetPreview(host) {
-    return new ThreeDAssetPreview(host);
+export function createThreeDAssetPreview(host, options = {}) {
+    return new ThreeDAssetPreview(host, options);
 }

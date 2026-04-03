@@ -118,6 +118,8 @@ export function createEmptyStitchDocument(theme = 'light') {
         },
         analysis: {
             status: 'idle',
+            progressMessage: '',
+            runId: 0,
             warning: '',
             error: '',
             lastRunAt: 0,
@@ -254,6 +256,8 @@ export function normalizeStitchDocument(document = {}) {
         },
         analysis: {
             status: ['idle', 'running', 'ready', 'error'].includes(document.analysis?.status) ? document.analysis.status : 'idle',
+            progressMessage: String(document.analysis?.progressMessage || ''),
+            runId: Math.max(0, Math.round(Number(document.analysis?.runId) || 0)),
             warning: String(document.analysis?.warning || ''),
             error: String(document.analysis?.error || ''),
             lastRunAt: Number(document.analysis?.lastRunAt) || 0,
@@ -469,6 +473,7 @@ export function stripEphemeralStitchState(document) {
             warning: normalized.analysis.warning,
             error: normalized.analysis.error,
             lastRunAt: normalized.analysis.lastRunAt,
+            backend: normalized.analysis.backend,
             diagnostics: normalized.analysis.diagnostics,
             previews: {}
         }

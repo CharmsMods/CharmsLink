@@ -64,9 +64,11 @@ function rememberRetiredDispatch(domainState, dispatchId) {
 }
 
 function workerSupports(domainState, task, capabilities, payload) {
+    const workerType = String(domainState.config.type || 'module').toLowerCase();
+    const requiresModuleWorker = workerType !== 'classic';
     return !!domainState.config.workerUrl
         && capabilities.worker
-        && capabilities.moduleWorker
+        && (!requiresModuleWorker || capabilities.moduleWorker)
         && (typeof domainState.config.supportsTask !== 'function'
             || domainState.config.supportsTask(task, capabilities, payload));
 }
@@ -76,6 +78,9 @@ export function createBackgroundTaskBroker(options = {}) {
     const onEvent = typeof options.onEvent === 'function' ? options.onEvent : null;
     const onTaskMetric = typeof options.onTaskMetric === 'function' ? options.onTaskMetric : null;
     const domains = new Map();
+    let maxConcurrentTasks = Number.isFinite(Number(options.maxConcurrentTasks)) && Number(options.maxConcurrentTasks) > 0
+        ? Math.max(1, Math.round(Number(options.maxConcurrentTasks)))
+        : Number.POSITIVE_INFINITY;
 
     function registerDomain(domain, config = {}) {
         if (!domain) return;
@@ -108,6 +113,14 @@ export function createBackgroundTaskBroker(options = {}) {
 
     function emitMetric(metric) {
         onTaskMetric?.(metric);
+    }
+
+    function getActiveTaskCount() {
+        let count = 0;
+        domains.forEach((domainState) => {
+            if (domainState.active) count += 1;
+        });
+        return count;
     }
 
     function settleJob(job, method, value) {
@@ -151,6 +164,7 @@ export function createBackgroundTaskBroker(options = {}) {
 
     function queueNext(domainState) {
         if (domainState.active || !domainState.queue.length) return;
+        if (getActiveTaskCount() >= maxConcurrentTasks) return;
         const nextJob = domainState.queue.shift();
         if (!nextJob) return;
         if (nextJob.cancelled || nextJob.signal?.aborted || nextJob.settled) {
@@ -169,7 +183,7 @@ export function createBackgroundTaskBroker(options = {}) {
         } else {
             domainState.queue = domainState.queue.filter((queuedJob) => queuedJob.id !== job.id);
         }
-        queueNext(domainState);
+        drainQueues();
     }
 
     function requeueTaskFront(domainState, job) {
@@ -183,7 +197,7 @@ export function createBackgroundTaskBroker(options = {}) {
         }
         domainState.queue.unshift(job);
         sortQueue(domainState.queue);
-        queueNext(domainState);
+        drainQueues();
     }
 
     function retireJob(domainState, job, reason = 'Task cancelled.', options = {}) {
@@ -221,8 +235,22 @@ export function createBackgroundTaskBroker(options = {}) {
             }
         }
         settleJob(job, 'reject', options.error || abortError(reason));
-        queueNext(domainState);
+        drainQueues();
         return true;
+    }
+
+    function drainQueues() {
+        if (getActiveTaskCount() >= maxConcurrentTasks) return;
+        let madeProgress = true;
+        while (madeProgress && getActiveTaskCount() < maxConcurrentTasks) {
+            madeProgress = false;
+            domains.forEach((domainState) => {
+                if (domainState.active || !domainState.queue.length) return;
+                if (getActiveTaskCount() >= maxConcurrentTasks) return;
+                madeProgress = true;
+                queueNext(domainState);
+            });
+        }
     }
 
     async function createWorkerRequest(job) {
@@ -297,7 +325,9 @@ export function createBackgroundTaskBroker(options = {}) {
 
     function ensureWorker(domainState) {
         if (domainState.workerReady) return domainState.workerReady;
-        if (!domainState.config.workerUrl || !capabilities.worker || !capabilities.moduleWorker) {
+        const workerType = String(domainState.config.type || 'module').toLowerCase();
+        const requiresModuleWorker = workerType !== 'classic';
+        if (!domainState.config.workerUrl || !capabilities.worker || (requiresModuleWorker && !capabilities.moduleWorker)) {
             return Promise.resolve(null);
         }
 
@@ -307,7 +337,7 @@ export function createBackgroundTaskBroker(options = {}) {
             let worker = null;
             let ready = false;
             try {
-                worker = new Worker(domainState.config.workerUrl, { type: domainState.config.type || 'module' });
+                worker = new Worker(domainState.config.workerUrl, { type: requiresModuleWorker ? 'module' : 'classic' });
                 domainState.worker = worker;
 
                 const failBoot = (error) => {
@@ -375,6 +405,10 @@ export function createBackgroundTaskBroker(options = {}) {
                     }
 
                     if (message.type === WORKER_EVENT_TYPES.ERROR) {
+                        const error = new Error(message.error || `Worker task "${activeJob.task}" failed.`);
+                        if (message.details && typeof message.details === 'object') {
+                            Object.assign(error, message.details);
+                        }
                         emitMetric({
                             domain: domainState.name,
                             task: activeJob.task,
@@ -384,7 +418,7 @@ export function createBackgroundTaskBroker(options = {}) {
                             failed: true
                         });
                         finalizeTask(domainState, activeJob);
-                        settleJob(activeJob, 'reject', new Error(message.error || `Worker task "${activeJob.task}" failed.`));
+                        settleJob(activeJob, 'reject', error);
                     }
                 };
 
@@ -611,7 +645,7 @@ export function createBackgroundTaskBroker(options = {}) {
 
             domainState.queue.push(job);
             sortQueue(domainState.queue);
-            queueNext(domainState);
+            drainQueues();
         });
     }
 
@@ -649,6 +683,15 @@ export function createBackgroundTaskBroker(options = {}) {
     return {
         registerDomain,
         runTask,
+        configure(nextOptions = {}) {
+            if (Object.prototype.hasOwnProperty.call(nextOptions, 'maxConcurrentTasks')) {
+                const requested = Number(nextOptions.maxConcurrentTasks);
+                maxConcurrentTasks = Number.isFinite(requested) && requested > 0
+                    ? Math.max(1, Math.round(requested))
+                    : Number.POSITIVE_INFINITY;
+                drainQueues();
+            }
+        },
         cancelTasks,
         cancelScope(scope, options = {}) {
             cancelTasks({
@@ -665,6 +708,11 @@ export function createBackgroundTaskBroker(options = {}) {
         destroy,
         getCapabilities() {
             return { ...capabilities };
+        },
+        getConfig() {
+            return {
+                maxConcurrentTasks: Number.isFinite(maxConcurrentTasks) ? maxConcurrentTasks : 0
+            };
         }
     };
 }

@@ -36,7 +36,16 @@
 
 [done] when something finishes and the Logs tab button turns green or something fails/error and it turns Red, display the message that it came from, to the right of the logs button if the user is not on the logs tab.
 
+[done] for the logs tab, when something that was processing finishes sucsessfully, if the logs tab is open, wash the entire background of the page in green to help signify that something good happened for the user, and highlight the box it happened in with a light gold color and a nice animation that will fade away.
+
+
 ## Not Done
+
+fix 3D tab's assets drawer: when the user trys to drag and drop something from it into the scene, nothing happens or gets loaded, and the logs tab says nothing
+
+for the editor tab, the 3 wheel color grading layer, when the mouse clicks on a wheel, divide the movement of the orignal mouse's movement distance, in order to give the user greater precision when moving inside the wheel, since currently the sensitivity is way too high and the wheels are small so that makes it worse, possibly stacking wheels would allow them to be bigger.
+
+look into a solution for making the UI stay responsive during the 3D viewport rendering in path trace mode (not png renders, just with the viewport open and on path trace mode) 
 
 while the library is loading, show the library's logs from the log tab, on the loading overlay since many new users may not understand that they can see this info on the logs tab.
 
@@ -72,4 +81,6 @@ check to see if the current way the library indexs it's contents is making it sl
 
 perhaps adding a loading sequence where the page is unusable when it first loads, where this gives the entire site time to load the important things, and makes it much more likely that the UI will be 100% responsive, some sort of logo animation needed for after i iterate on a design. or add a screen that loads before anything on the site, that asks what the user wants to do, and lets them check whether or not they want to load certain tabs of the site on page load, by check boxes or toggles, and if the user visits a tab they did not check to have loaded on page load, there should be an overlay asking if they want to boot up that tab. Library however should not be apart of this, and should load every time and background process it's startup processes; use web workers to let it work in the background doing its loading and searching and healing of any assets along with everything else it does in the background, which is quite a lot on load and the first few interactions.
 
-potentially huge job in terms of making sure nothing is missed, but reorganizing any code files in the database to be in better groups, since there are many different files for different tabs, engines, and 
+potentially huge job in terms of making sure nothing is missed, but reorganizing any code files in the database to be in better groups, since there are many different files for different tabs, engines, and having things organized would be a life saver. it would be  extremely important to use move and copy commands,and then edit realtive paths and where files point to, rather than re-writing entire files from scratch and making errors.
+
+add animations to the entire site, and a toggle in settings to disable animations for the site

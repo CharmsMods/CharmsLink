@@ -1,15 +1,16 @@
 import { createThreeDAssetPreview } from '../3d/assetPreview.js';
-import { didSaveFile, saveDataUrlLocally, saveJsonLocally, wasSaveCancelled } from '../io/localSave.js';
+import { didSaveFile, saveDataUrlLocally, saveJsonLocally, saveTextLocally, wasSaveCancelled } from '../io/localSave.js';
 import { maybeYieldToUi, nextPaint } from './scheduling.js';
+import {
+    isSecureLibraryCompatibilityError,
+    LIBRARY_ASSET_FOLDER_FORMAT,
+    LIBRARY_EXPORT_FORMAT,
+    LIBRARY_EXPORT_TYPE,
+    LIBRARY_SECURE_EXPORT_FORMAT,
+    LEGACY_LIBRARY_EXPORT_FORMAT
+} from '../library/secureTransfer.js';
 
 const SKIP_PARAMS = new Set(['_libraryName', '_libraryTags', '_libraryProjectType', '_libraryHoverSource', '_librarySourceArea', '_librarySourceCount']);
-const LIBRARY_EXPORT_TYPE = 'noise-studio-library';
-const LIBRARY_EXPORT_FORMAT = 'library-json/v2';
-const LEGACY_LIBRARY_EXPORT_FORMAT = 'library-json/v1';
-const LIBRARY_SECURE_EXPORT_FORMAT = 'library-secure-json/v1';
-const LIBRARY_ASSET_FOLDER_FORMAT = 'library-assets-folder/v1';
-const LIBRARY_SECURE_KDF_ITERATIONS = 250000;
-const textEncoder = new TextEncoder();
 
 function escapeHtml(value) {
     return String(value ?? '')
@@ -449,97 +450,19 @@ function extractLibraryImportBundle(parsed, fallbackName) {
     };
 }
 
-function bytesToBase64(bytes) {
-    let binary = '';
-    const chunkSize = 0x8000;
-    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-        const chunk = bytes.subarray(offset, offset + chunkSize);
-        binary += String.fromCharCode(...chunk);
-    }
-    return btoa(binary);
-}
-
-function base64ToBytes(base64) {
-    const binary = atob(String(base64 || ''));
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index);
-    }
-    return bytes;
-}
-
-async function gzipText(text) {
-    if (typeof CompressionStream !== 'function') {
-        throw new Error('This browser does not support compressed Library exports yet.');
-    }
-    const stream = new Blob([text], { type: 'application/json' })
-        .stream()
-        .pipeThrough(new CompressionStream('gzip'));
-    const buffer = await new Response(stream).arrayBuffer();
-    return new Uint8Array(buffer);
-}
-
-async function gunzipText(bytes) {
-    if (typeof DecompressionStream !== 'function') {
-        throw new Error('This browser does not support compressed Library imports yet.');
-    }
-    const stream = new Blob([bytes], { type: 'application/gzip' })
-        .stream()
-        .pipeThrough(new DecompressionStream('gzip'));
-    return await new Response(stream).text();
-}
-
-async function deriveLibraryKey(passphrase, salt, iterations = LIBRARY_SECURE_KDF_ITERATIONS) {
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        textEncoder.encode(String(passphrase || '')),
-        'PBKDF2',
-        false,
-        ['deriveKey']
-    );
-    return crypto.subtle.deriveKey(
-        {
-            name: 'PBKDF2',
-            salt,
-            iterations,
-            hash: 'SHA-256'
-        },
-        keyMaterial,
-        {
-            name: 'AES-GCM',
-            length: 256
-        },
-        false,
-        ['encrypt', 'decrypt']
-    );
-}
-
-async function encryptLibraryBytes(bytes, passphrase, iterations = LIBRARY_SECURE_KDF_ITERATIONS) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const key = await deriveLibraryKey(passphrase, salt, iterations);
-    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
-    return {
-        salt: bytesToBase64(salt),
-        iv: bytesToBase64(iv),
-        data: bytesToBase64(new Uint8Array(encrypted))
-    };
-}
-
-async function decryptLibraryBytes(copy, passphrase, iterations = LIBRARY_SECURE_KDF_ITERATIONS) {
-    const salt = base64ToBytes(copy?.salt || '');
-    const iv = base64ToBytes(copy?.iv || '');
-    const data = base64ToBytes(copy?.data || '');
-    const key = await deriveLibraryKey(passphrase, salt, iterations);
-    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
-    return new Uint8Array(decrypted);
-}
-
 async function downloadJsonFile(payload, filename, options = {}) {
     return saveJsonLocally(payload, toJsonFilename(stripJsonExtension(filename)), {
         title: options.title || 'Save JSON',
         buttonLabel: options.buttonLabel || 'Save JSON',
         pretty: options.pretty !== false,
+        filters: [{ name: 'JSON File', extensions: ['json'] }]
+    });
+}
+
+async function downloadJsonTextFile(text, filename, options = {}) {
+    return saveTextLocally(String(text || ''), toJsonFilename(stripJsonExtension(filename)), {
+        title: options.title || 'Save JSON',
+        buttonLabel: options.buttonLabel || 'Save JSON',
         filters: [{ name: 'JSON File', extensions: ['json'] }]
     });
 }
@@ -1015,6 +938,24 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
     const gridStateSignatureByMode = { library: '', assets: '' };
     let lastProgressLogSignature = '';
 
+    function getSettings() {
+        return actions.getState?.()?.settings || null;
+    }
+
+    function getLibrarySettings() {
+        return getSettings()?.library || {};
+    }
+
+    function applyLibraryPreferenceDefaults() {
+        const settings = getLibrarySettings();
+        sortKey = settings.defaultSortKey || 'timestamp';
+        sortDirection = settings.defaultSortDirection || 'desc';
+        refs.shell.classList.toggle('is-list-layout', settings.defaultViewLayout === 'list');
+        if (assetPreview && typeof assetPreview.setQuality === 'function') {
+            assetPreview.setQuality(settings.assetPreviewQuality || 'balanced');
+        }
+    }
+
     function logLibrary(level, processId, message, progressOrOptions = {}, maybeOptions = {}) {
         if (!logger || !message) return;
         const label = processId === 'library.import'
@@ -1433,7 +1374,9 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
 
     function ensureAssetPreview() {
         if (!assetPreview && refs.detailAssetPreviewHost) {
-            assetPreview = createThreeDAssetPreview(refs.detailAssetPreviewHost);
+            assetPreview = createThreeDAssetPreview(refs.detailAssetPreviewHost, {
+                quality: getLibrarySettings().assetPreviewQuality || 'balanced'
+            });
         }
         return assetPreview;
     }
@@ -2016,6 +1959,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
     }
 
     function applyViewState() {
+        applyLibraryPreferenceDefaults();
         ensureActiveFilterStillExists();
         visibleLibraryData = getVisibleLibraryData();
         visibleAssetData = getVisibleAssetData();
@@ -2225,7 +2169,40 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         return value ? toJsonFilename(value) : null;
     }
 
+    async function promptImportTags() {
+        const existingTags = normalizeTagList(libraryTags);
+        const selected = await runModalStep({
+            title: 'Assign Tags',
+            text: 'Choose one or more tags for the imported project, or continue without tags.',
+            html: `
+                <label class="library-modal-field">
+                    <span>New tags</span>
+                    <input type="text" class="library-modal-input" data-library-role="import-tags-input" placeholder="Comma separated tags">
+                </label>
+                ${existingTags.length ? `
+                    <div class="library-side-label">Existing Tags</div>
+                    <div class="library-tag-list">
+                        ${existingTags.map((tag) => `
+                            <label class="library-tag library-tag-button" style="cursor:pointer;">
+                                <input type="checkbox" value="${escapeHtml(tag)}" data-library-role="import-tag-choice" style="display:none;">
+                                <span>${escapeHtml(tag)}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                ` : '<div class="info-banner" style="margin:0;">No saved Library tags exist yet. You can still continue without assigning any tags.</div>'}
+            `,
+            confirmLabel: 'Continue',
+            onConfirm: ({ root }) => {
+                const typed = String(root.querySelector('[data-library-role="import-tags-input"]')?.value || '');
+                const picked = Array.from(root.querySelectorAll('[data-library-role="import-tag-choice"]:checked')).map((node) => node.value);
+                return normalizeTagList([...typed.split(','), ...picked]);
+            }
+        });
+        return selected || [];
+    }
+
     async function promptSaveLibraryMode(defaultScope = getActiveExportScope()) {
+        const preferSecure = !!getLibrarySettings().secureExportByDefault;
         const exportChoice = await runModalStep({
             title: isAssetsPage() ? 'Save Assets' : 'Save Library',
             text: 'Choose what to export, then choose whether the package should be plain JSON or use the secure packed format.',
@@ -2246,12 +2223,12 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 <div class="library-side-label">Export Format</div>
                 <div class="library-modal-choice-grid">
                     <label class="library-modal-choice">
-                        <input type="radio" name="library-export-mode" value="plain" checked>
+                        <input type="radio" name="library-export-mode" value="plain" ${preferSecure ? '' : 'checked'}>
                         <strong>Json Export</strong>
                         <span>Readable JSON package with every included project, asset, tag, and export date preserved.</span>
                     </label>
                     <label class="library-modal-choice">
-                        <input type="radio" name="library-export-mode" value="secure">
+                        <input type="radio" name="library-export-mode" value="secure" ${preferSecure ? 'checked' : ''}>
                         <strong>Secure Export</strong>
                         <span>Pack the selected Library data into a compressed JSON-safe block, with optional encryption.</span>
                     </label>
@@ -2465,6 +2442,92 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         });
     }
 
+    async function promptSecureCompatibilityFallback({ title, text, detail, confirmLabel }) {
+        return runModalStep({
+            title,
+            text,
+            html: `
+                <div class="info-banner" style="margin:0;">
+                    ${escapeHtml(detail || 'The faster secure packaging path is unavailable right now. You can continue with a slower compatibility path instead.')}
+                </div>
+            `,
+            confirmLabel: confirmLabel || 'Use Compatibility Path',
+            cancelLabel: 'Cancel'
+        });
+    }
+
+    async function buildSecureLibraryExportRecord(bundle, { secureMode, passphrase = '', compatibilityMode = 'fast' } = {}) {
+        return typeof actions.buildSecureLibraryExportRecord === 'function'
+            ? actions.buildSecureLibraryExportRecord(bundle, {
+                secureMode,
+                passphrase,
+                compatibilityMode
+            })
+            : null;
+    }
+
+    async function buildSecureLibraryExportWithFallback(bundle, options = {}) {
+        try {
+            return await buildSecureLibraryExportRecord(bundle, {
+                ...options,
+                compatibilityMode: 'fast'
+            });
+        } catch (error) {
+            if (!isSecureLibraryCompatibilityError(error)) {
+                throw error;
+            }
+            const detail = error.fallbackReason || error.message || 'The fast secure Library export path is unavailable.';
+            logLibrary('warning', 'library.export', detail);
+            logLibrary('info', 'library.export', 'Secure Library export compatibility prompt shown.');
+            const accepted = await promptSecureCompatibilityFallback({
+                title: 'Secure Export Compatibility',
+                text: 'This export can continue using a slower compatibility path.',
+                detail,
+                confirmLabel: 'Use Compatibility Path'
+            });
+            if (!accepted) {
+                logLibrary('info', 'library.export', 'Secure Library export compatibility fallback was declined.');
+                return null;
+            }
+            logLibrary('info', 'library.export', 'Secure Library export compatibility fallback accepted.');
+            return buildSecureLibraryExportRecord(bundle, {
+                ...options,
+                compatibilityMode: 'js'
+            });
+        }
+    }
+
+    async function resolveSecureLibraryImportRecord(parsed, passphrase = '', compatibilityMode = 'fast') {
+        return typeof actions.resolveSecureLibraryImportRecord === 'function'
+            ? actions.resolveSecureLibraryImportRecord(parsed, passphrase, { compatibilityMode })
+            : null;
+    }
+
+    async function resolveSecureLibraryImportWithFallback(parsed, passphrase = '') {
+        try {
+            return await resolveSecureLibraryImportRecord(parsed, passphrase, 'fast');
+        } catch (error) {
+            if (!isSecureLibraryCompatibilityError(error)) {
+                throw error;
+            }
+            const detail = error.fallbackReason || error.message || 'The fast secure Library import path is unavailable.';
+            logLibrary('warning', 'library.import', detail);
+            logLibrary('info', 'library.import', 'Secure Library import compatibility prompt shown.');
+            const accepted = await promptSecureCompatibilityFallback({
+                title: 'Secure Import Compatibility',
+                text: 'This import can continue using a slower compatibility path.',
+                detail,
+                confirmLabel: 'Use Compatibility Path'
+            });
+            if (!accepted) {
+                logLibrary('info', 'library.import', 'Secure Library import compatibility fallback was declined.');
+                return null;
+            }
+            logLibrary('info', 'library.import', 'Secure Library import compatibility fallback accepted.');
+            return resolveSecureLibraryImportRecord(parsed, passphrase, 'js');
+        }
+    }
+
     function showProgress(text, countText = '', ratio = 0) {
         refs.statusText.textContent = text || 'Preparing Library task...';
         refs.countText.textContent = countText || '';
@@ -2487,11 +2550,12 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         lastProgressLogSignature = '';
     }
 
-    async function refresh() {
-        if (!panelActive) {
+    async function refresh(options = {}) {
+        if (!panelActive && !options.forceInactive) {
             pendingRefreshWhileInactive = true;
             return;
         }
+        applyLibraryPreferenceDefaults();
         const token = ++refreshToken;
         const shouldShowInitialProgress = !hasRenderedLibrary;
         const previousData = libraryData;
@@ -2765,17 +2829,6 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         return true;
     }
 
-    async function buildSecureLibraryExportRecord(bundle, { secureMode, passphrase = '', duplicateCopies = false }) {
-        const result = typeof actions.buildSecureLibraryExportRecord === 'function'
-            ? await actions.buildSecureLibraryExportRecord(bundle, {
-                secureMode,
-                passphrase,
-                duplicateCopies
-            })
-            : null;
-        return result?.record || result;
-    }
-
     async function saveLibraryWorkflow(options = {}) {
         if (!libraryData.length && !assetData.length && !libraryTags.length) {
             showAlert('There are no Library projects, assets, or tags to save yet.');
@@ -2822,7 +2875,6 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         if (!secureMode) return false;
 
         let passphrase = '';
-        let duplicateCopies = false;
         if (secureMode === 'encrypted') {
             passphrase = await promptEncryptionPassphrase();
             if (!passphrase) return false;
@@ -2830,13 +2882,15 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
 
         try {
             showProgress('Packing export...', summary, 0.15);
-            const payload = await buildSecureLibraryExportRecord(bundle, {
+            const payloadPackage = await buildSecureLibraryExportWithFallback(bundle, {
                 secureMode,
-                passphrase,
-                duplicateCopies
+                passphrase
             });
+            if (!payloadPackage) {
+                return false;
+            }
             showProgress('Saving export...', toJsonFilename(filename), 1);
-            const saveResult = await downloadJsonFile(payload, filename, {
+            const saveResult = await downloadJsonTextFile(payloadPackage.serializedText || JSON.stringify(payloadPackage.record || {}), filename, {
                 title: 'Save Library Export',
                 buttonLabel: 'Save JSON',
                 pretty: false
@@ -2862,9 +2916,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
 
     async function resolveSecureImportPayload(parsed, fallbackName) {
         if (parsed.mode === 'compressed') {
-            const resolved = typeof actions.resolveSecureLibraryImportRecord === 'function'
-                ? await actions.resolveSecureLibraryImportRecord(parsed, '')
-                : null;
+            const resolved = await resolveSecureLibraryImportWithFallback(parsed, '');
+            if (!resolved) return null;
             const recoveredText = String(resolved?.recoveredText || '');
             if (!recoveredText) {
                 throw new Error('This secure Library file could not be unpacked.');
@@ -2888,9 +2941,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             throw new Error('This secure Library file does not contain any encrypted copies.');
         }
 
-        const resolved = typeof actions.resolveSecureLibraryImportRecord === 'function'
-            ? await actions.resolveSecureLibraryImportRecord(parsed, passphrase)
-            : null;
+        const resolved = await resolveSecureLibraryImportWithFallback(parsed, passphrase);
+        if (!resolved) return null;
         const recoveredText = String(resolved?.recoveredText || '');
         const failedCount = Math.max(0, Number(resolved?.failedCount || 0));
         if (!recoveredText) {
@@ -2903,7 +2955,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             const wantsRepairDownload = await promptRecoveredFileDownload(toJsonFilename(parsed.name || fallbackName));
             if (wantsRepairDownload === null) return null;
             if (wantsRepairDownload) {
-                const repairedPayload = await buildSecureLibraryExportRecord(
+                const repairedPayloadPackage = await buildSecureLibraryExportWithFallback(
                     isPlainLibraryExportPayload(recoveredParsed)
                         ? recoveredParsed
                         : buildLibraryExportBundle({
@@ -2923,11 +2975,13 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                         }),
                     {
                         secureMode: 'encrypted',
-                        passphrase,
-                        duplicateCopies: Boolean(parsed.duplicateCopies || copies.length > 1)
+                        passphrase
                     }
                 );
-                const saveResult = await downloadJsonFile(repairedPayload, `${stripJsonExtension(parsed.name || fallbackName)} repaired`, {
+                if (!repairedPayloadPackage) {
+                    return null;
+                }
+                const saveResult = await downloadJsonTextFile(repairedPayloadPackage.serializedText || JSON.stringify(repairedPayloadPackage.record || {}), `${stripJsonExtension(parsed.name || fallbackName)} repaired`, {
                     title: 'Save Repaired Library Export',
                     buttonLabel: 'Save JSON',
                     pretty: false
@@ -3014,9 +3068,9 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             importedIds: [],
             updatedIds: []
         };
-        const projectEntries = importPackages.flatMap((entry) => entry.projectEntries || []);
+        let projectEntries = importPackages.flatMap((entry) => entry.projectEntries || []);
         const assetEntries = normalizeImportedAssetEntries(importPackages.flatMap((entry) => entry.assetEntries || []));
-        const importedCatalog = normalizeTagList([
+        let importedCatalog = normalizeTagList([
             ...importPackages.flatMap((entry) => entry.tags || []),
             ...projectEntries.flatMap((entry) => entry.tags || []),
             ...assetEntries.flatMap((entry) => entry.tags || [])
@@ -3060,6 +3114,29 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             }
             if (scopeIncludesAssets(importScope)) {
                 await actions.clearLibraryAssets?.();
+            }
+        }
+
+        if (getLibrarySettings().requireTagOnImport && projectEntries.length) {
+            const assignedTags = await promptImportTags();
+            if (assignedTags.length) {
+                importedCatalog = normalizeTagList([...importedCatalog, ...assignedTags]);
+                projectEntries = projectEntries.map((entry) => {
+                    try {
+                        const parsed = JSON.parse(entry.text);
+                        const mergedTags = normalizeTagList([...(entry.tags || []), ...assignedTags]);
+                        return {
+                            ...entry,
+                            tags: mergedTags,
+                            text: JSON.stringify({
+                                ...parsed,
+                                _libraryTags: mergedTags
+                            })
+                        };
+                    } catch (_error) {
+                        return entry;
+                    }
+                });
             }
         }
 
@@ -3796,6 +3873,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
     setHoverEnabled(false);
     setFullscreenEnabled(false);
     setSidePanelOpen(false);
+    applyLibraryPreferenceDefaults();
     updateToolbarState();
     renderSidePanel();
 

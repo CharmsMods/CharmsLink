@@ -17,65 +17,62 @@
     display: grid;
     place-items: center;
     padding: 28px;
-    background:
-        radial-gradient(circle at top, rgba(214, 228, 255, 0.35), transparent 44%),
-        linear-gradient(180deg, #f4f6fb 0%, #eef2f7 100%);
+    background: #000000;
 }
 
 .boot-shell-card {
-    width: min(560px, 100%);
-    padding: 28px 30px;
-    border-radius: 24px;
-    border: 1px solid rgba(30, 41, 59, 0.1);
-    background: rgba(255, 255, 255, 0.92);
-    box-shadow: 0 22px 70px rgba(15, 23, 42, 0.14);
-    backdrop-filter: blur(12px);
+    width: min(480px, 100%);
+    padding: 42px;
+    border-radius: 4px;
+    border: 1px solid rgba(184, 178, 163, 0.28);
+    background: #000000;
 }
 
 .boot-shell-eyebrow {
-    font-size: 0.72rem;
-    letter-spacing: 0.16em;
+    font-size: 10px;
+    letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(30, 41, 59, 0.55);
+    color: #b8b2a3;
+    font-weight: 500;
 }
 
 .boot-shell-title {
-    margin: 10px 0 8px;
-    font-size: clamp(1.9rem, 4vw, 2.7rem);
-    line-height: 1;
-    color: #111827;
+    margin: 12px 0 8px;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.1;
+    color: #ffffff;
 }
 
 .boot-shell-detail {
-    margin: 0 0 18px;
-    font-size: 1rem;
-    line-height: 1.55;
-    color: rgba(17, 24, 39, 0.72);
+    margin: 0 0 28px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #b8b2a3;
 }
 
 .boot-shell-progress {
     position: relative;
-    height: 10px;
+    height: 4px;
     overflow: hidden;
-    border-radius: 999px;
-    background: rgba(148, 163, 184, 0.22);
+    background: rgba(184, 178, 163, 0.12);
+    border-radius: 2px;
 }
 
 .boot-shell-progress-fill {
     width: 8%;
     height: 100%;
-    border-radius: inherit;
-    background: linear-gradient(90deg, #3b82f6 0%, #38bdf8 100%);
-    box-shadow: 0 0 24px rgba(56, 189, 248, 0.34);
-    transition: width 260ms ease;
+    background: #ffffff;
+    transition: width 260ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .boot-shell-stage {
-    margin-top: 12px;
-    font-size: 0.84rem;
-    letter-spacing: 0.08em;
+    margin-top: 14px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: rgba(30, 41, 59, 0.48);
+    color: #b8b2a3;
+    opacity: 0.7;
 }
 
 :root[data-theme="dark"] {
@@ -1068,6 +1065,37 @@ code {
 .library-grid-view {
     position: relative;
     padding: 14px 18px 22px 14px;
+}
+
+.library-panel-shell.is-list-layout .library-project-grid,
+.library-panel-shell.is-list-layout .library-asset-grid {
+    columns: 1;
+    column-width: auto;
+}
+
+.library-panel-shell.is-list-layout .library-grid-item {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+    align-items: stretch;
+}
+
+.library-panel-shell.is-list-layout .library-grid-item:hover {
+    transform: none;
+}
+
+.library-panel-shell.is-list-layout .library-image-container,
+.library-panel-shell.is-list-layout .library-asset-thumb {
+    height: 100%;
+    min-height: 140px;
+    aspect-ratio: auto;
+    border-bottom: none;
+    border-right: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+}
+
+.library-panel-shell.is-list-layout .library-card-meta {
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 16px;
 }
 
 .library-grid-view > .library-grid-mode {
@@ -2707,6 +2735,17 @@ code {
         column-width: auto;
         columns: 1;
         padding: 12px 12px 18px;
+    }
+
+    .library-panel-shell.is-list-layout .library-grid-item {
+        grid-template-columns: 1fr;
+    }
+
+    .library-panel-shell.is-list-layout .library-image-container,
+    .library-panel-shell.is-list-layout .library-asset-thumb {
+        min-height: 180px;
+        border-right: none;
+        border-bottom: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
     }
 
     .library-side-tab {

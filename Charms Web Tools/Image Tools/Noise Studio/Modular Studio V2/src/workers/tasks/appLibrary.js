@@ -1,4 +1,10 @@
-import { buildSecureLibraryExportRecord, resolveSecureLibraryImportRecord } from '../../library/secureTransfer.js';
+import {
+    buildSecureLibraryExportRecord,
+    createSecureLibraryCompatibilityError,
+    prepareSecureLibraryExportBundle,
+    resolveSecureLibraryImportRecord,
+    SECURE_LIBRARY_FAST_PATH_JSON_THRESHOLD
+} from '../../library/secureTransfer.js';
 import { getRegistryUrls, loadRegistryFromUrls } from '../../registry/shared.js';
 import { bytesToHex, dataUrlToBlob, sampleHashString } from '../../utils/dataUrl.js';
 import { createImagePreviewData, readImageMetadata } from '../../utils/workerImage.js';
@@ -71,6 +77,10 @@ let runtimeAnnouncement = '';
 
 function now() {
     return typeof performance?.now === 'function' ? performance.now() : Date.now();
+}
+
+function normalizeCompatibilityMode(value) {
+    return String(value || '').toLowerCase() === 'js' ? 'js' : 'fast';
 }
 
 function markRuntimeAnnouncement(context, runtime) {
@@ -150,6 +160,58 @@ function createLibraryCodec(runtime) {
     };
 }
 
+function logExportStage(context, stage, meta = {}) {
+    if (stage === 'bundle-normalized') {
+        context.log('info', `Library export bundle normalized (${meta.projectCount || 0} projects, ${meta.assetCount || 0} assets).`);
+        return;
+    }
+    if (stage === 'bundle-json-estimate') {
+        context.log('info', `Estimated secure Library export JSON size: ${Math.round((meta.estimatedJsonBytes || 0) / 1024)} KB.`);
+        return;
+    }
+    if (stage === 'compressed') {
+        context.log('info', `Compressed Library export payload to ${Math.round((meta.compressedBytes || 0) / 1024)} KB.`);
+        return;
+    }
+    if (stage === 'base64-started') {
+        context.log('active', 'Encoding the secure Library payload as base64.');
+        return;
+    }
+    if (stage === 'base64-completed') {
+        context.log('info', `Finished base64 packaging (${Math.round((meta.base64Length || 0) / 1024)} KB of JSON text).`);
+        return;
+    }
+    if (stage === 'encrypted-started') {
+        context.log('active', `Encrypting secure Library copy ${meta.copyIndex || 1} of ${meta.copyCount || 1}.`);
+        return;
+    }
+    if (stage === 'encrypted-completed') {
+        context.log('info', `Encrypted secure Library copy ${meta.copyIndex || 1} of ${meta.copyCount || 1} (${Math.round((meta.encryptedBytes || 0) / 1024)} KB).`);
+    }
+}
+
+function logImportStage(context, stage, meta = {}) {
+    if (stage === 'base64-started') {
+        context.log('active', 'Decoding the secure Library payload from base64.');
+        return;
+    }
+    if (stage === 'base64-completed') {
+        context.log('info', `Decoded ${Math.round((meta.decodedBytes || 0) / 1024)} KB of secure Library payload data.`);
+        return;
+    }
+    if (stage === 'decompressed') {
+        context.log('info', `Recovered ${Math.round((meta.recoveredJsonBytes || 0) / 1024)} KB of Library JSON after decompression.`);
+        return;
+    }
+    if (stage === 'copy-decrypt-started') {
+        context.log('active', `Decrypting secure Library copy ${meta.copyIndex || 1} of ${meta.copyCount || 1}.`);
+        return;
+    }
+    if (stage === 'copy-decrypt-completed') {
+        context.log('info', `Recovered secure Library copy ${meta.copyIndex || 1} of ${meta.copyCount || 1}.`);
+    }
+}
+
 async function getRuntime(context) {
     const runtime = await getLibraryWasmRuntime(context.capabilities || {});
     markRuntimeAnnouncement(context, runtime);
@@ -182,18 +244,77 @@ export const appLibraryTaskHandlers = {
     async 'build-secure-library-export-record'(payload = {}, context) {
         context.assertNotCancelled();
         const startedAt = now();
-        const runtime = await getRuntime(context);
-        const codec = createLibraryCodec(runtime);
-        const record = await buildSecureLibraryExportRecord(payload.bundle, {
-            secureMode: payload.secureMode,
-            passphrase: payload.passphrase || '',
-            duplicateCopies: !!payload.duplicateCopies,
-            codec
-        });
+        const compatibilityMode = normalizeCompatibilityMode(payload.compatibilityMode);
+        const preparedBundle = prepareSecureLibraryExportBundle(payload.bundle);
+        if (compatibilityMode !== 'js' && preparedBundle.estimatedJsonBytes > SECURE_LIBRARY_FAST_PATH_JSON_THRESHOLD) {
+            throw createSecureLibraryCompatibilityError(
+                'This secure Library export is large enough that the compatibility packaging path is safer.',
+                {
+                    stage: 'bundle-json-estimate',
+                    fallbackReason: `Estimated secure export JSON size is ${Math.round(preparedBundle.estimatedJsonBytes / (1024 * 1024))} MB.`,
+                    compatibilityMode: 'js',
+                    meta: {
+                        estimatedJsonBytes: preparedBundle.estimatedJsonBytes
+                    }
+                }
+            );
+        }
+
+        let runtime = {
+            ok: false,
+            selection: 'js-fallback',
+            initMs: 0,
+            reason: 'Compatibility mode requested.'
+        };
+        let codec = null;
+        if (compatibilityMode !== 'js') {
+            runtime = await getRuntime(context);
+            if (!runtime?.ok) {
+                throw createSecureLibraryCompatibilityError(
+                    'The Library WASM export path is unavailable for this session.',
+                    {
+                        stage: 'runtime-init',
+                        fallbackReason: runtime?.reason || 'Library WASM could not be initialized.',
+                        compatibilityMode: 'js',
+                        runtime
+                    }
+                );
+            }
+            codec = createLibraryCodec(runtime);
+        } else {
+            context.log('warning', 'Using the Library export compatibility path (JS/native codecs).');
+        }
+
+        let record;
+        try {
+            record = await buildSecureLibraryExportRecord(payload.bundle, {
+                secureMode: payload.secureMode,
+                passphrase: payload.passphrase || '',
+                duplicateCopies: false,
+                codec,
+                preparedBundle,
+                onStage(stage, meta) {
+                    logExportStage(context, stage, meta);
+                }
+            });
+        } catch (error) {
+            if (compatibilityMode !== 'js' && !error?.fallbackEligible) {
+                throw createSecureLibraryCompatibilityError(
+                    'The fast secure Library export path could not finish packaging this file.',
+                    {
+                        stage: 'packaging',
+                        fallbackReason: error?.message || 'Unknown secure export error.',
+                        compatibilityMode: 'js',
+                        runtime
+                    }
+                );
+            }
+            throw error;
+        }
         const taskMs = Math.max(0, now() - startedAt);
         context.log('info', `Built the secure Library export payload in ${Math.round(taskMs)}ms via ${runtime.ok ? runtime.selection : 'js-fallback'}.`);
         return {
-            record,
+            ...record,
             runtime: {
                 selection: runtime.ok ? runtime.selection : 'js-fallback',
                 initMs: runtime.initMs || 0,
@@ -205,11 +326,54 @@ export const appLibraryTaskHandlers = {
     async 'resolve-secure-library-import-record'(payload = {}, context) {
         context.assertNotCancelled();
         const startedAt = now();
-        const runtime = await getRuntime(context);
-        const codec = createLibraryCodec(runtime);
-        const resolved = await resolveSecureLibraryImportRecord(payload.parsed, payload.passphrase || '', {
-            codec
-        });
+        const compatibilityMode = normalizeCompatibilityMode(payload.compatibilityMode);
+        let runtime = {
+            ok: false,
+            selection: 'js-fallback',
+            initMs: 0,
+            reason: 'Compatibility mode requested.'
+        };
+        let codec = null;
+        if (compatibilityMode !== 'js') {
+            runtime = await getRuntime(context);
+            if (!runtime?.ok) {
+                throw createSecureLibraryCompatibilityError(
+                    'The Library WASM import path is unavailable for this session.',
+                    {
+                        stage: 'runtime-init',
+                        fallbackReason: runtime?.reason || 'Library WASM could not be initialized.',
+                        compatibilityMode: 'js',
+                        runtime
+                    }
+                );
+            }
+            codec = createLibraryCodec(runtime);
+        } else {
+            context.log('warning', 'Using the Library import compatibility path (JS/native codecs).');
+        }
+
+        let resolved;
+        try {
+            resolved = await resolveSecureLibraryImportRecord(payload.parsed, payload.passphrase || '', {
+                codec,
+                onStage(stage, meta) {
+                    logImportStage(context, stage, meta);
+                }
+            });
+        } catch (error) {
+            if (compatibilityMode !== 'js' && !error?.fallbackEligible) {
+                throw createSecureLibraryCompatibilityError(
+                    'The fast secure Library import path could not finish decoding this file.',
+                    {
+                        stage: 'decode',
+                        fallbackReason: error?.message || 'Unknown secure import error.',
+                        compatibilityMode: 'js',
+                        runtime
+                    }
+                );
+            }
+            throw error;
+        }
         const taskMs = Math.max(0, now() - startedAt);
         context.log('info', `Resolved the secure Library import payload in ${Math.round(taskMs)}ms via ${runtime.ok ? runtime.selection : 'js-fallback'}.`);
         return {

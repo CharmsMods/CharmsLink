@@ -45,6 +45,8 @@ let readyPosted = false
 let candidateCounter = 0
 let bootTimeoutHandle = 0
 let cv = null
+const runtimeWaiters = []
+const STANDALONE_RUNTIME = self.__STITCH_OPENCV_STANDALONE__ !== false
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value))
@@ -148,7 +150,13 @@ function emitProgress(requestId, label, detail = '', extras = {}) {
         ...extras
     }
     logDebug(detail ? `${label} ${detail}` : label)
-    self.postMessage({ type: 'progress', requestId, progress })
+    if (typeof self.__STITCH_OPENCV_PROGRESS__ === 'function') {
+        self.__STITCH_OPENCV_PROGRESS__({ requestId, progress })
+        return
+    }
+    if (STANDALONE_RUNTIME) {
+        self.postMessage({ type: 'progress', requestId, progress })
+    }
 }
 
 function createIdentityHomography() {
@@ -3064,6 +3072,41 @@ function analyzePhotoDocument(document, preparedInputs, requestId = '') {
     }
 }
 
+function flushRuntimeWaiters(handler) {
+    while (runtimeWaiters.length) {
+        const waiter = runtimeWaiters.shift()
+        try {
+            handler(waiter)
+        } catch (_error) {
+            // Ignore waiter resolution failures.
+        }
+    }
+}
+
+function buildRuntimeSummary() {
+    return {
+        ready: !!cvReady,
+        error: cvInitError || '',
+        supportedDetectors: [
+            !!cv && (typeof cv.ORB_create === 'function' || typeof cv.ORB === 'function') ? 'orb' : '',
+            !!cv && (typeof cv.AKAZE_create === 'function' || typeof cv.AKAZE === 'function') ? 'akaze' : '',
+            !!cv && (typeof cv.SIFT_create === 'function' || typeof cv.SIFT === 'function') ? 'sift' : ''
+        ].filter(Boolean),
+        runtime: {
+            homography: !!cv && typeof cv.findHomography === 'function',
+            opticalFlow: !!cv && typeof cv.calcOpticalFlowPyrLK === 'function'
+        }
+    }
+}
+
+function waitForRuntimeReady() {
+    if (cvReady) return Promise.resolve(buildRuntimeSummary())
+    if (cvInitError) return Promise.reject(new Error(cvInitError))
+    return new Promise((resolve, reject) => {
+        runtimeWaiters.push({ resolve, reject })
+    })
+}
+
 function postReadyOnce() {
     if (readyPosted) return
     if (bootTimeoutHandle) {
@@ -3079,7 +3122,10 @@ function postReadyOnce() {
             sift: !!cv && (typeof cv.SIFT_create === 'function' || typeof cv.SIFT === 'function')
         }
     })
-    self.postMessage({ type: 'ready' })
+    flushRuntimeWaiters((waiter) => waiter.resolve(buildRuntimeSummary()))
+    if (STANDALONE_RUNTIME) {
+        self.postMessage({ type: 'ready' })
+    }
 }
 
 function postInitError(error) {
@@ -3090,7 +3136,10 @@ function postInitError(error) {
     }
     cvInitError = error?.message || String(error) || 'OpenCV.js could not initialize.'
     logError('Initialization failed.', cvInitError)
-    self.postMessage({ type: 'init-error', error: cvInitError })
+    flushRuntimeWaiters((waiter) => waiter.reject(new Error(cvInitError)))
+    if (STANDALONE_RUNTIME) {
+        self.postMessage({ type: 'init-error', error: cvInitError })
+    }
 }
 
 try {
@@ -3100,7 +3149,8 @@ try {
         }
     }, BOOT_TIMEOUT_MS)
     logDebug('Loading vendored OpenCV.js...')
-    importScripts('../vendor/opencv/opencv.js')
+    const assetVersionQuery = self.location?.search || ''
+    importScripts(`../vendor/opencv/opencv.js${assetVersionQuery}`)
     if (!self.cv || (typeof self.cv !== 'object' && typeof self.cv !== 'function')) {
         throw new Error('OpenCV.js did not expose a global cv object.')
     }
@@ -3135,23 +3185,39 @@ try {
     postInitError(error)
 }
 
-self.addEventListener('message', (event) => {
-    const { type, requestId, document, preparedInputs } = event.data || {}
-    if (type !== 'analyze') return
-    if (cvInitError) {
-        self.postMessage({ requestId, error: cvInitError })
-        return
-    }
-    if (!cvReady) {
-        self.postMessage({ requestId, error: 'OpenCV.js is still loading for Stitch photo analysis.' })
-        return
-    }
+self.__STITCH_OPENCV_RUNTIME__ = {
+    ensureReady: waitForRuntimeReady,
+    analyzePhotoDocument(document, preparedInputs, requestId = '') {
+        if (cvInitError) {
+            throw new Error(cvInitError)
+        }
+        if (!cvReady) {
+            throw new Error('OpenCV.js is still loading for Stitch photo analysis.')
+        }
+        return analyzePhotoDocument(document, preparedInputs || [], requestId)
+    },
+    getRuntimeSummary: buildRuntimeSummary
+}
 
-    try {
-        const result = analyzePhotoDocument(document, preparedInputs || [], requestId)
-        self.postMessage({ requestId, result })
-    } catch (error) {
-        logError('Photo analysis failed.', error?.stack || error)
-        self.postMessage({ requestId, error: error?.message || 'OpenCV.js photo analysis failed.' })
-    }
-})
+if (STANDALONE_RUNTIME) {
+    self.addEventListener('message', (event) => {
+        const { type, requestId, document, preparedInputs } = event.data || {}
+        if (type !== 'analyze') return
+        if (cvInitError) {
+            self.postMessage({ requestId, error: cvInitError })
+            return
+        }
+        if (!cvReady) {
+            self.postMessage({ requestId, error: 'OpenCV.js is still loading for Stitch photo analysis.' })
+            return
+        }
+
+        try {
+            const result = analyzePhotoDocument(document, preparedInputs || [], requestId)
+            self.postMessage({ requestId, result })
+        } catch (error) {
+            logError('Photo analysis failed.', error?.stack || error)
+            self.postMessage({ requestId, error: error?.message || 'OpenCV.js photo analysis failed.' })
+        }
+    })
+}

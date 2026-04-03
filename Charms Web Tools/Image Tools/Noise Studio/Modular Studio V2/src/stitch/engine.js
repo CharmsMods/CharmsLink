@@ -10,6 +10,7 @@ import {
 import { analyzePreparedStitchInputs } from './analysis.js';
 import { classifyPreparedInputs } from './classifier.js';
 import { drawWarpedPlacement, hitTestWarpedPlacement } from './warp.js';
+import { blobToDataUrl, dataUrlToBlob } from '../utils/dataUrl.js';
 
 const SCREENSHOT_LEGACY_DEFAULTS = Object.freeze({
     analysisMaxDimension: 320,
@@ -44,6 +45,13 @@ function canvasToBlob(canvas, type = 'image/png') {
             else reject(new Error('Could not encode the stitch canvas.'));
         }, type);
     });
+}
+
+function getGlobalDevicePixelRatio() {
+    if (typeof globalThis?.devicePixelRatio === 'number' && Number.isFinite(globalThis.devicePixelRatio)) {
+        return globalThis.devicePixelRatio;
+    }
+    return 1;
 }
 
 function viewportScale(bounds, canvasWidth, canvasHeight, zoom = 1) {
@@ -887,13 +895,27 @@ export class StitchEngine {
             return cached.promise;
         }
         const promise = new Promise((resolve, reject) => {
-            const image = new Image();
-            image.onload = () => {
-                this.imageCache.set(input.id, { src: input.imageData, image });
-                resolve(image);
-            };
-            image.onerror = () => reject(new Error(`Could not load ${input.name || 'stitch image'}.`));
-            image.src = input.imageData;
+            if (typeof Image === 'function') {
+                const image = new Image();
+                image.onload = () => {
+                    this.imageCache.set(input.id, { src: input.imageData, image });
+                    resolve(image);
+                };
+                image.onerror = () => reject(new Error(`Could not load ${input.name || 'stitch image'}.`));
+                image.src = input.imageData;
+                return;
+            }
+            if (typeof createImageBitmap === 'function') {
+                (async () => {
+                    const bitmap = await createImageBitmap(await dataUrlToBlob(input.imageData));
+                    this.imageCache.set(input.id, { src: input.imageData, image: bitmap });
+                    resolve(bitmap);
+                })().catch((error) => {
+                    reject(new Error(error?.message || `Could not load ${input.name || 'stitch image'}.`));
+                });
+                return;
+            }
+            reject(new Error(`Could not load ${input.name || 'stitch image'} in this environment.`));
         });
         this.imageCache.set(input.id, { src: input.imageData, promise });
         return promise;
@@ -1013,7 +1035,7 @@ export class StitchEngine {
                     const labelY = viewport.offsetY + (box.minY * viewport.scale) - 8;
                     ctx.fillStyle = normalized.selection.inputId === input.id ? 'rgba(0, 26, 41, 0.86)' : 'rgba(10, 10, 14, 0.72)';
                     const label = input.name;
-                    ctx.font = `${Math.max(12, 12 * (window.devicePixelRatio || 1))}px "Segoe UI", sans-serif`;
+                    ctx.font = `${Math.max(12, 12 * getGlobalDevicePixelRatio())}px "Segoe UI", sans-serif`;
                     const width = ctx.measureText(label).width + 14;
                     ctx.fillRect(labelX, labelY - 18, width, 18);
                     ctx.fillStyle = '#ffffff';
@@ -1078,6 +1100,43 @@ export class StitchEngine {
         }));
     }
 
+    async prepareAnalysisInputs(document, options = {}) {
+        const normalized = normalizeStitchDocument(document);
+        if (!this.taskBroker || options.preferWorker === false) {
+            return this.buildPreparedInputs(normalized);
+        }
+        return this.taskBroker.runTask('stitch', 'prepare-analysis-inputs', {
+            document: normalized
+        }, {
+            priority: options.priority || 'user-visible',
+            processId: options.processId || 'stitch.analysis',
+            scope: options.scope || 'section:stitch',
+            replaceKey: options.replaceKey || null,
+            replaceActive: !!options.replaceActive,
+            replayOnWorkerCrash: options.replayOnWorkerCrash !== false,
+            maxCrashReplays: options.maxCrashReplays || 1,
+            onProgress: options.onProgress,
+            onLog: options.onLog
+        });
+    }
+
+    async classifySceneMode(preparedInputs, options = {}) {
+        if (!this.taskBroker || options.preferWorker === false) {
+            return classifyPreparedInputs(preparedInputs);
+        }
+        return this.taskBroker.runTask('stitch', 'classify-scene-mode', {
+            preparedInputs
+        }, {
+            priority: options.priority || 'user-visible',
+            processId: options.processId || 'stitch.analysis',
+            scope: options.scope || 'section:stitch',
+            replaceKey: options.replaceKey || null,
+            replaceActive: !!options.replaceActive,
+            replayOnWorkerCrash: options.replayOnWorkerCrash !== false,
+            maxCrashReplays: options.maxCrashReplays || 1
+        });
+    }
+
     resolveAnalysisBackend(document, preparedInputs) {
         const sceneMode = document.settings?.sceneMode || 'auto';
         if (sceneMode === 'screenshot') {
@@ -1134,7 +1193,11 @@ export class StitchEngine {
 
     async analyze(document, options = {}) {
         const normalized = normalizeStitchDocument(document);
+        const analysisStartedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
         let routing = null;
+        let classifierTimingMs = 0;
+        let prepareTimingMs = 0;
+        let analyzeTimingMs = 0;
         if ((normalized.settings?.sceneMode || 'auto') === 'auto') {
             const classifierDocument = {
                 ...normalized,
@@ -1144,31 +1207,110 @@ export class StitchEngine {
                     useFullResolutionAnalysis: false
                 }
             };
-            const classifierInputs = await this.buildPreparedInputs(classifierDocument);
-            routing = this.resolveAnalysisBackend(normalized, classifierInputs);
+            const classifyStartedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
+            const classifierInputs = await this.prepareAnalysisInputs(classifierDocument, {
+                priority: 'user-visible',
+                processId: 'stitch.analysis',
+                scope: 'section:stitch',
+                replaceKey: 'stitch:auto-classifier-inputs',
+                replaceActive: true,
+                replayOnWorkerCrash: true,
+                maxCrashReplays: 1
+            });
+            const classification = await this.classifySceneMode(classifierInputs, {
+                priority: 'user-visible',
+                processId: 'stitch.analysis',
+                scope: 'section:stitch',
+                replaceKey: 'stitch:auto-classifier',
+                replaceActive: true
+            });
+            classifierTimingMs = (typeof performance?.now === 'function' ? performance.now() : Date.now()) - classifyStartedAt;
+            routing = {
+                backend: classification.sceneMode === 'photo' ? 'opencv-wasm' : 'screenshot-js',
+                sceneMode: classification.sceneMode,
+                diagnostics: classification.diagnostics || []
+            };
         } else {
             routing = this.resolveAnalysisBackend(normalized, []);
         }
         const analysisDocument = this.buildAnalysisDocumentForBackend(normalized, routing.backend, routing.sceneMode);
-        const preparedInputs = await this.buildPreparedInputs(analysisDocument);
+        const prepareStartedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
+        const preparedInputs = await this.prepareAnalysisInputs(analysisDocument, {
+            priority: 'user-visible',
+            processId: 'stitch.analysis',
+            scope: 'section:stitch',
+            replaceKey: 'stitch:prepare-analysis-inputs',
+            replaceActive: true,
+            replayOnWorkerCrash: true,
+            maxCrashReplays: 1,
+            onProgress: options.onProgress
+        });
+        prepareTimingMs = (typeof performance?.now === 'function' ? performance.now() : Date.now()) - prepareStartedAt;
 
         if (routing.backend === 'opencv-wasm') {
+            if (this.taskBroker) {
+                const analyzeStarted = typeof performance?.now === 'function' ? performance.now() : Date.now();
+                const result = await this.taskBroker.runTask('stitch-opencv', 'analyze-photo', {
+                    document: analysisDocument,
+                    preparedInputs
+                }, {
+                    priority: 'user-visible',
+                    processId: 'stitch.analysis',
+                    scope: 'section:stitch',
+                    replaceKey: 'stitch:photo-analysis',
+                    replaceActive: true,
+                    replayOnWorkerCrash: true,
+                    maxCrashReplays: 1,
+                    onProgress: options.onProgress
+                });
+                analyzeTimingMs = (typeof performance?.now === 'function' ? performance.now() : Date.now()) - analyzeStarted;
+                return {
+                    ...result,
+                    backend: 'opencv-wasm',
+                    diagnostics: [
+                        ...routing.diagnostics,
+                        ...(result?.diagnostics || []),
+                        {
+                            method: 'analysis-runtime',
+                            backend: 'opencv-wasm',
+                            classifyMs: Math.round(classifierTimingMs),
+                            prepareMs: Math.round(prepareTimingMs),
+                            analyzeMs: Math.round(analyzeTimingMs),
+                            totalMs: Math.round((typeof performance?.now === 'function' ? performance.now() : Date.now()) - analysisStartedAt)
+                        }
+                    ]
+                };
+            }
             const worker = await this.ensureOpenCvWorker();
             if (!worker) {
                 throw new Error('Photo analysis requires browser Worker and WebAssembly support for OpenCV.js.');
             }
+            const analyzeStarted = typeof performance?.now === 'function' ? performance.now() : Date.now();
             const result = await this.runWorkerAnalysis(worker, {
                 type: 'analyze',
                 document: analysisDocument,
                 preparedInputs
             }, options);
+            analyzeTimingMs = (typeof performance?.now === 'function' ? performance.now() : Date.now()) - analyzeStarted;
             return {
                 ...result,
                 backend: 'opencv-wasm',
-                diagnostics: [...routing.diagnostics, ...(result?.diagnostics || [])]
+                diagnostics: [
+                    ...routing.diagnostics,
+                    ...(result?.diagnostics || []),
+                    {
+                        method: 'analysis-runtime',
+                        backend: 'opencv-wasm',
+                        classifyMs: Math.round(classifierTimingMs),
+                        prepareMs: Math.round(prepareTimingMs),
+                        analyzeMs: Math.round(analyzeTimingMs),
+                        totalMs: Math.round((typeof performance?.now === 'function' ? performance.now() : Date.now()) - analysisStartedAt)
+                    }
+                ]
             };
         }
 
+        const screenshotAnalyzeStarted = typeof performance?.now === 'function' ? performance.now() : Date.now();
         const result = this.taskBroker
             ? await this.taskBroker.runTask('stitch', 'analyze-screenshot', {
                 document: analysisDocument,
@@ -1184,10 +1326,22 @@ export class StitchEngine {
                     ? this.runWorkerAnalysis(worker, { document: analysisDocument, preparedInputs }, options)
                     : analyzePreparedStitchInputs(analysisDocument, preparedInputs);
             })();
+        analyzeTimingMs = (typeof performance?.now === 'function' ? performance.now() : Date.now()) - screenshotAnalyzeStarted;
         return {
             ...result,
             backend: 'screenshot-js',
-            diagnostics: [...routing.diagnostics, ...(result?.diagnostics || [])]
+            diagnostics: [
+                ...routing.diagnostics,
+                ...(result?.diagnostics || []),
+                {
+                    method: 'analysis-runtime',
+                    backend: 'screenshot-js',
+                    classifyMs: Math.round(classifierTimingMs),
+                    prepareMs: Math.round(prepareTimingMs),
+                    analyzeMs: Math.round(analyzeTimingMs),
+                    totalMs: Math.round((typeof performance?.now === 'function' ? performance.now() : Date.now()) - analysisStartedAt)
+                }
+            ]
         };
     }
 
@@ -1256,7 +1410,14 @@ export class StitchEngine {
 
     async buildCandidatePreview(document, candidate, maxSide = 280) {
         if (!candidate) return '';
-        const normalized = applyCandidateToDocument(document, candidate.id);
+        const normalized = normalizeStitchDocument({
+            ...applyCandidateToDocument(document, candidate.id),
+            view: {
+                ...document?.view,
+                showLabels: false,
+                showBounds: false
+            }
+        });
         await this.ensureImages(normalized);
         const placements = candidate.placements || getActivePlacements(normalized);
         const bounds = computeCompositeBounds(normalized, placements);
@@ -1285,9 +1446,15 @@ export class StitchEngine {
         });
         if (typeof canvas.convertToBlob === 'function') {
             const blob = await canvas.convertToBlob({ type: 'image/png' });
-            return URL.createObjectURL(blob);
+            if (typeof globalThis.document !== 'undefined' && typeof URL?.createObjectURL === 'function') {
+                return URL.createObjectURL(blob);
+            }
+            return blobToDataUrl(blob);
         }
-        return canvas.toDataURL('image/png');
+        if (typeof canvas.toDataURL === 'function') {
+            return canvas.toDataURL('image/png');
+        }
+        return blobToDataUrl(await canvasToBlob(canvas, 'image/png'));
     }
 
     async buildCandidatePreviewMap(document) {

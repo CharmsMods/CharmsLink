@@ -131,11 +131,26 @@ export function createWorkerDomainHost(domain, handlers = {}) {
                 });
                 return;
             }
+            const details = {};
+            if (error && typeof error === 'object') {
+                if (error.code) details.code = error.code;
+                if (error.stage) details.stage = error.stage;
+                if (error.fallbackReason) details.fallbackReason = error.fallbackReason;
+                if (error.compatibilityMode) details.compatibilityMode = error.compatibilityMode;
+                if (error.runtime && typeof error.runtime === 'object') {
+                    details.runtime = error.runtime;
+                }
+                if (error.meta && typeof error.meta === 'object') {
+                    details.meta = error.meta;
+                }
+                if (error.fallbackEligible) details.fallbackEligible = true;
+            }
             post(WORKER_EVENT_TYPES.ERROR, {
                 id: request.id,
                 task: request.task,
                 processId: request.processId || null,
-                error: error?.message || `Worker task "${request.task}" failed.`
+                error: error?.message || `Worker task "${request.task}" failed.`,
+                details: Object.keys(details).length ? details : null
             });
         } finally {
             cancelled.delete(request.id);

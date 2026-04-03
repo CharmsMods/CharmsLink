@@ -51,6 +51,7 @@ export async function detectWorkerCapabilities() {
         offscreenCanvasWebgl2: detectOffscreenCanvasWebgl2(),
         compressionStreams: typeof CompressionStream === 'function' && typeof DecompressionStream === 'function',
         fileSystemAccess: typeof window?.showOpenFilePicker === 'function' || typeof window?.showDirectoryPicker === 'function',
-        createImageBitmap: typeof createImageBitmap === 'function'
+        createImageBitmap: typeof createImageBitmap === 'function',
+        hardwareConcurrency: Math.max(0, Math.round(Number(globalThis.navigator?.hardwareConcurrency) || 0))
     };
 }

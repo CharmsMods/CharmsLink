@@ -1,13 +1,13 @@
 import * as THREE from 'three';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { DenoiseMaterial, WebGLPathTracer } from 'three-gpu-pathtracer';
-import { Brush, Evaluator, SUBTRACTION } from 'three-bvh-csg';
 import { normalizeThreeDDocument } from './document.js';
 import { createGradientEnvironmentTexture, createSolidEnvironmentTexture } from './environment.js';
 import { createExtrudedTextObject, createFlatTextObject } from './text.js';
@@ -147,8 +147,6 @@ const LINKED_SCALE_AXES = {
     YZ: [1, 2]
 };
 
-const BOOLEAN_ATTRIBUTE_KEYS = ['position', 'normal', 'uv'];
-
 function isEditableTarget(target) {
     if (!target) return false;
     const tagName = String(target.tagName || '').toLowerCase();
@@ -166,62 +164,6 @@ function getObjectWorldCenter(object) {
         return box.getCenter(new THREE.Vector3());
     }
     return object.getWorldPosition(new THREE.Vector3());
-}
-
-function isBooleanCompatibleItem(item) {
-    return item?.kind === 'model' || item?.kind === 'primitive';
-}
-
-function getPrimaryMaterial(material) {
-    if (Array.isArray(material)) return material.find(Boolean) || null;
-    return material || null;
-}
-
-function createAttributeSlice(attribute, start, count) {
-    const itemSize = attribute.itemSize || 1;
-    const typedArray = attribute.array.slice(start * itemSize, (start + count) * itemSize);
-    const nextAttribute = new THREE.BufferAttribute(typedArray, itemSize, attribute.normalized);
-    if (attribute.name) nextAttribute.name = attribute.name;
-    return nextAttribute;
-}
-
-function createNonIndexedGeometrySlice(sourceGeometry, start = 0, count = Infinity) {
-    const working = sourceGeometry.index ? sourceGeometry.toNonIndexed() : sourceGeometry.clone();
-    const position = working.getAttribute('position');
-    const maxCount = position?.count || 0;
-    const nextStart = Math.max(0, Math.min(maxCount, Math.round(start)));
-    const nextCount = Math.max(0, Math.min(maxCount - nextStart, Math.round(count)));
-    const geometry = new THREE.BufferGeometry();
-
-    if (nextCount > 0) {
-        Object.entries(working.attributes).forEach(([name, attribute]) => {
-            geometry.setAttribute(name, createAttributeSlice(attribute, nextStart, nextCount));
-        });
-        geometry.morphTargetsRelative = working.morphTargetsRelative;
-        geometry.computeBoundingBox();
-        geometry.computeBoundingSphere();
-    }
-
-    working.dispose?.();
-    return geometry;
-}
-
-function getMeshBooleanGeometryParts(mesh) {
-    if (!mesh?.geometry?.getAttribute?.('position')) return [];
-    const materialList = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    if (Array.isArray(mesh.material) && Array.isArray(mesh.geometry.groups) && mesh.geometry.groups.length) {
-        return mesh.geometry.groups
-            .filter((group) => Number(group?.count || 0) > 0)
-            .map((group) => ({
-                geometry: createNonIndexedGeometrySlice(mesh.geometry, group.start, group.count),
-                material: materialList[group.materialIndex] || materialList[0] || null
-            }));
-    }
-
-    return [{
-        geometry: createNonIndexedGeometrySlice(mesh.geometry),
-        material: materialList[0] || null
-    }];
 }
 
 function chooseLinkedPlaneScaleRatio(object, startScale, axisIndices) {
@@ -318,12 +260,11 @@ export class ThreeDEngine {
         this.destroyed = false;
         this.loader = new GLTFLoader();
         this.hdriLoader = new RGBELoader();
-        this.geometryLoader = new THREE.BufferGeometryLoader();
         this.textureLoader = new THREE.TextureLoader();
-        this.booleanEvaluator = new Evaluator();
-        this.booleanEvaluator.useGroups = true;
-        this.booleanEvaluator.consolidateGroups = true;
-        this.booleanEvaluator.removeUnusedMaterials = true;
+        this.dracoLoader = null;
+        this.ktx2Loader = null;
+        this.decoderAvailability = { draco: false, ktx2: false };
+        this._decoderAvailabilityLogged = false;
         this.sceneObjects = new Map();
         this.itemLights = new Map();
         this.itemHelpers = new Map();
@@ -397,6 +338,7 @@ export class ThreeDEngine {
         this.renderer.shadowMap.autoUpdate = false;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.container.appendChild(this.renderer.domElement);
+        this.setupCompressedAssetLoaders();
 
         this.pathTracer = new WebGLPathTracer(this.renderer);
         this.pathTracer.renderScale = 1;
@@ -493,6 +435,65 @@ export class ThreeDEngine {
         return object;
     }
 
+    emitAssetPipelineMessage(level, message, options = {}) {
+        if (!message) return;
+        this.onAssetPipelineMessage?.({
+            level,
+            processId: '3d.assets',
+            message,
+            ...options
+        });
+    }
+
+    getDecoderAssetUrl(relativePath) {
+        return new URL(`../vendor/three/addons/${relativePath}`, import.meta.url).href;
+    }
+
+    setupCompressedAssetLoaders() {
+        const availability = {
+            draco: false,
+            ktx2: false
+        };
+
+        try {
+            this.dracoLoader = new DRACOLoader();
+            this.dracoLoader.setDecoderPath(this.getDecoderAssetUrl('libs/draco/'));
+            this.loader.setDRACOLoader(this.dracoLoader);
+            availability.draco = true;
+        } catch (error) {
+            console.warn('Could not initialize the DRACO decoder.', error);
+            this.dracoLoader?.dispose?.();
+            this.dracoLoader = null;
+        }
+
+        try {
+            this.ktx2Loader = new KTX2Loader();
+            this.ktx2Loader.setTranscoderPath(this.getDecoderAssetUrl('libs/basis/'));
+            this.ktx2Loader.detectSupport(this.renderer);
+            this.loader.setKTX2Loader(this.ktx2Loader);
+            availability.ktx2 = true;
+        } catch (error) {
+            console.warn('Could not initialize the KTX2 transcoder.', error);
+            this.ktx2Loader?.dispose?.();
+            this.ktx2Loader = null;
+        }
+
+        this.decoderAvailability = availability;
+    }
+
+    reportCompressedAssetPipelineStatus() {
+        if (this._decoderAvailabilityLogged) return;
+        this._decoderAvailabilityLogged = true;
+        const details = [
+            this.decoderAvailability?.draco ? 'DRACO ready' : 'DRACO unavailable',
+            this.decoderAvailability?.ktx2 ? 'KTX2 ready' : 'KTX2 unavailable'
+        ].join(', ');
+        this.emitAssetPipelineMessage('info', `Compressed 3D asset pipeline initialized (${details}).`, {
+            dedupeKey: `3d-decoders:${details}`,
+            dedupeWindowMs: 500
+        });
+    }
+
     emitPathTraceLoading(active, message = '') {
         const nextMessage = message || this._pathTraceLoadingMessage || 'Preparing path tracer...';
         if (this._pathTraceLoadingActive === !!active && (!active || nextMessage === this._pathTraceLoadingMessage)) {
@@ -521,6 +522,9 @@ export class ThreeDEngine {
 
     getViewportPixelRatio() {
         const devicePixelRatio = window.devicePixelRatio || 1;
+        if (this.activeDocument?.view?.viewportHighResCap === false) {
+            return devicePixelRatio;
+        }
         if (this.canRunViewportPathTrace()) {
             return devicePixelRatio;
         }
@@ -789,8 +793,9 @@ export class ThreeDEngine {
         const deltaY = Number.isFinite(event.movementY) ? event.movementY : (event.clientY - this._flyPointerY);
         this._flyPointerX = event.clientX;
         this._flyPointerY = event.clientY;
-        this._flyYaw -= deltaX * 0.003;
-        this._flyPitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this._flyPitch - deltaY * 0.003));
+        const lookSensitivity = Math.max(0.0005, Number(this.activeDocument?.view?.flyLookSensitivity) || 0.003);
+        this._flyYaw -= deltaX * lookSensitivity;
+        this._flyPitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this._flyPitch - deltaY * lookSensitivity));
         this.applyFlyOrientation();
         this.handleLiveCameraChange();
         this.queueCameraCommit();
@@ -878,7 +883,8 @@ export class ThreeDEngine {
 
         movement.normalize();
         const speedMultiplier = this._flyKeys.has('shift') ? 3.5 : this._flyKeys.has('alt') ? 0.35 : 1;
-        const speed = 6 * speedMultiplier * Math.min(Math.max(deltaTime, 1 / 240), 1 / 15);
+        const baseSpeed = Math.max(0.25, Number(this.activeDocument?.view?.flyMoveSpeed) || 6);
+        const speed = baseSpeed * speedMultiplier * Math.min(Math.max(deltaTime, 1 / 240), 1 / 15);
         this.camera.position.addScaledVector(movement, speed);
         this.applyFlyOrientation();
         this.handleLiveCameraChange();
@@ -1058,6 +1064,9 @@ export class ThreeDEngine {
         } else {
             this.transformControl.rotationSnap = rotationSnap;
         }
+        if (typeof this.transformControl.setSize === 'function') {
+            this.transformControl.setSize(Math.max(0.4, Number(document.view.gizmoScale) || 1));
+        }
 
         let nextView = document.view;
         if (this._navigationMode === 'canvas') {
@@ -1212,237 +1221,12 @@ export class ThreeDEngine {
         this.scheduleSceneRebuild();
     }
 
-    disposeBooleanSegments(segments = [], { disposeMaterials = false } = {}) {
-        segments.forEach(({ geometry, material }) => {
-            geometry?.dispose?.();
-            if (disposeMaterials) {
-                material?.dispose?.();
-            }
-        });
-    }
-
-    normalizeBooleanGeometryAttributes(geometry, includeUv = false) {
-        const position = geometry?.getAttribute?.('position');
-        if (!position) return false;
-
-        if (!geometry.getAttribute('normal')) {
-            geometry.computeVertexNormals();
-        }
-
-        if (includeUv && !geometry.getAttribute('uv')) {
-            geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(position.count * 2), 2));
-        }
-
-        Object.keys(geometry.attributes).forEach((name) => {
-            if (!BOOLEAN_ATTRIBUTE_KEYS.includes(name) || (name === 'uv' && !includeUv)) {
-                geometry.deleteAttribute(name);
-            }
-        });
-
-        if (!geometry.getAttribute('normal') && geometry.getAttribute('position')) {
-            geometry.computeVertexNormals();
-        }
-
-        geometry.computeBoundingBox();
-        geometry.computeBoundingSphere();
-        return true;
-    }
-
-    collectBooleanMeshSegments(root, referenceObject = root, { cloneMaterials = true } = {}) {
-        if (!root || !referenceObject) return [];
-        root.updateMatrixWorld(true);
-        referenceObject.updateMatrixWorld(true);
-        const referenceInverse = new THREE.Matrix4().copy(referenceObject.matrixWorld).invert();
-        const segments = [];
-
-        root.traverse((child) => {
-            if (!child?.isMesh || child.visible === false || !child.geometry?.getAttribute?.('position')) return;
-            const toReference = new THREE.Matrix4().multiplyMatrices(referenceInverse, child.matrixWorld);
-            getMeshBooleanGeometryParts(child).forEach(({ geometry, material }) => {
-                geometry.applyMatrix4(toReference);
-                segments.push({
-                    geometry,
-                    material: cloneMaterials
-                        ? material?.clone?.() || new THREE.MeshStandardMaterial({
-                            color: 0xffffff,
-                            roughness: 0.65,
-                            metalness: 0
-                        })
-                        : null
-                });
-            });
-        });
-
-        return segments;
-    }
-
-    mergeBooleanSegmentGeometry(segments, useGroups = false) {
-        if (!segments.length) {
-            throw new Error('No mesh data was available for the boolean operation.');
-        }
-
-        const includeUv = segments.some(({ geometry }) => geometry?.getAttribute?.('uv'));
-        const prepared = segments
-            .map(({ geometry }) => geometry)
-            .filter((geometry) => this.normalizeBooleanGeometryAttributes(geometry, includeUv));
-
-        if (!prepared.length) {
-            throw new Error('No compatible mesh attributes were available for the boolean operation.');
-        }
-
-        const merged = mergeGeometries(prepared, useGroups);
-        if (!merged) {
-            throw new Error('Could not combine the mesh data for boolean slicing.');
-        }
-
-        if (!merged.getAttribute('normal') && merged.getAttribute('position')) {
-            merged.computeVertexNormals();
-        }
-        merged.computeBoundingBox();
-        merged.computeBoundingSphere();
-        return merged;
-    }
-
-    buildBooleanBrushFromObject(root, referenceObject = root) {
-        const segments = this.collectBooleanMeshSegments(root, referenceObject, { cloneMaterials: true });
-        try {
-            if (!segments.length) return null;
-            const geometry = this.mergeBooleanSegmentGeometry(segments, true);
-            const materials = segments.map(({ material }) => material || new THREE.MeshStandardMaterial({
-                color: 0xffffff,
-                roughness: 0.65,
-                metalness: 0
-            }));
-            const brush = new Brush(geometry, materials.length === 1 ? materials[0] : materials);
-            brush.name = root.name || 'Brush';
-            brush.castShadow = true;
-            brush.receiveShadow = true;
-            brush.updateMatrixWorld(true);
-            segments.forEach(({ geometry: segmentGeometry }) => segmentGeometry?.dispose?.());
-            return brush;
-        } catch (error) {
-            this.disposeBooleanSegments(segments, { disposeMaterials: true });
-            throw error;
-        }
-    }
-
-    buildBooleanSnapshotGeometry(root, referenceObject = root) {
-        const segments = this.collectBooleanMeshSegments(root, referenceObject, { cloneMaterials: false });
-        try {
-            const geometry = this.mergeBooleanSegmentGeometry(segments, false);
-            this.disposeBooleanSegments(segments);
-            return geometry;
-        } catch (error) {
-            this.disposeBooleanSegments(segments);
-            throw error;
-        }
-    }
-
     async createRenderableObject(item) {
-        if (isBooleanCompatibleItem(item) && Array.isArray(item.booleanCuts) && item.booleanCuts.length) {
-            return this.createBooleanSlicedObject(item);
-        }
-
         if (item.kind === 'primitive') return this.createPrimitiveObject(item);
         if (item.kind === 'image-plane') return this.createImagePlaneObject(item);
         if (item.kind === 'text') return this.createTextObject(item);
         if (item.kind === 'shape-2d') return this.createShape2DObject(item);
         return this.createModelObject(item);
-    }
-
-    async createBooleanSlicedObject(item) {
-        const baseObject = item.kind === 'primitive'
-            ? this.createPrimitiveObject(item)
-            : await this.createModelObject(item);
-
-        try {
-            let currentBrush = this.buildBooleanBrushFromObject(baseObject, baseObject);
-            if (!currentBrush) {
-                const empty = new THREE.Group();
-                empty.name = item.name || 'Sliced Object';
-                return empty;
-            }
-
-            const baseBrush = currentBrush;
-            for (const cut of item.booleanCuts || []) {
-                if (cut?.mode !== 'subtract' || !cut.geometry) continue;
-
-                const cutterGeometry = this.geometryLoader.parse(cut.geometry);
-                const position = cutterGeometry.getAttribute('position');
-                if (!position || position.count < 3) {
-                    cutterGeometry.dispose?.();
-                    continue;
-                }
-
-                const sharedMaterial = getPrimaryMaterial(currentBrush.material) || new THREE.MeshStandardMaterial({
-                    color: 0xffffff,
-                    roughness: 0.65,
-                    metalness: 0
-                });
-                const cutterBrush = new Brush(cutterGeometry, sharedMaterial);
-                const nextBrush = new Brush(new THREE.BufferGeometry(), sharedMaterial);
-                this.booleanEvaluator.evaluate(currentBrush, cutterBrush, SUBTRACTION, nextBrush);
-                if (currentBrush !== baseBrush) {
-                    currentBrush.geometry?.dispose?.();
-                }
-                cutterBrush.geometry?.dispose?.();
-                currentBrush = nextBrush;
-            }
-
-            currentBrush.name = item.name || baseObject.name || 'Sliced Object';
-            currentBrush.castShadow = true;
-            currentBrush.receiveShadow = true;
-            if (!currentBrush.geometry.getAttribute('normal') && currentBrush.geometry.getAttribute('position')) {
-                currentBrush.geometry.computeVertexNormals();
-            }
-            currentBrush.geometry.computeBoundingBox?.();
-            currentBrush.geometry.computeBoundingSphere?.();
-            currentBrush.userData.threeDOriginalMaterialTemplate = cloneMaterialSet(currentBrush.material);
-            return currentBrush;
-        } catch (error) {
-            const detail = String(error?.message || '').trim();
-            throw new Error(
-                detail
-                    ? `Could not slice "${item.name || 'item'}". Boolean cuts work best on closed watertight meshes. ${detail}`
-                    : `Could not slice "${item.name || 'item'}". Boolean cuts work best on closed watertight meshes.`
-            );
-        } finally {
-            disposeObject3D(baseObject);
-        }
-    }
-
-    async captureBooleanCutSnapshot(targetItemId, cutterItemId) {
-        if (!targetItemId || !cutterItemId || targetItemId === cutterItemId) {
-            throw new Error('Choose a different target and cutter object.');
-        }
-
-        const targetItem = this.activeDocument.scene.items.find((item) => item.id === targetItemId) || null;
-        const cutterItem = this.activeDocument.scene.items.find((item) => item.id === cutterItemId) || null;
-        if (!isBooleanCompatibleItem(targetItem) || !isBooleanCompatibleItem(cutterItem)) {
-            throw new Error('Only model and primitive objects can be used for solid slicing.');
-        }
-
-        const targetObject = this.sceneObjects.get(targetItemId);
-        const cutterObject = this.sceneObjects.get(cutterItemId);
-        if (!targetObject || !cutterObject) {
-            throw new Error('The selected cutter or target is not ready in the 3D viewport yet.');
-        }
-
-        const geometry = this.buildBooleanSnapshotGeometry(cutterObject, targetObject);
-        const position = geometry.getAttribute('position');
-        if (!position || position.count < 3) {
-            geometry.dispose?.();
-            throw new Error('The cutter did not produce any solid mesh data to slice with.');
-        }
-
-        const snapshot = {
-            mode: 'subtract',
-            sourceName: cutterItem.name || cutterObject.name || 'Cutter',
-            createdAt: Date.now(),
-            geometry: geometry.toJSON()
-        };
-        geometry.dispose?.();
-        return snapshot;
     }
 
     buildItemSignature(item) {
@@ -1474,8 +1258,7 @@ export class ThreeDEngine {
             primitiveType: item.asset?.primitiveType || '',
             dataUrl: item.asset?.dataUrl || '',
             width: item.asset?.width || 0,
-            height: item.asset?.height || 0,
-            booleanCuts: item.booleanCuts || []
+            height: item.asset?.height || 0
         });
     }
 
@@ -1530,11 +1313,30 @@ export class ThreeDEngine {
         const payload = item.asset.format === 'gltf'
             ? await dataUrlToText(item.asset.dataUrl)
             : await dataUrlToArrayBuffer(item.asset.dataUrl);
-        const root = await new Promise((resolve, reject) => {
+        const gltf = await new Promise((resolve, reject) => {
             this.loader.parse(payload, '', (gltf) => {
-                resolve(gltf.scene || gltf.scenes?.[0] || new THREE.Group());
+                resolve(gltf);
             }, reject);
         });
+        const root = gltf.scene || gltf.scenes?.[0] || new THREE.Group();
+        const extensionsUsed = Array.isArray(gltf?.parser?.json?.extensionsUsed) ? gltf.parser.json.extensionsUsed : [];
+        const usedCompression = [];
+        if (extensionsUsed.includes('KHR_draco_mesh_compression')) {
+            usedCompression.push('DRACO');
+        }
+        if (extensionsUsed.includes('KHR_texture_basisu')) {
+            usedCompression.push('KTX2');
+        }
+        if (usedCompression.length) {
+            this.emitAssetPipelineMessage(
+                'info',
+                `Loaded "${item.name || item.asset?.name || 'Model'}" with ${usedCompression.join(' + ')} compression.`,
+                {
+                    dedupeKey: `3d-model-compression:${item.id}:${usedCompression.join('+')}`,
+                    dedupeWindowMs: 300
+                }
+            );
+        }
         root.name = item.name || item.asset.name || 'Model';
         root.traverse((child) => {
             if (!child.isMesh) return;
@@ -2179,7 +1981,7 @@ export class ThreeDEngine {
     }
 
     renderSelectionCutthrough() {
-        // The old temporary x-ray overlay has been replaced by persistent boolean cuts.
+        // Reserved for future selection overlays.
     }
 
     renderSelectionEditorOverlay() {
@@ -2582,6 +2384,8 @@ export class ThreeDEngine {
         disposeDenoisePass(this.viewportDenoisePass);
         disposePathTracerSafely(this.pathTracer);
         this.meshViewMaterial.dispose();
+        this.dracoLoader?.dispose?.();
+        this.ktx2Loader?.dispose?.();
         this.disposeWorldTexture(this._worldBackgroundTexture);
         this.disposeWorldTexture(this._worldLightingTexture);
         this._worldBackgroundTexture = null;
