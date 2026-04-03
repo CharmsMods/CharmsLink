@@ -1,11 +1,4 @@
-function downloadBlob(blob, filename) {
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
-}
+import { saveJsonLocally } from './localSave.js';
 
 function normalizeStudioPreview(preview) {
     if (!preview || typeof preview !== 'object' || !preview.imageData) {
@@ -76,19 +69,22 @@ export function serializeState(state, options = {}) {
     });
 }
 
-export function downloadPreset(state) {
-    const blob = new Blob([JSON.stringify(serializePreset(state), null, 2)], { type: 'application/json' });
-    downloadBlob(blob, 'noise-studio-preset.mns.json');
+export async function downloadPreset(state) {
+    return saveJsonLocally(serializePreset(state), 'noise-studio-preset.mns.json', {
+        filters: [{ name: 'Noise Studio Preset', extensions: ['json'] }]
+    });
 }
 
-export function downloadDocument(state, options = {}) {
-    const blob = new Blob([JSON.stringify(serializeDocument(state, options), null, 2)], { type: 'application/json' });
-    downloadBlob(blob, 'noise-studio-document.mns.json');
+export async function downloadDocument(state, options = {}) {
+    return saveJsonLocally(serializeDocument(state, options), 'noise-studio-document.mns.json', {
+        filters: [{ name: 'Noise Studio Document', extensions: ['json'] }]
+    });
 }
 
-export function downloadState(state, options = {}) {
-    const blob = new Blob([JSON.stringify(serializeState(state, options), null, 2)], { type: 'application/json' });
-    downloadBlob(blob, 'noise-studio-state.mns.json');
+export async function downloadState(state, options = {}) {
+    return saveJsonLocally(serializeState(state, options), 'noise-studio-state.mns.json', {
+        filters: [{ name: 'Noise Studio State', extensions: ['json'] }]
+    });
 }
 
 export function readJsonFile(file) {

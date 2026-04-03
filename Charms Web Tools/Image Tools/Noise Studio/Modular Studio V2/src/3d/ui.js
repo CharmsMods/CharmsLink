@@ -51,6 +51,16 @@ function formatRenderSize(job) {
     return `${job.outputWidth} x ${job.outputHeight}`;
 }
 
+function formatDuration(durationMs = 0) {
+    const safeMs = Math.max(0, Math.round(Number(durationMs) || 0));
+    if (safeMs < 1000) return `${safeMs} ms`;
+    const totalSeconds = safeMs / 1000;
+    if (totalSeconds < 60) return `${totalSeconds.toFixed(totalSeconds >= 10 ? 1 : 2).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1')} s`;
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = Math.round(totalSeconds % 60);
+    return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
 function describeItemKind(item) {
     const baseLabel = item.kind === 'light'
         ? item.light?.lightType || 'light'
@@ -232,10 +242,11 @@ export function createThreeDWorkspace(actions, store) {
                 <section class="panel-section" style="background:rgba(15,15,18,0.84); backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,0.1); border-radius:14px; overflow:hidden;">
                     <div class="panel-heading" style="padding:14px 16px; margin:0; border-bottom:1px solid rgba(255,255,255,0.08);">3D Scene</div>
                     <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
-                        <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
+                        <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
                             <button type="button" class="primary-button" data-threed-action="load-models">Load Models</button>
                             <button type="button" class="toolbar-button" data-threed-action="load-images">Add Image Planes</button>
                             <button type="button" class="toolbar-button" data-threed-action="save-library">Save to Library</button>
+                            <button type="button" class="toolbar-button" data-threed-action="save-scene-json">Save JSON</button>
                         </div>
                         <button type="button" class="toolbar-button" data-threed-action="new-scene">New 3D Scene</button>
                         <div class="info-banner" style="margin:0;">Embedded <code>.glb</code> and embedded images are the most reliable Library formats for both browser and Electron builds.</div>
@@ -401,7 +412,10 @@ export function createThreeDWorkspace(actions, store) {
                 <section class="panel-section" style="background:rgba(15,15,18,0.84); backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,0.1); border-radius:14px; overflow:hidden;">
                     <div class="panel-heading" style="padding:14px 16px; margin:0; border-bottom:1px solid rgba(255,255,255,0.08);">Inspector</div>
                     <div style="padding:16px; display:flex; flex-direction:column; gap:10px;">
-                        <div data-threed-role="selection-name" style="font-weight:600;">Nothing selected</div>
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                            <div data-threed-role="selection-name" style="font-weight:600;">Nothing selected</div>
+                            <button type="button" class="secondary-button" data-threed-action="selection-menu">Item Menu</button>
+                        </div>
                         <label style="display:flex; flex-direction:column; gap:6px;">
                             <span>Name</span>
                             <input type="text" class="control-number" data-threed-role="item-name" placeholder="Select an item to rename it">
@@ -1262,6 +1276,7 @@ export function createThreeDWorkspace(actions, store) {
                 <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="edit">Panels</button>
                 <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="fullscreen">Fullscreen</button>
                 <button type="button" class="toolbar-button" data-threed-action="save-library">Save</button>
+                <button type="button" class="toolbar-button" data-threed-action="save-scene-json">JSON</button>
             </div>
             <span class="threed-overlay-chip">Mode <strong data-threed-role="compact-render-mode-label">Edit</strong></span>
             <span class="threed-overlay-chip">Spp <strong data-threed-role="header-sample-count">0</strong></span>
@@ -1364,6 +1379,7 @@ export function createThreeDWorkspace(actions, store) {
     let sampleCount = 0;
     let previewTransform = null;
     let statusTone = 'info';
+    let statusResetTimer = null;
     let renderSyncToken = 0;
     let lastEngineSyncKey = '';
     let uiMode = 'edit';
@@ -1372,6 +1388,7 @@ export function createThreeDWorkspace(actions, store) {
     let sliceCutterId = '';
     let contextMenuPath = [];
     let contextMenuAnchor = null;
+    let lastContextMenuOpenAt = 0;
     let surfaceAttachTextId = null;
     let libraryAssets = [];
     let visibleLibraryAssets = [];
@@ -1518,7 +1535,7 @@ export function createThreeDWorkspace(actions, store) {
         renderAssetDrawer();
     }
 
-    function setStatus(text, tone = 'info') {
+    function applyStatus(text, tone = 'info') {
         statusTone = tone;
         refs.status.textContent = text || '';
         refs.status.dataset.tone = tone;
@@ -1528,6 +1545,66 @@ export function createThreeDWorkspace(actions, store) {
             ? 'rgba(184,178,163,0.28)'
             : 'rgba(184,178,163,0.72)';
         logStatusMessage(text, tone);
+    }
+
+    function applyBaseStatus(state = store.getState()) {
+        const document = state?.threeDDocument;
+        if (!document) return;
+        const hasTracePreviewContent = document.scene.items.some((item) => item.visible !== false && item.kind !== 'light');
+        if (document.renderJob?.active) {
+            const renderMessage = document.renderJob.message
+                ? `${document.renderJob.message} ${document.renderJob.currentSamples || 0} / ${document.renderJob.requestedSamples || 0} samples at ${formatRenderSize(document.renderJob)}.`
+                : `Final render running: ${document.renderJob.currentSamples || 0} / ${document.renderJob.requestedSamples || 0} samples at ${formatRenderSize(document.renderJob)}.`;
+            applyStatus(renderMessage, 'info');
+            return;
+        }
+        if (document.view.navigationMode !== 'canvas' && document.view.cameraMode === 'fly') {
+            applyStatus('Fly camera active. Click the viewport, then use right-drag to look and W A S D Q E to move.', 'info');
+            return;
+        }
+        if (surfaceAttachTextId) {
+            applyStatus('Surface attach is active. Click a model or primitive surface, or press Escape to cancel.', 'info');
+            return;
+        }
+        if (!document.scene.items.length) {
+            applyStatus('Load models or add image planes to start building a 3D scene.', 'info');
+            return;
+        }
+        if (document.render.mode === 'pathtrace' && !hasTracePreviewContent) {
+            applyStatus('Path Trace is active, but there are no visible objects to trace yet. Add a model, primitive, text, shape, or image plane to preview lighting.', 'info');
+            return;
+        }
+        if (document.render.mode === 'pathtrace') {
+            applyStatus(
+                document.render.denoiseEnabled
+                    ? 'Path tracing is active. Denoising is enabled, so noise should settle faster but very fine detail can soften a bit.'
+                    : 'Path tracing is active. Editor helpers are excluded from the traced scene.',
+                'info'
+            );
+            return;
+        }
+        if (document.render.mode === 'mesh') {
+            applyStatus('Mesh view is active. Scene geometry is shown as wireframe while the editor controls stay available.', 'info');
+            return;
+        }
+        applyStatus('Edit view is active. Objects are shown unlit for faster editing and clearer visibility; switch to Path Trace to preview lighting.', 'info');
+    }
+
+    function clearStatusResetTimer() {
+        if (!statusResetTimer) return;
+        clearTimeout(statusResetTimer);
+        statusResetTimer = null;
+    }
+
+    function setStatus(text, tone = 'info', timeout = 0) {
+        clearStatusResetTimer();
+        applyStatus(text, tone);
+        if (timeout > 0) {
+            statusResetTimer = setTimeout(() => {
+                statusResetTimer = null;
+                applyBaseStatus(store.getState());
+            }, timeout);
+        }
     }
 
     function setInputValue(input, value) {
@@ -1894,22 +1971,40 @@ export function createThreeDWorkspace(actions, store) {
         });
     }
 
-    function openContextMenuAt(event, itemId) {
+    function openContextMenuForItem(itemId, options = {}) {
         if (!itemId || !refs.contextMenuHost || !refs.canvasContainer) {
             closeContextMenu();
-            return;
+            return false;
         }
         const rect = refs.shell?.getBoundingClientRect() || refs.contextMenuHost.getBoundingClientRect();
         const hostRect = refs.contextMenuHost.getBoundingClientRect();
+        const anchorElement = options.anchorEl || refs.selectionName || refs.canvasContainer;
+        const anchorRect = anchorElement?.getBoundingClientRect?.() || rect;
+        const requestedX = Number.isFinite(Number(options.clientX))
+            ? Number(options.clientX)
+            : (anchorRect.left + Math.min(anchorRect.width, 180));
+        const requestedY = Number.isFinite(Number(options.clientY))
+            ? Number(options.clientY)
+            : (anchorRect.bottom + 10);
         const maxX = Math.max(8, hostRect.width - 196);
         const maxY = Math.max(8, hostRect.height - 160);
         contextMenuAnchor = {
-            x: clamp(event.clientX - rect.left, 8, maxX),
-            y: clamp(event.clientY - rect.top, 8, maxY),
+            x: clamp(requestedX - rect.left, 8, maxX),
+            y: clamp(requestedY - rect.top, 8, maxY),
             itemId
         };
+        lastContextMenuOpenAt = Date.now();
         contextMenuPath = [];
         renderContextMenus(store.getState());
+        return true;
+    }
+
+    function openContextMenuAt(event, itemId) {
+        return openContextMenuForItem(itemId, {
+            clientX: event?.clientX,
+            clientY: event?.clientY,
+            anchorEl: event?.currentTarget || event?.target || refs.selectionName
+        });
     }
 
     function closeContextMenu() {
@@ -2074,26 +2169,33 @@ export function createThreeDWorkspace(actions, store) {
             samples: requestedSamples,
             width: outputWidth,
             height: outputHeight,
-            fileName: suggestedName
+            fileName: suggestedName,
+            saveHandler: (blob, nextFileName) => actions.persistThreeDRenderSave?.(blob, nextFileName, {
+                documentState: renderDocument,
+                width: outputWidth,
+                height: outputHeight
+            })
         }).catch((error) => {
             console.error(error);
-            actions.resetThreeDRenderJob({
-                active: false,
-                status: 'error',
-                requestedSamples,
-                currentSamples: 0,
-                outputWidth,
-                outputHeight,
-                finishedAt: Date.now(),
-                fileName: suggestedName,
-                message: error?.message || 'The render failed.'
-            });
             setPathTraceLoading(false);
-            setStatus(error?.message || 'The render failed.', 'error');
+            if (store.getState().threeDDocument?.renderJob?.status !== 'error') {
+                actions.resetThreeDRenderJob({
+                    active: false,
+                    status: 'error',
+                    requestedSamples,
+                    currentSamples: 0,
+                    outputWidth,
+                    outputHeight,
+                    finishedAt: Date.now(),
+                    fileName: suggestedName,
+                    message: error?.message || 'The render failed.'
+                });
+                setStatus(error?.message || 'The render failed.', 'error', 7000);
+            }
         });
     }
 
-    root.addEventListener('click', (event) => {
+    root.addEventListener('click', async (event) => {
         const actionNode = event.target.closest('[data-threed-action]');
         if (!actionNode) return;
         const action = actionNode.dataset.threedAction;
@@ -2118,7 +2220,26 @@ export function createThreeDWorkspace(actions, store) {
         } else if (action === 'load-images') {
             refs.imageInput.click();
         } else if (action === 'save-library') {
-            actions.saveProjectToLibrary(null, { projectType: '3d' });
+            setStatus('Preparing the current 3D scene for Library save...', 'info', 2400);
+            actions.saveProjectToLibrary(null, { projectType: '3d' }).catch((error) => {
+                console.error(error);
+                setStatus(error?.message || 'Could not save this 3D scene to the Library.', 'error', 7000);
+            });
+        } else if (action === 'save-scene-json') {
+            setStatus('Preparing the current 3D scene JSON for local save...', 'info', 2400);
+            actions.exportThreeDSceneJson?.().catch((error) => {
+                console.error(error);
+                setStatus(error?.message || 'Could not save the 3D scene JSON.', 'error', 7000);
+            });
+        } else if (action === 'selection-menu') {
+            const selected = getSelectedItem(store.getState());
+            if (!selected) {
+                setStatus('Select an item first to open its context menu.', 'warning', 4200);
+                return;
+            }
+            openContextMenuForItem(selected.id, {
+                anchorEl: actionNode
+            });
         } else if (action === 'new-scene') {
             actions.newThreeDProject?.();
         } else if (action === 'add-light') {
@@ -2196,7 +2317,14 @@ export function createThreeDWorkspace(actions, store) {
             actions.resetThreeDCamera?.();
         } else if (action === 'save-camera-preset') {
             const snapshot = engine?.getCameraSnapshot?.() || store.getState().threeDDocument?.view;
-            const name = window.prompt('Name this camera preset:', `Camera ${(store.getState().threeDDocument?.view?.presets?.length || 0) + 1}`);
+            const name = await actions.requestTextDialog?.({
+                title: 'Save Camera Preset',
+                text: 'Choose a name for this camera preset.',
+                fieldLabel: 'Preset name',
+                defaultValue: `Camera ${(store.getState().threeDDocument?.view?.presets?.length || 0) + 1}`,
+                confirmLabel: 'Save Preset',
+                cancelLabel: 'Cancel'
+            });
             if (name != null) {
                 actions.saveThreeDCameraPreset(name, snapshot);
                 setStatus(`Saved camera preset "${String(name || '').trim() || 'Camera'}".`, 'success');
@@ -2245,7 +2373,14 @@ export function createThreeDWorkspace(actions, store) {
             closeContextMenu();
             if (entry === 'duplicate') actions.duplicateThreeDItem?.(item.id);
             else if (entry === 'rename') {
-                const name = window.prompt('Rename item:', item.name);
+                const name = await actions.requestTextDialog?.({
+                    title: 'Rename 3D Item',
+                    text: 'Enter a new name for the selected 3D item.',
+                    fieldLabel: 'Item name',
+                    defaultValue: item.name || 'Item',
+                    confirmLabel: 'Rename',
+                    cancelLabel: 'Cancel'
+                });
                 if (name != null) actions.renameThreeDItem?.(item.id, name);
             } else if (entry === 'hide' || entry === 'show') actions.toggleThreeDItemVisibility?.(item.id);
             else if (entry === 'lock' || entry === 'unlock') actions.toggleThreeDItemLock?.(item.id);
@@ -2297,9 +2432,11 @@ export function createThreeDWorkspace(actions, store) {
         }
     });
 
-    refs.canvasContainer.addEventListener('contextmenu', (event) => {
+    function handleCanvasContextRequest(event) {
         if (!active) return;
+        if ((Date.now() - lastContextMenuOpenAt) < 120 && event.type !== 'contextmenu') return;
         event.preventDefault();
+        event.stopPropagation();
         const documentState = store.getState().threeDDocument;
         if (documentState?.view?.cameraMode === 'fly') {
             closeContextMenu();
@@ -2317,12 +2454,14 @@ export function createThreeDWorkspace(actions, store) {
             return;
         }
         openContextMenuAt(event, itemId);
-    });
+    }
 
-    refs.hierarchy.addEventListener('contextmenu', (event) => {
+    function handleHierarchyContextRequest(event) {
         const itemNode = event.target.closest('[data-threed-item-id]');
         if (!itemNode) return;
         event.preventDefault();
+        event.stopPropagation();
+        if ((Date.now() - lastContextMenuOpenAt) < 120 && event.type !== 'contextmenu') return;
         const itemId = itemNode.dataset.threedItemId || '';
         if (!itemId) {
             closeContextMenu();
@@ -2333,6 +2472,18 @@ export function createThreeDWorkspace(actions, store) {
             actions.setThreeDSelection(itemId);
         }
         openContextMenuAt(event, itemId);
+    }
+
+    refs.canvasContainer.addEventListener('contextmenu', handleCanvasContextRequest);
+    refs.canvasContainer.addEventListener('pointerup', (event) => {
+        if (event.button !== 2) return;
+        handleCanvasContextRequest(event);
+    });
+
+    refs.hierarchy.addEventListener('contextmenu', handleHierarchyContextRequest);
+    refs.hierarchy.addEventListener('pointerup', (event) => {
+        if (event.button !== 2) return;
+        handleHierarchyContextRequest(event);
     });
 
     refs.canvasContainer.addEventListener('pointerdown', (event) => {
@@ -2852,6 +3003,18 @@ export function createThreeDWorkspace(actions, store) {
             }
         }
         if (store.getState().threeDDocument?.renderJob?.active) return;
+        if (event.shiftKey && key === 'f10') {
+            const selected = getSelectedItem(store.getState());
+            if (!selected) {
+                setStatus('Select an item first to open its context menu.', 'warning', 4200);
+                return;
+            }
+            event.preventDefault();
+            openContextMenuForItem(selected.id, {
+                anchorEl: refs.selectionName
+            });
+            return;
+        }
         if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
         if (event.repeat || event.defaultPrevented || event.isComposing) return;
         const tagName = String(event.target?.tagName || '').toLowerCase();
@@ -2935,6 +3098,7 @@ export function createThreeDWorkspace(actions, store) {
                 const prefix = payload?.message ? `${payload.message} ` : 'Final render running: ';
                 setStatus(`${prefix}${payload.currentSamples || 0} / ${payload.requestedSamples || 0} samples at ${formatRenderSize(payload)}.`, 'info');
             }
+            const durationLabel = payload?.durationMs ? ` in ${formatDuration(payload.durationMs)}` : '';
             if (payload?.active) {
                 const requestedSamples = Math.max(1, Number(payload.requestedSamples || 0));
                 const ratio = requestedSamples > 0 ? Math.min(1, (Number(payload.currentSamples || 0) / requestedSamples)) : 0;
@@ -2949,13 +3113,31 @@ export function createThreeDWorkspace(actions, store) {
                 }
             } else if (payload?.status === 'complete') {
                 lastRenderProgressSignature = '';
-                logThreeD('success', '3d.render', payload?.message || '3D render complete. PNG exported.');
+                if (payload?.libraryStatus === 'failed') {
+                    logThreeD('warning', '3d.render', `${payload?.message || '3D render complete. PNG exported.'}${durationLabel} The Assets Library copy could not be updated: ${payload?.libraryError || 'Unknown Library error.'}`);
+                    setStatus(`${payload?.message || 'Render complete. PNG exported.'}${durationLabel} Local save worked, but the Assets Library copy could not be updated.`, 'warning', 7000);
+                } else {
+                    logThreeD('success', '3d.render', `${payload?.message || '3D render complete. PNG exported.'}${durationLabel}`);
+                    setStatus(
+                        payload?.libraryStatus === 'saved'
+                            ? `${payload?.message || 'Render complete. PNG exported.'}${durationLabel} Saved locally and added to the Assets Library.`
+                            : `${payload?.message || 'Render complete. PNG exported.'}${durationLabel}`,
+                        'success',
+                        4200
+                    );
+                }
+            } else if (payload?.status === 'cancelled') {
+                lastRenderProgressSignature = '';
+                logThreeD('warning', '3d.render', `${payload?.message || '3D render finished, but the PNG save was cancelled.'}${durationLabel}`);
+                setStatus(`${payload?.message || 'Render finished, but the PNG save was cancelled.'}${durationLabel}`, 'warning', 4200);
             } else if (payload?.status === 'aborted') {
                 lastRenderProgressSignature = '';
-                logThreeD('warning', '3d.render', payload?.message || '3D render aborted.');
+                logThreeD('warning', '3d.render', `${payload?.message || '3D render aborted.'}${durationLabel}`);
+                setStatus(`${payload?.message || 'Render aborted.'}${durationLabel}`, 'warning', 4200);
             } else if (payload?.status === 'error') {
                 lastRenderProgressSignature = '';
-                logThreeD('error', '3d.render', payload?.message || 'The 3D render failed.');
+                logThreeD('error', '3d.render', `${payload?.message || 'The 3D render failed.'}${durationLabel}`);
+                setStatus(`${payload?.message || 'The 3D render failed.'}${durationLabel}`, 'error', 7000);
             }
             actions.setThreeDRenderJob(
                 payload,
@@ -3215,6 +3397,9 @@ export function createThreeDWorkspace(actions, store) {
                     node.disabled = renderLocked || !hasSelection;
                 });
             });
+            root.querySelectorAll('[data-threed-action="selection-menu"]').forEach((node) => {
+                node.disabled = renderLocked || !hasSelection;
+            });
             ['duplicate-item', 'reset-transform', 'delete-item'].forEach((actionName) => {
                 root.querySelectorAll(`[data-threed-action="${actionName}"]`).forEach((node) => {
                     node.disabled = renderLocked || !hasSelection || selectionLocked;
@@ -3298,36 +3483,8 @@ export function createThreeDWorkspace(actions, store) {
                 node.disabled = renderLocked || worldLight.mode !== 'gradient';
             });
 
-            if (statusTone !== 'error') {
-                if (document.renderJob?.active) {
-                    const renderMessage = document.renderJob.message
-                        ? `${document.renderJob.message} ${document.renderJob.currentSamples || 0} / ${document.renderJob.requestedSamples || 0} samples at ${formatRenderSize(document.renderJob)}.`
-                        : `Final render running: ${document.renderJob.currentSamples || 0} / ${document.renderJob.requestedSamples || 0} samples at ${formatRenderSize(document.renderJob)}.`;
-                    setStatus(renderMessage, 'info');
-                } else if (document.renderJob?.status === 'complete') {
-                    setStatus(document.renderJob.message || 'Render complete. PNG exported.', 'success');
-                } else if (document.renderJob?.status === 'aborted') {
-                    setStatus(document.renderJob.message || 'Render aborted.', 'warning');
-                } else if (document.view.navigationMode !== 'canvas' && document.view.cameraMode === 'fly') {
-                    setStatus('Fly camera active. Click the viewport, then use right-drag to look and W A S D Q E to move.', 'info');
-                } else if (surfaceAttachTextId) {
-                    setStatus('Surface attach is active. Click a model or primitive surface, or press Escape to cancel.', 'info');
-                } else if (!document.scene.items.length) {
-                    setStatus('Load models or add image planes to start building a 3D scene.');
-                } else if (document.render.mode === 'pathtrace' && !hasTracePreviewContent) {
-                    setStatus('Path Trace is active, but there are no visible objects to trace yet. Add a model, primitive, text, shape, or image plane to preview lighting.', 'info');
-                } else if (document.render.mode === 'pathtrace') {
-                    setStatus(
-                        document.render.denoiseEnabled
-                            ? 'Path tracing is active. Denoising is enabled, so noise should settle faster but very fine detail can soften a bit.'
-                            : 'Path tracing is active. Editor helpers are excluded from the traced scene.',
-                        'info'
-                    );
-                } else if (document.render.mode === 'mesh') {
-                    setStatus('Mesh view is active. Scene geometry is shown as wireframe while the editor controls stay available.', 'info');
-                } else {
-                    setStatus('Edit view is active. Objects are shown unlit for faster editing and clearer visibility; switch to Path Trace to preview lighting.', 'info');
-                }
+            if (!statusResetTimer && statusTone !== 'error') {
+                applyBaseStatus(state);
             }
 
             if (document.renderJob?.active && (document.renderJob.currentSamples || 0) < 1) {

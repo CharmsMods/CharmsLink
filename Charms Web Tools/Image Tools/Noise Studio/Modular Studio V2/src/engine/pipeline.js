@@ -102,6 +102,19 @@ function applyAlphaProtection(gl, runtime, inputTex, processedTex, outputFbo, mo
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
+function isCanvasVisible(canvas) {
+    if (!canvas) return false;
+    if (typeof canvas.getClientRects !== 'function') return true;
+    return canvas.getClientRects().length > 0;
+}
+
+function isAbortLike(error) {
+    return !!error && (
+        error.name === 'AbortError'
+        || /abort/i.test(String(error?.message || error || ''))
+    );
+}
+
 export class NoiseStudioEngine {
     constructor(registry, hooks = {}) {
         this.registry = registry;
@@ -143,6 +156,11 @@ export class NoiseStudioEngine {
             hasRenderableLayers: false,
             sourcePlacement: { x: 0, y: 0, w: 1, h: 1 }
         };
+        this.analysisTaskVersion = 0;
+        this.analysisAbortController = null;
+        this.diffPreviewJobs = new WeakMap();
+        this.diffPreviewCanvasKeys = new WeakMap();
+        this.diffPreviewCanvasCounter = 0;
     }
 
     async init(canvas) {
@@ -392,8 +410,155 @@ export class NoiseStudioEngine {
         drawImageContained(ctx, this.runtime.baseImage, canvas.width, canvas.height);
     }
 
+    hasVisibleScopeTargets() {
+        return isCanvasVisible(this.refs.histogramCanvas)
+            || isCanvasVisible(this.refs.vectorscopeCanvas)
+            || isCanvasVisible(this.refs.paradeCanvas);
+    }
+
+    renderRgbaBufferToCanvas(canvas, rgba, width, height) {
+        if (!canvas || !rgba) return;
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+        }
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+        const bytes = rgba instanceof Uint8ClampedArray ? rgba : new Uint8ClampedArray(rgba);
+        ctx.putImageData(new ImageData(bytes, width, height), 0, 0);
+    }
+
+    applyScopeMetrics(metrics = {}) {
+        if (this.refs.avgBrightnessEl && Number.isFinite(metrics.averageBrightness)) {
+            this.refs.avgBrightnessEl.textContent = `${Math.round(metrics.averageBrightness)}`;
+        }
+        if (this.refs.avgSaturationEl && Number.isFinite(metrics.averageSaturation)) {
+            this.refs.avgSaturationEl.textContent = `${Math.round(metrics.averageSaturation)}%`;
+        }
+        if (this.refs.renderResolutionEl && Number.isFinite(metrics.renderWidth) && Number.isFinite(metrics.renderHeight)) {
+            this.refs.renderResolutionEl.textContent = `${metrics.renderWidth} x ${metrics.renderHeight}`;
+        }
+    }
+
+    applyScopeAnalysisResult(result = {}) {
+        if (result.histogram) {
+            this.renderRgbaBufferToCanvas(
+                this.refs.histogramCanvas,
+                result.histogram.rgba,
+                result.histogram.width,
+                result.histogram.height
+            );
+        }
+        if (result.vectorscope) {
+            this.renderRgbaBufferToCanvas(
+                this.refs.vectorscopeCanvas,
+                result.vectorscope.rgba,
+                result.vectorscope.width,
+                result.vectorscope.height
+            );
+        }
+        if (result.parade) {
+            this.renderRgbaBufferToCanvas(
+                this.refs.paradeCanvas,
+                result.parade.rgba,
+                result.parade.width,
+                result.parade.height
+            );
+        }
+        this.applyScopeMetrics(result.metrics || {});
+    }
+
+    runScopeAnalysisFallback(pixels, width, height) {
+        updateHistogram(
+            this.refs.histogramCanvas,
+            this.refs.avgBrightnessEl,
+            this.refs.renderResolutionEl,
+            pixels,
+            width,
+            height,
+            this.runtime.renderWidth,
+            this.runtime.renderHeight
+        );
+        updateVectorscope(
+            this.refs.vectorscopeCanvas,
+            this.refs.avgSaturationEl,
+            pixels,
+            width,
+            height
+        );
+        updateParade(this.refs.paradeCanvas, pixels, width, height);
+    }
+
+    scheduleScopeAnalysis(pixels, width, height) {
+        if (!pixels?.length || !this.hasVisibleScopeTargets()) return;
+        const payload = {
+            pixels,
+            width,
+            height,
+            renderWidth: this.runtime.renderWidth,
+            renderHeight: this.runtime.renderHeight,
+            histogramWidth: Math.max(1, Number(this.refs.histogramCanvas?.width) || 512),
+            histogramHeight: Math.max(1, Number(this.refs.histogramCanvas?.height) || 220),
+            vectorscopeWidth: Math.max(1, Number(this.refs.vectorscopeCanvas?.width) || 360),
+            vectorscopeHeight: Math.max(1, Number(this.refs.vectorscopeCanvas?.height) || 360),
+            paradeWidth: Math.max(1, Number(this.refs.paradeCanvas?.width) || 620),
+            paradeHeight: Math.max(1, Number(this.refs.paradeCanvas?.height) || 220)
+        };
+        const fallback = () => this.runScopeAnalysisFallback(pixels, width, height);
+        const version = ++this.analysisTaskVersion;
+        this.analysisAbortController?.abort?.();
+        const abortController = typeof AbortController === 'function' ? new AbortController() : null;
+        this.analysisAbortController = abortController;
+
+        if (typeof this.hooks.computeAnalysisVisuals !== 'function') {
+            fallback();
+            return;
+        }
+
+        this.hooks.computeAnalysisVisuals(payload, {
+            signal: abortController?.signal || null,
+            priority: 'background',
+            processId: 'editor.analysis',
+            scope: 'section:editor',
+            replaceKey: 'editor-analysis-visuals',
+            replaceActive: true
+        }).then((result) => {
+            if (version !== this.analysisTaskVersion || abortController?.signal?.aborted) return;
+            if (!result) {
+                fallback();
+                return;
+            }
+            this.applyScopeAnalysisResult(result);
+        }).catch((error) => {
+            if (version !== this.analysisTaskVersion || abortController?.signal?.aborted || isAbortLike(error)) return;
+            fallback();
+        });
+    }
+
+    getDiffPreviewTaskKey(canvas) {
+        if (!canvas) return 'editor-diff-preview';
+        let key = this.diffPreviewCanvasKeys.get(canvas);
+        if (!key) {
+            this.diffPreviewCanvasCounter += 1;
+            key = `editor-diff-preview:${this.diffPreviewCanvasCounter}`;
+            this.diffPreviewCanvasKeys.set(canvas, key);
+        }
+        return key;
+    }
+
+    applyDiffPreviewResult(canvas, rgba, width, height, aspect) {
+        if (!canvas || !rgba) return;
+        const bytes = rgba instanceof Uint8ClampedArray ? rgba : new Uint8ClampedArray(rgba);
+        const imageData = new ImageData(bytes, width, height);
+        this.runtime.thumbTempCanvas.width = width;
+        this.runtime.thumbTempCanvas.height = height;
+        this.runtime.thumbTempCtx.putImageData(imageData, 0, 0);
+        this.drawThumbnailCanvasToCanvas(canvas, aspect);
+    }
+
     updateScopesFromCanvas(canvas) {
         if (!canvas || !this.refs.histogramCanvas && !this.refs.vectorscopeCanvas && !this.refs.paradeCanvas) return;
+        if (!this.hasVisibleScopeTargets()) return;
         const width = this.runtime.analysisFBO.w;
         const height = this.runtime.analysisFBO.h;
         this.runtime.analysisTempCtx.clearRect(0, 0, width, height);
@@ -403,24 +568,7 @@ export class NoiseStudioEngine {
             this.runtime.analysisPixelBuffer = new Uint8Array(imageData.length);
         }
         this.runtime.analysisPixelBuffer.set(imageData);
-        updateHistogram(
-            this.refs.histogramCanvas,
-            this.refs.avgBrightnessEl,
-            this.refs.renderResolutionEl,
-            this.runtime.analysisPixelBuffer,
-            width,
-            height,
-            this.runtime.renderWidth,
-            this.runtime.renderHeight
-        );
-        updateVectorscope(
-            this.refs.vectorscopeCanvas,
-            this.refs.avgSaturationEl,
-            this.runtime.analysisPixelBuffer,
-            width,
-            height
-        );
-        updateParade(this.refs.paradeCanvas, this.runtime.analysisPixelBuffer, width, height);
+        this.scheduleScopeAnalysis(this.runtime.analysisPixelBuffer.slice(), width, height);
     }
 
     getActiveDisplayCanvas() {
@@ -619,6 +767,7 @@ export class NoiseStudioEngine {
 
     updateScopes(texture) {
         if (!this.refs.histogramCanvas && !this.refs.vectorscopeCanvas && !this.refs.paradeCanvas) return;
+        if (!this.hasVisibleScopeTargets()) return;
         const { gl } = this.runtime;
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.runtime.analysisFBO.fbo);
         gl.viewport(0, 0, this.runtime.analysisFBO.w, this.runtime.analysisFBO.h);
@@ -627,24 +776,11 @@ export class NoiseStudioEngine {
             this.runtime.analysisPixelBuffer = new Uint8Array(this.runtime.analysisFBO.w * this.runtime.analysisFBO.h * 4);
         }
         gl.readPixels(0, 0, this.runtime.analysisFBO.w, this.runtime.analysisFBO.h, gl.RGBA, gl.UNSIGNED_BYTE, this.runtime.analysisPixelBuffer);
-        updateHistogram(
-            this.refs.histogramCanvas,
-            this.refs.avgBrightnessEl,
-            this.refs.renderResolutionEl,
-            this.runtime.analysisPixelBuffer,
-            this.runtime.analysisFBO.w,
-            this.runtime.analysisFBO.h,
-            this.runtime.renderWidth,
-            this.runtime.renderHeight
-        );
-        updateVectorscope(
-            this.refs.vectorscopeCanvas,
-            this.refs.avgSaturationEl,
-            this.runtime.analysisPixelBuffer,
+        this.scheduleScopeAnalysis(
+            this.runtime.analysisPixelBuffer.slice(),
             this.runtime.analysisFBO.w,
             this.runtime.analysisFBO.h
         );
-        updateParade(this.refs.paradeCanvas, this.runtime.analysisPixelBuffer, this.runtime.analysisFBO.w, this.runtime.analysisFBO.h);
     }
 
     getThumbnailMetrics(resolution = null) {
@@ -724,38 +860,82 @@ export class NoiseStudioEngine {
         this.readTextureToThumbnailBuffer(processedTexture, resolution, this.runtime.thumbPixelBufferAlt, this.runtime.thumbClampedBufferAlt);
 
         const total = tw * th * 4;
-        for (let offset = 0; offset < total; offset += 4) {
-            const baseR = this.runtime.thumbClampedBuffer[offset];
-            const baseG = this.runtime.thumbClampedBuffer[offset + 1];
-            const baseB = this.runtime.thumbClampedBuffer[offset + 2];
-            const nextR = this.runtime.thumbClampedBufferAlt[offset];
-            const nextG = this.runtime.thumbClampedBufferAlt[offset + 1];
-            const nextB = this.runtime.thumbClampedBufferAlt[offset + 2];
+        const basePixels = this.runtime.thumbClampedBuffer.slice(0, total);
+        const processedPixels = this.runtime.thumbClampedBufferAlt.slice(0, total);
+        const fallback = () => {
+            for (let offset = 0; offset < total; offset += 4) {
+                const baseR = basePixels[offset];
+                const baseG = basePixels[offset + 1];
+                const baseB = basePixels[offset + 2];
+                const nextR = processedPixels[offset];
+                const nextG = processedPixels[offset + 1];
+                const nextB = processedPixels[offset + 2];
 
-            const baseLuma = (baseR * 0.2126) + (baseG * 0.7152) + (baseB * 0.0722);
-            const nextLuma = (nextR * 0.2126) + (nextG * 0.7152) + (nextB * 0.0722);
-            const diffMagnitude = Math.sqrt(
-                ((nextR - baseR) * (nextR - baseR))
-                + ((nextG - baseG) * (nextG - baseG))
-                + ((nextB - baseB) * (nextB - baseB))
-            ) / 441.67295593;
-            const overlayStrength = Math.min(1, diffMagnitude * 3.0);
-            const tint = nextLuma >= baseLuma
-                ? [46, 214, 255]
-                : [255, 138, 64];
-            const grayscale = Math.max(0, Math.min(255, Math.round((baseLuma * 0.88) + 12)));
+                const baseLuma = (baseR * 0.2126) + (baseG * 0.7152) + (baseB * 0.0722);
+                const nextLuma = (nextR * 0.2126) + (nextG * 0.7152) + (nextB * 0.0722);
+                const diffMagnitude = Math.sqrt(
+                    ((nextR - baseR) * (nextR - baseR))
+                    + ((nextG - baseG) * (nextG - baseG))
+                    + ((nextB - baseB) * (nextB - baseB))
+                ) / 441.67295593;
+                const overlayStrength = Math.min(1, diffMagnitude * 3.0);
+                const tint = nextLuma >= baseLuma
+                    ? [46, 214, 255]
+                    : [255, 138, 64];
+                const grayscale = Math.max(0, Math.min(255, Math.round((baseLuma * 0.88) + 12)));
 
-            this.runtime.thumbCompositeBuffer[offset] = Math.round(grayscale + ((tint[0] - grayscale) * overlayStrength));
-            this.runtime.thumbCompositeBuffer[offset + 1] = Math.round(grayscale + ((tint[1] - grayscale) * overlayStrength));
-            this.runtime.thumbCompositeBuffer[offset + 2] = Math.round(grayscale + ((tint[2] - grayscale) * overlayStrength));
-            this.runtime.thumbCompositeBuffer[offset + 3] = 255;
+                this.runtime.thumbCompositeBuffer[offset] = Math.round(grayscale + ((tint[0] - grayscale) * overlayStrength));
+                this.runtime.thumbCompositeBuffer[offset + 1] = Math.round(grayscale + ((tint[1] - grayscale) * overlayStrength));
+                this.runtime.thumbCompositeBuffer[offset + 2] = Math.round(grayscale + ((tint[2] - grayscale) * overlayStrength));
+                this.runtime.thumbCompositeBuffer[offset + 3] = 255;
+            }
+
+            this.applyDiffPreviewResult(
+                canvas,
+                new Uint8ClampedArray(this.runtime.thumbCompositeBuffer.buffer.slice(0, total)),
+                tw,
+                th,
+                aspect
+            );
+        };
+
+        const activeJob = this.diffPreviewJobs.get(canvas);
+        activeJob?.abortController?.abort?.();
+        const abortController = typeof AbortController === 'function' ? new AbortController() : null;
+        const job = {
+            abortController,
+            key: this.getDiffPreviewTaskKey(canvas)
+        };
+        this.diffPreviewJobs.set(canvas, job);
+
+        if (typeof this.hooks.computeDiffPreview !== 'function') {
+            fallback();
+            return;
         }
 
-        const imageData = new ImageData(new Uint8ClampedArray(this.runtime.thumbCompositeBuffer.buffer, 0, total), tw, th);
-        this.runtime.thumbTempCanvas.width = tw;
-        this.runtime.thumbTempCanvas.height = th;
-        this.runtime.thumbTempCtx.putImageData(imageData, 0, 0);
-        this.drawThumbnailCanvasToCanvas(canvas, aspect);
+        this.hooks.computeDiffPreview({
+            basePixels,
+            processedPixels,
+            width: tw,
+            height: th
+        }, {
+            signal: abortController?.signal || null,
+            priority: 'background',
+            processId: 'editor.preview',
+            scope: 'section:editor',
+            replaceKey: job.key,
+            replaceActive: true
+        }).then((result) => {
+            if (this.diffPreviewJobs.get(canvas) !== job || abortController?.signal?.aborted) return;
+            if (!result?.rgba) {
+                fallback();
+                return;
+            }
+            this.applyDiffPreviewResult(canvas, result.rgba, result.width || tw, result.height || th, aspect);
+        }).catch((error) => {
+            if (this.diffPreviewJobs.get(canvas) !== job || abortController?.signal?.aborted || isAbortLike(error)) return;
+            fallback();
+        });
     }
 
     syncHoverPreview() {

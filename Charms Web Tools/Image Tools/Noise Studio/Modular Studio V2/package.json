@@ -5,7 +5,10 @@
   "main": "electron-main.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder -w"
+    "dist": "electron-builder -w",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build:wasm:editor": "node scripts/build-wasm.mjs editor",
+    "build:wasm:library": "node scripts/build-wasm.mjs library"
   },
   "keywords": [],
   "author": "Antigravity",

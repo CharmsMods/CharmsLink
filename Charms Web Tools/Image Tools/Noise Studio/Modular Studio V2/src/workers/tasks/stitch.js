@@ -2,6 +2,7 @@ import { analyzePreparedStitchInputs } from '../../stitch/analysis.js';
 import { createStitchInputId } from '../../stitch/document.js';
 import { blobToDataUrl } from '../../utils/dataUrl.js';
 import { readImageMetadata } from '../../utils/workerImage.js';
+import { reviveWorkerFileEntries } from '../filePayload.js';
 
 function isLikelyImageFile(file) {
     const mimeType = String(file?.type || '').toLowerCase();
@@ -16,7 +17,8 @@ export const stitchTaskHandlers = {
         return analyzePreparedStitchInputs(payload.document, payload.preparedInputs);
     },
     async 'prepare-input-files'(payload = {}, context) {
-        const sourceFiles = (payload.files || []).filter((file) => isLikelyImageFile(file));
+        const sourceFiles = reviveWorkerFileEntries(payload.fileEntries, payload.files)
+            .filter((file) => isLikelyImageFile(file));
         const inputs = [];
         const failures = [];
 

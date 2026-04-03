@@ -4,6 +4,7 @@ import { loadRegistry, createLayerInstance, relabelInstance } from './registry/i
 import { getRegistryUrls } from './registry/shared.js';
 import { downloadState, readJsonFile, serializeState, validateImportPayload } from './io/documents.js';
 import { createProjectAdapterRegistry } from './io/projectAdapters.js';
+import { didSaveFile, saveBlobLocally, saveJsonLocally, wasSaveCancelled } from './io/localSave.js';
 import { NoiseStudioEngine } from './engine/pipeline.js';
 import { StitchEngine } from './stitch/engine.js';
 import { analyzePreparedStitchInputs } from './stitch/analysis.js';
@@ -42,13 +43,22 @@ import { createLogEngine } from './logs/engine.js';
 import { maybeYieldToUi, nextPaint } from './ui/scheduling.js';
 import { createBackgroundTaskBroker } from './workers/runtime.js';
 import { detectWorkerCapabilities } from './workers/capabilities.js';
+import { createWorkerFileEntries, createWorkerSingleFileEntry } from './workers/filePayload.js';
 import { createBootstrapMetrics } from './perf/bootstrapMetrics.js';
 import { createBootShell } from './ui/bootShell.js';
+import { computeAnalysisVisualsJs, computeDiffPreviewJs, extractPaletteFromFileJs } from './editor/backgroundCompute.js';
+import { extractPaletteFromImageSource } from './editor/palette.js';
+import {
+    buildSecureLibraryExportRecord as buildSecureLibraryExportRecordData,
+    resolveSecureLibraryImportRecord as resolveSecureLibraryImportRecordData
+} from './library/secureTransfer.js';
 
 const DB_NAME = 'ModularStudioDB';
 const DB_VERSION = 2;
 const STORE_NAME = 'LibraryProjects';
 const LIBRARY_META_ID = '__library_meta__';
+let backgroundTasks = null;
+let workerCapabilities = null;
 
 function initDB() {
     return new Promise((resolve, reject) => {
@@ -570,13 +580,29 @@ function clearActiveLibraryOrigin(projectType = null) {
     setActiveLibraryOrigin(projectType, null, null);
 }
 
-function downloadBlob(blob, filename) {
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+function describeSavedLocation(result) {
+    return result?.filePath ? ` at "${result.filePath}"` : '';
+}
+
+async function requestAppConfirmDialog(view, options = {}) {
+    if (view?.requestAppConfirm) {
+        return !!(await view.requestAppConfirm(options));
+    }
+    return !!globalThis.confirm?.(String(options.text || options.title || 'Continue?'));
+}
+
+async function requestAppTextDialog(view, options = {}) {
+    if (view?.requestAppText) {
+        return view.requestAppText(options);
+    }
+    const fallbackText = String(options.text || options.title || 'Enter a value:');
+    const fallbackDefault = String(options.defaultValue ?? '');
+    const value = globalThis.prompt?.(fallbackText, fallbackDefault);
+    return value == null ? null : String(options.trim === false ? value : value.trim());
+}
+
+function normalizeComparableLabel(value) {
+    return String(value || '').trim().toLowerCase();
 }
 
 function fileToDataUrl(file) {
@@ -609,6 +635,26 @@ function blobToDataUrl(blob) {
         reader.onerror = reject;
         reader.readAsDataURL(blob);
     });
+}
+
+function isAbortError(error) {
+    return error?.name === 'AbortError';
+}
+
+async function buildWorkerFileListRequest(files = [], options = {}) {
+    const { fileEntries, transfer } = await createWorkerFileEntries(files, options);
+    return {
+        payload: { fileEntries },
+        transfer
+    };
+}
+
+async function buildWorkerSingleFileRequest(file, options = {}) {
+    const { fileEntry, transfer } = await createWorkerSingleFileEntry(file, options);
+    return {
+        payload: { fileEntry },
+        transfer
+    };
 }
 
 function createStudioPreviewSnapshot(studioEngine, documentState, dataUrl) {
@@ -782,7 +828,10 @@ async function computeLibraryAssetFingerprintInBackground(payload = {}) {
     }
     const result = await backgroundTasks.runTask('app-library', 'fingerprint-asset', payload, {
         priority: 'background',
-        processId: 'library.assets'
+        processId: 'library.assets',
+        scope: 'background:library-assets',
+        replayOnWorkerCrash: true,
+        maxCrashReplays: 2
     });
     return String(result?.fingerprint || '');
 }
@@ -857,7 +906,10 @@ async function prepareLibraryAssetRecord(record, existingAsset = null) {
         maxEdge: 192
     }, {
         priority: 'background',
-        processId: 'library.assets'
+        processId: 'library.assets',
+        scope: 'background:library-assets',
+        replayOnWorkerCrash: true,
+        maxCrashReplays: 2
     });
 }
 
@@ -1205,106 +1257,70 @@ function normalizeRgbaColor(color) {
 }
 
 function createPaletteFromImage(image, count) {
-    const canvas = document.createElement('canvas');
-    const longestEdge = Math.max(image.width || 1, image.height || 1);
-    const sampleScale = Math.min(1, 320 / longestEdge);
-    canvas.width = Math.max(1, Math.round((image.width || 1) * sampleScale));
-    canvas.height = Math.max(1, Math.round((image.height || 1) * sampleScale));
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    const samples = [];
-    const targetCount = clamp(Math.round(Number(count) || 8), 2, 200);
-    const totalPixels = canvas.width * canvas.height;
-    const maxSamples = targetCount > 96 ? 10000 : 8000;
-    const stride = Math.max(1, Math.floor(Math.sqrt(totalPixels / maxSamples)));
+    return extractPaletteFromImageSource(image, count, {
+        deterministic: true
+    });
+}
 
-    for (let y = 0; y < canvas.height; y += stride) {
-        for (let x = 0; x < canvas.width; x += stride) {
-            const index = ((y * canvas.width) + x) * 4;
-            const alpha = pixels[index + 3];
-            if (alpha < 240) continue;
-            samples.push({
-                r: pixels[index],
-                g: pixels[index + 1],
-                b: pixels[index + 2]
-            });
-        }
-    }
-    if (!samples.length) return ['#111111', '#f5f7fa'];
-    const paletteSize = Math.min(targetCount, samples.length);
-    const centers = [samples[Math.floor(Math.random() * samples.length)]];
-    const minDistances = new Array(samples.length).fill(Infinity);
-
-    const distanceSq = (a, b) => {
-        const dr = a.r - b.r;
-        const dg = a.g - b.g;
-        const db = a.b - b.b;
-        return (dr * dr) + (dg * dg) + (db * db);
+function createJsFallbackRuntime(taskMs, reason = '') {
+    return {
+        selection: 'js-fallback',
+        initMs: 0,
+        taskMs,
+        fallbackReason: reason
     };
+}
 
-    const refreshDistances = (center) => {
-        samples.forEach((sample, index) => {
-            const dist = distanceSq(sample, center);
-            if (dist < minDistances[index]) minDistances[index] = dist;
-        });
+function computeAnalysisVisualsFallback(payload) {
+    const startedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
+    const result = computeAnalysisVisualsJs(payload);
+    const taskMs = Math.max(0, (typeof performance?.now === 'function' ? performance.now() : Date.now()) - startedAt);
+    return {
+        ...result,
+        runtime: createJsFallbackRuntime(taskMs, 'Editor worker or WASM runtime was unavailable.')
     };
+}
 
-    refreshDistances(centers[0]);
-    while (centers.length < paletteSize) {
-        let bestIndex = 0;
-        let bestDistance = -1;
-        minDistances.forEach((distance, index) => {
-            if (distance > bestDistance) {
-                bestDistance = distance;
-                bestIndex = index;
-            }
-        });
-        centers.push({ ...samples[bestIndex] });
-        refreshDistances(samples[bestIndex]);
-    }
+function computeDiffPreviewFallback(payload) {
+    const startedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
+    const result = computeDiffPreviewJs(payload);
+    const taskMs = Math.max(0, (typeof performance?.now === 'function' ? performance.now() : Date.now()) - startedAt);
+    return {
+        ...result,
+        runtime: createJsFallbackRuntime(taskMs, 'Editor worker or WASM runtime was unavailable.')
+    };
+}
 
-    for (let iteration = 0; iteration < 5; iteration += 1) {
-        const totals = centers.map(() => ({ r: 0, g: 0, b: 0, count: 0 }));
+async function extractPaletteFromFileFallback(file, count) {
+    const startedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
+    const palette = await extractPaletteFromFileJs(file, count, {
+        deterministic: true
+    });
+    const taskMs = Math.max(0, (typeof performance?.now === 'function' ? performance.now() : Date.now()) - startedAt);
+    return {
+        palette,
+        runtime: createJsFallbackRuntime(taskMs, 'Editor worker or WASM runtime was unavailable.')
+    };
+}
 
-        samples.forEach((sample) => {
-            let bestIndex = 0;
-            let bestDistance = Infinity;
-            centers.forEach((center, index) => {
-                const dist = distanceSq(sample, center);
-                if (dist < bestDistance) {
-                    bestDistance = dist;
-                    bestIndex = index;
-                }
-            });
-            totals[bestIndex].r += sample.r;
-            totals[bestIndex].g += sample.g;
-            totals[bestIndex].b += sample.b;
-            totals[bestIndex].count += 1;
-        });
+async function buildSecureLibraryExportRecordFallback(bundle, options = {}) {
+    const startedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
+    const record = await buildSecureLibraryExportRecordData(bundle, options);
+    const taskMs = Math.max(0, (typeof performance?.now === 'function' ? performance.now() : Date.now()) - startedAt);
+    return {
+        record,
+        runtime: createJsFallbackRuntime(taskMs, 'Library worker or WASM runtime was unavailable.')
+    };
+}
 
-        let moved = false;
-        centers.forEach((center, index) => {
-            const total = totals[index];
-            if (!total.count) return;
-            const next = {
-                r: Math.round(total.r / total.count),
-                g: Math.round(total.g / total.count),
-                b: Math.round(total.b / total.count)
-            };
-            if (next.r !== center.r || next.g !== center.g || next.b !== center.b) moved = true;
-            centers[index] = next;
-        });
-        if (!moved) break;
-    }
-
-    return centers
-        .map((sample) => ({
-            hex: `#${[sample.r, sample.g, sample.b].map((value) => value.toString(16).padStart(2, '0')).join('')}`,
-            weight: (sample.r * 0.2126) + (sample.g * 0.7152) + (sample.b * 0.0722)
-        }))
-        .sort((a, b) => a.weight - b.weight)
-        .map((sample) => sample.hex);
+async function resolveSecureLibraryImportRecordFallback(parsed, passphrase) {
+    const startedAt = typeof performance?.now === 'function' ? performance.now() : Date.now();
+    const resolved = await resolveSecureLibraryImportRecordData(parsed, passphrase);
+    const taskMs = Math.max(0, (typeof performance?.now === 'function' ? performance.now() : Date.now()) - startedAt);
+    return {
+        ...resolved,
+        runtime: createJsFallbackRuntime(taskMs, 'Library worker or WASM runtime was unavailable.')
+    };
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -1339,8 +1355,6 @@ window.addEventListener('DOMContentLoaded', async () => {
     let store = null;
     let engine = null;
     let stitchEngine = null;
-    let backgroundTasks = null;
-    let workerCapabilities = null;
 
     let noticeTimer = null;
     let playbackTimer = null;
@@ -1484,14 +1498,42 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (task === 'read-image-metadata') {
                     return readImageMetadataFallback(payload);
                 }
+                if (task === 'build-secure-library-export-record') {
+                    return buildSecureLibraryExportRecordFallback(payload.bundle, {
+                        secureMode: payload.secureMode,
+                        passphrase: payload.passphrase || '',
+                        duplicateCopies: !!payload.duplicateCopies
+                    });
+                }
+                if (task === 'resolve-secure-library-import-record') {
+                    return resolveSecureLibraryImportRecordFallback(payload.parsed, payload.passphrase || '');
+                }
                 throw new Error(`Unknown app-library task "${task}".`);
             }
         });
         backgroundTasks.registerDomain('editor', {
             workerUrl: new URL('./workers/editor.worker.js', import.meta.url),
+            supportsTask(task, capabilities) {
+                if (task === 'compute-analysis-visuals') {
+                    return !!capabilities.offscreenCanvas2d;
+                }
+                if (task === 'extract-palette-from-image') {
+                    return !!capabilities.createImageBitmap && !!capabilities.offscreenCanvas2d;
+                }
+                return true;
+            },
             fallback(task, payload) {
                 if (task === 'read-studio-state-file') {
                     return readStudioStateFileFallback(payload.file);
+                }
+                if (task === 'compute-analysis-visuals') {
+                    return computeAnalysisVisualsFallback(payload);
+                }
+                if (task === 'compute-diff-preview') {
+                    return computeDiffPreviewFallback(payload);
+                }
+                if (task === 'extract-palette-from-image') {
+                    return extractPaletteFromFileFallback(payload.file, payload.count);
                 }
                 throw new Error(`Unknown editor task "${task}".`);
             }
@@ -1595,11 +1637,58 @@ window.addEventListener('DOMContentLoaded', async () => {
         ...getRegistryUrls()
     }, {
         priority: 'critical-boot',
-        processId: 'app.bootstrap'
+        processId: 'app.bootstrap',
+        scope: 'boot:registry',
+        replayOnWorkerCrash: true,
+        maxCrashReplays: 2
     });
     store = createStore(createInitialState());
     engine = new NoiseStudioEngine(registry, {
         onNotice: (text, type = 'info') => setNotice(text, type),
+        computeAnalysisVisuals: (payload, options = {}) => backgroundTasks.runTask('editor', 'compute-analysis-visuals', payload, {
+            priority: options.priority || 'background',
+            processId: options.processId || 'editor.scopes',
+            scope: options.scope || 'section:editor',
+            replaceKey: options.replaceKey || 'editor-analysis-visuals',
+            replaceActive: options.replaceActive ?? true,
+            signal: options.signal || null,
+            createRequest() {
+                const pixels = payload?.pixels instanceof Uint8Array
+                    ? payload.pixels
+                    : new Uint8Array(payload?.pixels || []);
+                return {
+                    payload: {
+                        ...payload,
+                        pixels: pixels.buffer
+                    },
+                    transfer: [pixels.buffer]
+                };
+            }
+        }),
+        computeDiffPreview: (payload, options = {}) => backgroundTasks.runTask('editor', 'compute-diff-preview', payload, {
+            priority: options.priority || 'background',
+            processId: options.processId || 'editor.preview',
+            scope: options.scope || 'section:editor',
+            replaceKey: options.replaceKey || `editor-diff-preview:${options.key || 'default'}`,
+            replaceActive: options.replaceActive ?? true,
+            signal: options.signal || null,
+            createRequest() {
+                const basePixels = payload?.basePixels instanceof Uint8ClampedArray
+                    ? payload.basePixels
+                    : new Uint8ClampedArray(payload?.basePixels || []);
+                const processedPixels = payload?.processedPixels instanceof Uint8ClampedArray
+                    ? payload.processedPixels
+                    : new Uint8ClampedArray(payload?.processedPixels || []);
+                return {
+                    payload: {
+                        ...payload,
+                        basePixels: basePixels.buffer,
+                        processedPixels: processedPixels.buffer
+                    },
+                    transfer: [basePixels.buffer, processedPixels.buffer]
+                };
+            }
+        }),
         onMetrics: ({ fps }) => {
             const state = store.getState();
             if (!state.document.batch.isPlaying) return;
@@ -1740,10 +1829,15 @@ window.addEventListener('DOMContentLoaded', async () => {
                 : section === '3d'
                     ? '3d'
                     : section === 'logs'
-                        ? 'logs'
+                    ? 'logs'
                         : 'editor';
         if (nextSection !== 'editor') stopPlayback();
         syncSectionUrl(nextSection);
+        if (nextSection !== currentSection && backgroundTasks && ['editor', 'stitch', '3d'].includes(currentSection)) {
+            backgroundTasks.cancelScope(`section:${currentSection}`, {
+                reason: `Switched away from ${currentSection === '3d' ? '3D' : currentSection}.`
+            });
+        }
         if (nextSection !== currentSection) {
             logProcess('info', 'app.navigation', `Switched to ${nextSection === '3d' ? '3D' : nextSection === 'logs' ? 'Logs' : nextSection.charAt(0).toUpperCase() + nextSection.slice(1)}.`, {
                 dedupeKey: `section:${nextSection}`,
@@ -1884,6 +1978,46 @@ window.addEventListener('DOMContentLoaded', async () => {
             preserveExistingName: true,
             preserveExistingTags: true
         });
+    }
+
+    async function upsertRenderedThreeDAsset(blob, documentState, options = {}) {
+        if (!blob) {
+            throw new Error('The 3D render finished, but no PNG data was available for the Library asset.');
+        }
+        const sceneDocument = normalizeThreeDDocument(documentState || store.getState().threeDDocument);
+        const fileName = String(options.fileName || '3d-render.png').trim() || '3d-render.png';
+        const baseName = stripProjectExtension(fileName) || getSuggestedThreeDProjectName(sceneDocument) || '3d-render';
+        const activeOrigin = getActiveLibraryOrigin('3d');
+        const existingAssets = await getAllLibraryAssetRecords();
+        const existingAsset = activeOrigin.id
+            ? existingAssets.find((asset) => asset.origin === '3d-render' && asset.sourceProjectId === activeOrigin.id) || null
+            : null;
+        const width = Number(options.width || sceneDocument.renderJob?.outputWidth || sceneDocument.render?.outputWidth || 0);
+        const height = Number(options.height || sceneDocument.renderJob?.outputHeight || sceneDocument.render?.outputHeight || 0);
+        const dataUrl = await blobToDataUrl(blob);
+        const savedAsset = await saveLibraryAssetRecord({
+            id: existingAsset?.id || null,
+            name: existingAsset?.name || baseName,
+            assetType: 'image',
+            format: 'png',
+            mimeType: blob.type || 'image/png',
+            dataUrl,
+            tags: existingAsset?.tags?.length ? existingAsset.tags : [],
+            width,
+            height,
+            timestamp: Date.now(),
+            sourceProjectId: activeOrigin.id || null,
+            sourceProjectType: '3d',
+            sourceProjectName: activeOrigin.name || getSuggestedThreeDProjectName(sceneDocument),
+            origin: '3d-render'
+        }, {
+            existingAsset,
+            preserveExistingName: true,
+            preserveExistingTags: true
+        });
+        notifyLibraryChanged();
+        logProcess('success', 'library.assets', `Saved the final 3D render "${savedAsset.name || baseName}" into the Assets Library.`);
+        return savedAsset;
     }
 
     async function saveLibraryAssetFromThreeDItem(item, options = {}) {
@@ -2259,11 +2393,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (!backgroundTasks) {
             return createStitchInputsFromFilesFallback(files, options);
         }
+        await nextPaint();
         return backgroundTasks.runTask('stitch', 'prepare-input-files', {
             files: files || []
         }, {
             priority: 'user-visible',
             processId: 'stitch.workspace',
+            scope: 'section:stitch',
+            replaceKey: 'section:stitch:prepare-input-files',
+            replaceActive: true,
+            replayOnWorkerCrash: true,
+            maxCrashReplays: 1,
+            createRequest: ({ payload, assertNotCancelled }) => buildWorkerFileListRequest(payload.files || [], {
+                assertNotCancelled
+            }),
             onProgress(progress) {
                 options.onProgress?.({
                     ...progress?.payload,
@@ -2322,11 +2465,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (!backgroundTasks) {
             return createThreeDModelItemsFromFilesFallback(files, options);
         }
+        await nextPaint();
         const result = await backgroundTasks.runTask('three', 'prepare-model-files', {
             files: files || []
         }, {
             priority: 'user-visible',
             processId: '3d.assets',
+            scope: 'section:3d',
+            replaceKey: 'section:3d:prepare-model-files',
+            replaceActive: true,
+            replayOnWorkerCrash: true,
+            maxCrashReplays: 1,
+            createRequest: ({ payload, assertNotCancelled }) => buildWorkerFileListRequest(payload.files || [], {
+                assertNotCancelled
+            }),
             onProgress(progress) {
                 options.onProgress?.({
                     ...progress?.payload,
@@ -2389,11 +2541,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (!backgroundTasks) {
             return createThreeDImagePlaneItemsFromFilesFallback(files, options);
         }
+        await nextPaint();
         const result = await backgroundTasks.runTask('three', 'prepare-image-plane-files', {
             files: files || []
         }, {
             priority: 'user-visible',
             processId: '3d.assets',
+            scope: 'section:3d',
+            replaceKey: 'section:3d:prepare-image-plane-files',
+            replaceActive: true,
+            replayOnWorkerCrash: true,
+            maxCrashReplays: 1,
+            createRequest: ({ payload, assertNotCancelled }) => buildWorkerFileListRequest(payload.files || [], {
+                assertNotCancelled
+            }),
             onProgress(progress) {
                 options.onProgress?.({
                     ...progress?.payload,
@@ -2485,11 +2646,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (!backgroundTasks) {
             return createThreeDFontAssetsFromFilesFallback(files, options);
         }
+        await nextPaint();
         const result = await backgroundTasks.runTask('three', 'prepare-font-files', {
             files: files || []
         }, {
             priority: 'user-visible',
             processId: '3d.assets',
+            scope: 'section:3d',
+            replaceKey: 'section:3d:prepare-font-files',
+            replaceActive: true,
+            replayOnWorkerCrash: true,
+            maxCrashReplays: 1,
+            createRequest: ({ payload, assertNotCancelled }) => buildWorkerFileListRequest(payload.files || [], {
+                assertNotCancelled
+            }),
             onProgress(progress) {
                 options.onProgress?.({
                     ...progress?.payload,
@@ -2526,11 +2696,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (!backgroundTasks) {
             return createThreeDHdriAssetFromFileFallback(file, options);
         }
+        await nextPaint();
         const result = await backgroundTasks.runTask('three', 'prepare-hdri-file', {
             file: file || null
         }, {
             priority: 'user-visible',
             processId: '3d.assets',
+            scope: 'section:3d',
+            replaceKey: 'section:3d:prepare-hdri-file',
+            replaceActive: true,
+            replayOnWorkerCrash: true,
+            maxCrashReplays: 1,
+            createRequest: ({ payload, assertNotCancelled }) => buildWorkerSingleFileRequest(payload.file || null, {
+                assertNotCancelled
+            }),
             onProgress(progress) {
                 options.onProgress?.({
                     ...progress?.payload,
@@ -2566,7 +2745,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         const exactMatches = await getMatchingLibraryEntries(adapter.serializeDocument(currentDocument), projectType);
         if (exactMatches.length) return true;
 
-        const shouldSave = confirm(`Save the current ${adapter.label} project to the Library before ${actionLabel}?`);
+        const shouldSave = await requestAppConfirmDialog(view, {
+            title: `Save Current ${adapter.label}`,
+            text: `Save the current ${adapter.label} project to the Library before ${actionLabel}?`,
+            confirmLabel: 'Save To Library',
+            cancelLabel: 'Skip Save'
+        });
         if (shouldSave) {
             const saved = await actions.saveProjectToLibrary(adapter.suggestName(currentDocument), {
                 forceNew: true,
@@ -2575,12 +2759,24 @@ window.addEventListener('DOMContentLoaded', async () => {
             });
             return !!saved;
         }
-        return confirm(`Continue ${actionLabel} without saving the current ${adapter.label} project to the Library?`);
+        return requestAppConfirmDialog(view, {
+            title: `Continue Without Saving`,
+            text: `Continue ${actionLabel} without saving the current ${adapter.label} project to the Library?`,
+            confirmLabel: 'Continue',
+            cancelLabel: 'Cancel',
+            isDanger: true
+        });
     }
 
     const actions = {
         getState() {
             return store.getState();
+        },
+        async requestConfirmDialog(options = {}) {
+            return requestAppConfirmDialog(view, options);
+        },
+        async requestTextDialog(options = {}) {
+            return requestAppTextDialog(view, options);
         },
         setActiveSection(section) {
             commitActiveSection(section);
@@ -2970,59 +3166,66 @@ window.addEventListener('DOMContentLoaded', async () => {
                     : 'Preparing selected Stitch images...',
                 progress: 0.08
             });
-            const { inputs: nextInputs, failures } = await createStitchInputsFromFiles(files, {
-                onProgress: ({ index, total, file, message, progress }) => {
-                    const ratio = total
-                        ? Math.min(0.8, 0.12 + (((index + 0.55) / total) * 0.64))
-                        : Math.min(0.8, 0.16 + ((Number(progress) || 0) * 0.5));
-                    setStitchProgress({
-                        active: true,
-                        title: 'Importing Images',
-                        message: message || `Reading "${file?.name || 'image'}"...`,
-                        progress: ratio
-                    });
-                    logProgressProcess('stitch.workspace', message || `Reading "${file?.name || 'image'}"...`, ratio, {
-                        dedupeKey: `stitch-import:${file?.name || index}:${Math.round(ratio * 1000)}`,
-                        dedupeWindowMs: 80
-                    });
+            try {
+                const { inputs: nextInputs, failures } = await createStitchInputsFromFiles(files, {
+                    onProgress: ({ index, total, file, message, progress }) => {
+                        const ratio = total
+                            ? Math.min(0.8, 0.12 + (((index + 0.55) / total) * 0.64))
+                            : Math.min(0.8, 0.16 + ((Number(progress) || 0) * 0.5));
+                        setStitchProgress({
+                            active: true,
+                            title: 'Importing Images',
+                            message: message || `Reading "${file?.name || 'image'}"...`,
+                            progress: ratio
+                        });
+                        logProgressProcess('stitch.workspace', message || `Reading "${file?.name || 'image'}"...`, ratio, {
+                            dedupeKey: `stitch-import:${file?.name || index}:${Math.round(ratio * 1000)}`,
+                            dedupeWindowMs: 80
+                        });
+                    }
+                });
+                if (!nextInputs.length) {
+                    clearWorkspaceProgress('stitch');
+                    logProcess('warning', 'stitch.workspace', failures.length
+                        ? `Could not add any Stitch inputs. ${failures.length} file${failures.length === 1 ? '' : 's'} failed to load.`
+                        : 'Stitch image import was opened without any readable files.');
+                    if (failures.length) {
+                        setNotice(
+                            `None of the selected files could be added to Stitch. ${failures.length} image${failures.length === 1 ? '' : 's'} failed to load.`,
+                            'error',
+                            7000
+                        );
+                    } else {
+                        setNotice('Choose one or more images to add to the Stitch workspace.', 'warning');
+                    }
+                    return;
                 }
-            });
-            if (!nextInputs.length) {
+                stitchAnalysisToken += 1;
+                setStitchProgress({
+                    active: true,
+                    title: 'Importing Images',
+                    message: `Finalizing ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'}...`,
+                    progress: 0.9
+                });
+                updateStitchDocument((document) => appendStitchInputs(document, nextInputs), { renderStitch: true });
+                commitActiveSection('stitch');
                 clearWorkspaceProgress('stitch');
-                logProcess('warning', 'stitch.workspace', failures.length
-                    ? `Could not add any Stitch inputs. ${failures.length} file${failures.length === 1 ? '' : 's'} failed to load.`
-                    : 'Stitch image import was opened without any readable files.');
-                if (failures.length) {
-                    setNotice(
-                        `None of the selected files could be added to Stitch. ${failures.length} image${failures.length === 1 ? '' : 's'} failed to load.`,
-                        'error',
-                        7000
-                    );
-                } else {
-                    setNotice('Choose one or more images to add to the Stitch workspace.', 'warning');
-                }
-                return;
+                logProcess(failures.length ? 'warning' : 'success', 'stitch.workspace', failures.length
+                    ? `Added ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'} and skipped ${failures.length} unreadable file${failures.length === 1 ? '' : 's'}.`
+                    : `Added ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'}.`);
+                setNotice(
+                    failures.length
+                        ? `Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch. Skipped ${failures.length} file${failures.length === 1 ? '' : 's'} that could not be read.`
+                        : `Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch.`,
+                    failures.length ? 'warning' : 'success',
+                    failures.length ? 7000 : 4200
+                );
+            } catch (error) {
+                clearWorkspaceProgress('stitch');
+                if (isAbortError(error)) return;
+                logProcess('error', 'stitch.workspace', error?.message || 'Could not import the selected Stitch images.');
+                setNotice(error?.message || 'Could not import the selected Stitch images.', 'error', 7000);
             }
-            stitchAnalysisToken += 1;
-            setStitchProgress({
-                active: true,
-                title: 'Importing Images',
-                message: `Finalizing ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'}...`,
-                progress: 0.9
-            });
-            updateStitchDocument((document) => appendStitchInputs(document, nextInputs), { renderStitch: true });
-            commitActiveSection('stitch');
-            clearWorkspaceProgress('stitch');
-            logProcess(failures.length ? 'warning' : 'success', 'stitch.workspace', failures.length
-                ? `Added ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'} and skipped ${failures.length} unreadable file${failures.length === 1 ? '' : 's'}.`
-                : `Added ${nextInputs.length} Stitch input${nextInputs.length === 1 ? '' : 's'}.`);
-            setNotice(
-                failures.length
-                    ? `Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch. Skipped ${failures.length} file${failures.length === 1 ? '' : 's'} that could not be read.`
-                    : `Added ${nextInputs.length} image${nextInputs.length === 1 ? '' : 's'} to Stitch.`,
-                failures.length ? 'warning' : 'success',
-                failures.length ? 7000 : 4200
-            );
         },
         async runStitchAnalysis() {
             const snapshot = normalizeStitchDocument(store.getState().stitchDocument);
@@ -3375,8 +3578,20 @@ window.addEventListener('DOMContentLoaded', async () => {
                     message: `Writing "${baseName}-stitched.png"...`,
                     progress: 0.9
                 });
-                downloadBlob(blob, `${baseName}-stitched.png`);
+                const saveResult = await saveBlobLocally(blob, `${baseName}-stitched.png`, {
+                    title: 'Save Stitch PNG',
+                    buttonLabel: 'Save PNG',
+                    filters: [{ name: 'PNG Image', extensions: ['png'] }]
+                });
                 clearWorkspaceProgress('stitch');
+                if (wasSaveCancelled(saveResult)) {
+                    logProcess('info', 'stitch.workspace', 'Cancelled the Stitch PNG save dialog.');
+                    setNotice('Stitch PNG save cancelled.', 'info', 4200);
+                    return;
+                }
+                if (!didSaveFile(saveResult)) {
+                    throw new Error(saveResult?.error || 'Could not save the Stitch PNG.');
+                }
                 logProcess('success', 'stitch.workspace', `Exported Stitch PNG "${baseName}-stitched.png".`);
                 setNotice('Stitch PNG export complete.', 'success');
             } catch (error) {
@@ -3391,17 +3606,60 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async extractPaletteFromFile(file) {
             if (!file) return;
-            const dataUrl = await fileToDataUrl(file);
-            const image = await loadImageFromDataUrl(dataUrl);
             const state = store.getState();
             const owner = state.document.selection.layerInstanceId;
             const selected = state.document.layerStack.find((instance) => instance.instanceId === owner && instance.layerId === 'palette');
-            paletteExtractionImage = image;
-            paletteExtractionOwner = selected?.instanceId || null;
-            updateDocument((document) => ({
-                ...document,
-                palette: createPaletteFromImage(image, Number(selected?.params.extractCount || 8))
-            }));
+            const extractCount = Number(selected?.params.extractCount || 8);
+            try {
+                let paletteResult;
+                if (backgroundTasks) {
+                    const { fileEntry, transfer } = await createWorkerSingleFileEntry(file);
+                    paletteResult = await backgroundTasks.runTask('editor', 'extract-palette-from-image', {
+                        file,
+                        fileEntry,
+                        count: extractCount
+                    }, {
+                        priority: 'user-visible',
+                        processId: 'editor.palette',
+                        scope: 'section:editor',
+                        replaceKey: 'editor-palette-extract',
+                        replaceActive: true,
+                        replayOnWorkerCrash: false,
+                        createRequest() {
+                            return {
+                                payload: {
+                                    fileEntry,
+                                    count: extractCount
+                                },
+                                transfer
+                            };
+                        }
+                    });
+                } else {
+                    paletteResult = await extractPaletteFromFileFallback(file, extractCount);
+                }
+
+                const dataUrl = await fileToDataUrl(file);
+                const image = await loadImageFromDataUrl(dataUrl);
+                paletteExtractionImage = image;
+                paletteExtractionOwner = selected?.instanceId || null;
+                updateDocument((document) => ({
+                    ...document,
+                    palette: Array.isArray(paletteResult?.palette) && paletteResult.palette.length
+                        ? paletteResult.palette
+                        : createPaletteFromImage(image, extractCount)
+                }));
+
+                if (paletteResult?.runtime?.selection) {
+                    logProcess('info', 'editor.palette', `Extracted ${Math.max(0, paletteResult.palette?.length || 0)} palette color${(paletteResult.palette?.length || 0) === 1 ? '' : 's'} via ${paletteResult.runtime.selection}.`, {
+                        dedupeKey: `editor-palette-runtime:${paletteResult.runtime.selection}`,
+                        dedupeWindowMs: 400
+                    });
+                }
+            } catch (error) {
+                logProcess('error', 'editor.palette', error?.message || 'Could not extract a palette from that image.');
+                setNotice(error?.message || 'Could not extract a palette from that image.', 'error', 6000);
+            }
         },
         async saveProjectToLibrary(nameOverride = null, optionsOrForceNew = false) {
             const options = typeof optionsOrForceNew === 'object' && optionsOrForceNew !== null
@@ -3409,24 +3667,34 @@ window.addEventListener('DOMContentLoaded', async () => {
                 : { forceNew: !!optionsOrForceNew };
             const forceNew = !!options.forceNew;
             const preferExisting = !!options.preferExisting;
+            const promptless = !!options.promptless;
+            const suppressNotice = !!options.suppressNotice;
             const suppressWorkspaceOverlay = !!options.suppressWorkspaceOverlay;
+            const updateActiveOriginSilently = (id, name) => {
+                setActiveLibraryOrigin(projectType, id, name);
+            };
+            const showLibraryNotice = (...args) => {
+                if (!suppressNotice) {
+                    setNotice(...args);
+                }
+            };
             const state = store.getState();
             const projectType = options.projectType || getProjectTypeForSection(state.ui.activeSection);
             if (projectType === '3d' && isThreeDRenderJobActive()) {
                 logProcess('warning', 'library.projects', 'Blocked Library save because a 3D render is still active.');
-                setNotice('Abort the active 3D render before saving this scene to the Library.', 'warning', 6000);
+                showLibraryNotice('Abort the active 3D render before saving this scene to the Library.', 'warning', 6000);
                 return null;
             }
             const adapter = projectAdapters?.getAdapter(projectType);
             if (!adapter) {
                 logProcess('error', 'library.projects', `No Library project adapter is available for "${projectType}".`);
-                setNotice('This project type cannot be saved to the Library yet.', 'error', 7000);
+                showLibraryNotice('This project type cannot be saved to the Library yet.', 'error', 7000);
                 return null;
             }
             const currentDocument = adapter.getCurrentDocument(state);
             if (adapter.isEmpty(currentDocument) || !adapter.canSave(currentDocument)) {
                 logProcess('warning', 'library.projects', adapter.emptyNotice || `Blocked ${adapter.label} save because the project is empty.`);
-                setNotice(adapter.emptyNotice || `There is no ${adapter.label} project ready to save.`, 'warning');
+                showLibraryNotice(adapter.emptyNotice || `There is no ${adapter.label} project ready to save.`, 'warning');
                 return null;
             }
 
@@ -3442,11 +3710,11 @@ window.addEventListener('DOMContentLoaded', async () => {
 
             if (reusableMatch) {
                 const wasActiveMatch = reusableMatch.id === activeOrigin.id;
-                setActiveLibraryOrigin(projectType, reusableMatch.id, reusableMatch.name);
+                updateActiveOriginSilently(reusableMatch.id, reusableMatch.name);
                 logProcess('info', 'library.projects', wasActiveMatch
                     ? `Skipped save because the current ${adapter.label} project already matches "${reusableMatch.name}".`
                     : `Reused existing Library entry "${reusableMatch.name}" for the current ${adapter.label} project.`);
-                setNotice(
+                showLibraryNotice(
                     wasActiveMatch
                         ? 'Already saved - no changes detected.'
                         : `Already in Library as "${reusableMatch.name}".`,
@@ -3458,21 +3726,33 @@ window.addEventListener('DOMContentLoaded', async () => {
             let name;
             let saveId;
 
-            if (!forceNew && activeOrigin.id) {
+            if (promptless) {
+                if (!forceNew && activeOrigin.id) {
+                    saveId = activeOrigin.id;
+                    name = activeOrigin.name || adapter.suggestName(currentDocument, nameOverride);
+                } else {
+                    name = adapter.suggestName(currentDocument, nameOverride);
+                    saveId = createLibraryProjectId();
+                }
+            } else if (!forceNew && activeOrigin.id) {
                 const defaultName = activeOrigin.name || adapter.suggestName(currentDocument, nameOverride);
-                const choice = prompt(
-                    activeMatch
-                        ? `This project already matches "${defaultName}".\n\nLeave the name as-is to keep that saved version, or type a new name to save a NEW entry:`
-                        : `This project was loaded from "${defaultName}".\n\nType a new name to save as a NEW entry, or leave as-is to OVERWRITE the existing one:`,
-                    defaultName
-                );
+                const choice = await requestAppTextDialog(view, {
+                    title: `Save ${adapter.label} To Library`,
+                    text: activeMatch
+                        ? `This project already matches "${defaultName}". Leave the name as-is to keep that saved version, or enter a new name to save a new Library entry.`
+                        : `This project was loaded from "${defaultName}". Leave the name as-is to overwrite that Library entry, or enter a new name to save a new one.`,
+                    fieldLabel: `${adapter.label} name`,
+                    defaultValue: defaultName,
+                    confirmLabel: activeMatch ? 'Keep Or Save' : 'Overwrite Or Save',
+                    cancelLabel: 'Cancel'
+                });
                 if (choice === null) return null;
-                const trimmedChoice = choice.trim();
+                const trimmedChoice = String(choice || '').trim();
                 if (!trimmedChoice) return null;
-                if (trimmedChoice === defaultName) {
+                if (normalizeComparableLabel(trimmedChoice) === normalizeComparableLabel(defaultName)) {
                     if (activeMatch) {
                         logProcess('info', 'library.projects', `Skipped save because "${defaultName}" already matches the current ${adapter.label} project.`);
-                        setNotice('Already saved - no changes detected.', 'info');
+                        showLibraryNotice('Already saved - no changes detected.', 'info');
                         return activeMatch;
                     }
                     saveId = activeOrigin.id;
@@ -3483,9 +3763,16 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
             } else {
                 const defaultName = adapter.suggestName(currentDocument, nameOverride);
-                const askedName = prompt('Name your project for the Library:', defaultName);
+                const askedName = await requestAppTextDialog(view, {
+                    title: `Name Your ${adapter.label} Library Entry`,
+                    text: 'Choose a name for this Library save.',
+                    fieldLabel: `${adapter.label} name`,
+                    defaultValue: defaultName,
+                    confirmLabel: 'Save To Library',
+                    cancelLabel: 'Cancel'
+                });
                 if (askedName === null) return null;
-                name = askedName.trim();
+                name = String(askedName || '').trim();
                 if (!name) return null;
                 saveId = createLibraryProjectId();
             }
@@ -3499,7 +3786,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     });
                 }
                 logProcess('active', 'library.projects', `Saving ${adapter.label} project "${name}" to the Library...`);
-                setNotice('Saving to Library...', 'info', 0);
+                showLibraryNotice('Saving to Library...', 'info', 0);
                 logProcess('info', 'library.projects', `Capturing ${adapter.label} project data for "${name}".`, {
                     dedupeKey: `library-save-capture:${projectType}:${name}`,
                     dedupeWindowMs: 120
@@ -3549,9 +3836,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                     });
                 }
                 await registerLibraryTags(projectData.tags);
-                setActiveLibraryOrigin(projectType, saveId, name);
+                updateActiveOriginSilently(saveId, name);
                 logProcess('success', 'library.projects', `Saved "${name}" to the Library as a ${adapter.label} project.`);
-                setNotice(`Saved "${name}" to Library.`, 'success');
+                showLibraryNotice(`Saved "${name}" to Library.`, 'success');
                 notifyLibraryChanged();
                 clearWorkspaceProgress(projectType);
                 return projectData;
@@ -3559,7 +3846,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 console.error(error);
                 clearWorkspaceProgress(projectType);
                 logProcess('error', 'library.projects', error?.message || `Could not save the ${adapter.label} project to the Library.`);
-                setNotice(error?.message || 'Could not save that project to the Library.', 'error', 7000);
+                showLibraryNotice(error?.message || 'Could not save that project to the Library.', 'error', 7000);
                 return null;
             }
         },
@@ -3789,10 +4076,66 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
             notifyLibraryChanged();
         },
+        async buildSecureLibraryExportRecord(bundle, options = {}) {
+            if (!bundle || typeof bundle !== 'object') {
+                throw new Error('No Library export payload was provided.');
+            }
+            const request = {
+                bundle,
+                secureMode: options.secureMode || 'compressed',
+                passphrase: options.passphrase || '',
+                duplicateCopies: !!options.duplicateCopies
+            };
+            const result = backgroundTasks
+                ? await backgroundTasks.runTask('app-library', 'build-secure-library-export-record', request, {
+                    priority: 'user-visible',
+                    processId: 'library.export',
+                    scope: 'section:library',
+                    replaceKey: 'library-secure-export-record',
+                    replaceActive: true,
+                    replayOnWorkerCrash: false
+                })
+                : await buildSecureLibraryExportRecordFallback(bundle, request);
+            if (result?.runtime?.selection) {
+                logProcess('info', 'library.export', `Secure Library export packaging used ${result.runtime.selection}.`, {
+                    dedupeKey: `library-export-runtime:${result.runtime.selection}`,
+                    dedupeWindowMs: 400
+                });
+            }
+            return result;
+        },
+        async resolveSecureLibraryImportRecord(parsed, passphrase = '') {
+            if (!parsed || typeof parsed !== 'object') {
+                throw new Error('No secure Library import payload was provided.');
+            }
+            const result = backgroundTasks
+                ? await backgroundTasks.runTask('app-library', 'resolve-secure-library-import-record', {
+                    parsed,
+                    passphrase: passphrase || ''
+                }, {
+                    priority: 'user-visible',
+                    processId: 'library.import',
+                    scope: 'section:library',
+                    replaceKey: 'library-secure-import-record',
+                    replaceActive: true,
+                    replayOnWorkerCrash: false
+                })
+                : await resolveSecureLibraryImportRecordFallback(parsed, passphrase || '');
+            if (result?.runtime?.selection) {
+                logProcess('info', 'library.import', `Secure Library import decoding used ${result.runtime.selection}.`, {
+                    dedupeKey: `library-import-runtime:${result.runtime.selection}`,
+                    dedupeWindowMs: 400
+                });
+            }
+            return result;
+        },
         async importLibraryAssets(assetEntries = []) {
             const existingAssets = await getAllLibraryAssetRecords();
             const nextAssets = [...existingAssets];
             const importedAssets = [];
+            const updatedAssets = [];
+            let skippedDuplicateCount = 0;
+            let rejectedCount = 0;
             if (assetEntries.length) {
                 logProcess('active', 'library.import', `Importing ${assetEntries.length} asset${assetEntries.length === 1 ? '' : 's'} into the Assets Library.`);
             }
@@ -3800,19 +4143,29 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const entry = assetEntries[index];
                 const normalizedType = normalizeLibraryAssetType(entry.assetType || entry.type || 'image');
                 const dataUrl = String(entry.dataUrl || '');
-                if (!dataUrl) continue;
+                if (!dataUrl) {
+                    rejectedCount += 1;
+                    logProcess('warning', 'library.import', `Rejected "${entry.name || `asset ${index + 1}`}" because it did not include any embedded asset data.`);
+                    continue;
+                }
                 const fingerprint = entry.assetFingerprint || await computeLibraryAssetFingerprintInBackground({
                     assetType: normalizedType,
                     format: entry.format,
                     mimeType: entry.mimeType,
                     dataUrl
                 });
-                if (
-                    nextAssets.some((asset) => asset.assetFingerprint === fingerprint)
-                    || (entry.sourceProjectId && nextAssets.some((asset) => asset.sourceProjectId === String(entry.sourceProjectId)))
-                ) {
+                const duplicateAsset = nextAssets.find((asset) => asset.assetFingerprint === fingerprint) || null;
+                if (duplicateAsset) {
+                    skippedDuplicateCount += 1;
+                    logProcess('info', 'library.import', `Skipped duplicate asset "${entry.name || `asset ${index + 1}`}" during import.`, {
+                        dedupeKey: `library-asset-duplicate:${entry.name || index}:${fingerprint}`,
+                        dedupeWindowMs: 200
+                    });
                     continue;
                 }
+                const existingBySourceProject = entry.sourceProjectId
+                    ? nextAssets.find((asset) => asset.sourceProjectId === String(entry.sourceProjectId)) || null
+                    : null;
                 const savedAsset = await saveLibraryAssetRecord({
                     name: entry.name,
                     assetType: normalizedType,
@@ -3829,18 +4182,50 @@ window.addEventListener('DOMContentLoaded', async () => {
                     sourceProjectName: entry.sourceProjectName || null,
                     origin: entry.origin || 'import',
                     assetFingerprint: fingerprint
-                });
-                nextAssets.push(savedAsset);
-                importedAssets.push(savedAsset);
+                }, existingBySourceProject
+                    ? {
+                        existingAsset: existingBySourceProject,
+                        preserveExistingName: true,
+                        preserveExistingTags: true
+                    }
+                    : {});
+                if (existingBySourceProject) {
+                    const replaceIndex = nextAssets.findIndex((asset) => asset.id === existingBySourceProject.id);
+                    if (replaceIndex >= 0) nextAssets.splice(replaceIndex, 1, savedAsset);
+                    updatedAssets.push(savedAsset);
+                    logProcess('info', 'library.import', `Updated existing asset "${savedAsset.name || entry.name || `asset ${index + 1}`}" from the import payload.`);
+                } else {
+                    nextAssets.push(savedAsset);
+                    importedAssets.push(savedAsset);
+                }
                 await maybeYieldToUi(index, 2);
             }
             notifyLibraryChanged();
             if (assetEntries.length) {
-                logProcess('success', 'library.import', importedAssets.length
-                    ? `Imported ${importedAssets.length} new asset${importedAssets.length === 1 ? '' : 's'} into the Assets Library.`
-                    : 'Asset import completed without adding duplicates.');
+                const summaryBits = [];
+                if (importedAssets.length) summaryBits.push(`saved ${importedAssets.length}`);
+                if (updatedAssets.length) summaryBits.push(`updated ${updatedAssets.length}`);
+                if (skippedDuplicateCount) summaryBits.push(`skipped ${skippedDuplicateCount} duplicate${skippedDuplicateCount === 1 ? '' : 's'}`);
+                if (rejectedCount) summaryBits.push(`rejected ${rejectedCount} invalid asset${rejectedCount === 1 ? '' : 's'}`);
+                logProcess(
+                    rejectedCount || (!importedAssets.length && !updatedAssets.length) ? 'warning' : 'success',
+                    'library.import',
+                    summaryBits.length
+                        ? `Assets import summary: ${summaryBits.join(', ')}.`
+                        : 'Assets import completed with no changes.'
+                );
             }
-            return importedAssets;
+            return {
+                importedAssets,
+                updatedAssets,
+                savedCount: importedAssets.length,
+                updatedCount: updatedAssets.length,
+                skippedDuplicateCount,
+                rejectedCount,
+                totalRequested: assetEntries.length,
+                importedIds: importedAssets.map((asset) => asset.id),
+                updatedIds: updatedAssets.map((asset) => asset.id)
+            };
         },
         async loadLibraryProject(payload, libraryId = null, libraryName = null) {
             try {
@@ -3855,7 +4240,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             } catch (error) {
                 console.error(error);
                 logProcess('error', 'library.projects', error?.message || 'Failed to load a project from the Library.');
-                setNotice('Failed to load project from Library', 'error');
+                setNotice(error?.message || 'Failed to load project from Library', 'error', 7000);
                 throw error;
             }
         },
@@ -3950,12 +4335,21 @@ window.addEventListener('DOMContentLoaded', async () => {
                     dedupeKey: `editor-state-parse:${file.name}`,
                     dedupeWindowMs: 120
                 });
+                await nextPaint();
                 const parsedState = backgroundTasks
                     ? await backgroundTasks.runTask('editor', 'read-studio-state-file', {
                         file
                     }, {
                         priority: 'user-visible',
-                        processId: 'editor.files'
+                        processId: 'editor.files',
+                        scope: 'section:editor',
+                        replaceKey: 'section:editor:read-studio-state-file',
+                        replaceActive: true,
+                        replayOnWorkerCrash: true,
+                        maxCrashReplays: 1,
+                        createRequest: ({ payload, assertNotCancelled }) => buildWorkerSingleFileRequest(payload.file || null, {
+                            assertNotCancelled
+                        })
                     })
                     : await readStudioStateFileFallback(file);
                 const payload = parsedState.payload;
@@ -4055,6 +4449,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 );
             } catch (error) {
                 clearWorkspaceProgress('studio');
+                if (isAbortError(error)) return;
                 logProcess('error', 'editor.files', error?.message || `Could not load state file "${file?.name || 'document'}".`);
                 setNotice(error.message, 'error', 7000);
             }
@@ -4092,10 +4487,42 @@ window.addEventListener('DOMContentLoaded', async () => {
                 message: 'Writing the self-contained state JSON...',
                 progress: 0.88
             });
-            downloadState(state.document, {
+            const saveResult = await downloadState(state.document, {
                 includeSource: true,
                 preview
             });
+            if (wasSaveCancelled(saveResult)) {
+                clearWorkspaceProgress('studio');
+                logProcess('info', 'editor.export', 'Cancelled the Editor state JSON save dialog.');
+                setNotice('State save cancelled.', 'info', 4200);
+                return;
+            }
+            if (!didSaveFile(saveResult)) {
+                clearWorkspaceProgress('studio');
+                logProcess('error', 'editor.export', saveResult?.error || 'Could not save the current state JSON.');
+                setNotice(saveResult?.error || 'Could not save the current state JSON.', 'error', 7000);
+                return;
+            }
+
+            let libraryProject = null;
+            if (state.document.source?.imageData) {
+                setEditorProgress({
+                    active: true,
+                    title: 'Saving State',
+                    message: 'Updating the linked Library project...',
+                    progress: 0.96
+                });
+                libraryProject = await actions.saveProjectToLibrary(
+                    stripProjectExtension(saveResult.fileName || state.document.source.name || 'noise-studio-state'),
+                    {
+                        preferExisting: true,
+                        promptless: true,
+                        projectType: 'studio',
+                        suppressWorkspaceOverlay: true,
+                        suppressNotice: true
+                    }
+                );
+            }
 
             if (!state.document.source?.imageData) {
                 clearWorkspaceProgress('studio');
@@ -4105,13 +4532,23 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
             if (!preview) {
                 clearWorkspaceProgress('studio');
+                if (libraryProject) {
+                    logProcess('warning', 'editor.export', 'Saved state JSON without a captured rendered preview, but the Library project still updated.');
+                    setNotice('State saved and Library sync completed, but the current rendered preview could not be embedded.', 'warning', 7000);
+                    return;
+                }
                 logProcess('warning', 'editor.export', 'Saved state JSON without a captured rendered preview.');
                 setNotice('State saved, but the current rendered preview could not be embedded.', 'warning', 7000);
                 return;
             }
             clearWorkspaceProgress('studio');
+            if (!libraryProject) {
+                logProcess('warning', 'editor.export', 'Saved self-contained state JSON locally, but could not update the matching Library project.');
+                setNotice('State saved locally, but the matching Library project could not be updated.', 'warning', 7000);
+                return;
+            }
             logProcess('success', 'editor.export', 'Saved self-contained state JSON from the Editor.');
-            setNotice('State saved.', 'success');
+            setNotice('State saved locally and synced to Library.', 'success');
         },
         setLoadImageOnOpen(value) {
             store.setState((state) => ({ ...state, ui: { ...state.ui, loadImageOnOpen: value } }), { render: false });
@@ -4137,14 +4574,127 @@ window.addEventListener('DOMContentLoaded', async () => {
                     message: `Writing "${baseName}-processed.png"...`,
                     progress: 0.9
                 });
-                downloadBlob(blob, `${baseName}-processed.png`);
+                const saveResult = await saveBlobLocally(blob, `${baseName}-processed.png`, {
+                    title: 'Save Editor PNG',
+                    buttonLabel: 'Save PNG',
+                    filters: [{ name: 'PNG Image', extensions: ['png'] }]
+                });
                 clearWorkspaceProgress('studio');
+                if (wasSaveCancelled(saveResult)) {
+                    logProcess('info', 'editor.export', 'Cancelled the Editor PNG save dialog.');
+                    setNotice('PNG save cancelled.', 'info', 4200);
+                    return;
+                }
+                if (!didSaveFile(saveResult)) {
+                    throw new Error(saveResult?.error || 'Could not save the current Editor PNG.');
+                }
                 logProcess('success', 'editor.export', `Exported PNG "${baseName}-processed.png" from the Editor.`);
                 setNotice('PNG export complete.', 'success');
             } catch (error) {
                 clearWorkspaceProgress('studio');
                 logProcess('error', 'editor.export', error?.message || 'Could not export the current Editor PNG.');
                 setNotice(error?.message || 'Could not export the current Editor PNG.', 'error', 7000);
+            }
+        },
+        async persistThreeDRenderSave(blob, fileName, options = {}) {
+            const saveResult = await saveBlobLocally(blob, fileName, {
+                title: 'Save 3D Render PNG',
+                buttonLabel: 'Save PNG',
+                filters: [{ name: 'PNG Image', extensions: ['png'] }]
+            });
+            if (!didSaveFile(saveResult)) {
+                return saveResult;
+            }
+            try {
+                await upsertRenderedThreeDAsset(blob, options.documentState || store.getState().threeDDocument, {
+                    fileName,
+                    width: options.width,
+                    height: options.height
+                });
+                return {
+                    ...saveResult,
+                    libraryStatus: 'saved'
+                };
+            } catch (error) {
+                console.error(error);
+                logProcess('warning', '3d.render', `Saved the final 3D render locally${describeSavedLocation(saveResult)}, but could not update the Assets Library: ${error?.message || 'Unknown Library error.'}`);
+                return {
+                    ...saveResult,
+                    libraryStatus: 'failed',
+                    libraryError: error?.message || 'Could not update the Assets Library.'
+                };
+            }
+        },
+        async exportThreeDSceneJson() {
+            if (isThreeDRenderJobActive()) {
+                logProcess('warning', '3d.export', 'Blocked 3D scene JSON save because a render is still active.');
+                setNotice('Abort the active 3D render before saving the current 3D scene JSON.', 'warning', 6000);
+                return null;
+            }
+            const adapter = projectAdapters?.getAdapter('3d');
+            const documentState = store.getState().threeDDocument;
+            if (!adapter || adapter.isEmpty(documentState) || !adapter.canSave(documentState)) {
+                logProcess('warning', '3d.export', 'Blocked 3D scene JSON save because the scene is empty.');
+                setNotice('Add at least one 3D asset to the scene before saving a 3D JSON file.', 'warning', 6000);
+                return null;
+            }
+
+            const suggestedName = `${adapter.suggestName(documentState) || '3d-scene'}.json`;
+            await showWorkspaceProgress('3d', {
+                title: 'Saving 3D JSON',
+                message: 'Capturing the current 3D scene...',
+                progress: 0.14
+            });
+            logProcess('active', '3d.export', `Preparing "${suggestedName}" for local 3D JSON save.`);
+            try {
+                const capture = await adapter.captureDocument(documentState);
+                setThreeDProgress({
+                    active: true,
+                    title: 'Saving 3D JSON',
+                    message: `Writing "${suggestedName}"...`,
+                    progress: 0.9
+                });
+                const saveResult = await saveJsonLocally(capture.payload, suggestedName, {
+                    title: 'Save 3D Scene JSON',
+                    buttonLabel: 'Save JSON',
+                    filters: [{ name: '3D Scene JSON', extensions: ['json'] }]
+                });
+                if (wasSaveCancelled(saveResult)) {
+                    clearWorkspaceProgress('3d');
+                    logProcess('info', '3d.export', 'Cancelled the 3D scene JSON save dialog.');
+                    setNotice('3D scene JSON save cancelled.', 'info', 4200);
+                    return null;
+                }
+                if (!didSaveFile(saveResult)) {
+                    throw new Error(saveResult?.error || 'Could not save the 3D scene JSON.');
+                }
+                setThreeDProgress({
+                    active: true,
+                    title: 'Saving 3D JSON',
+                    message: 'Updating the matching Library project...',
+                    progress: 0.97
+                });
+                const libraryProject = await actions.saveProjectToLibrary(stripProjectExtension(saveResult.fileName || suggestedName), {
+                    preferExisting: true,
+                    promptless: true,
+                    projectType: '3d',
+                    suppressWorkspaceOverlay: true,
+                    suppressNotice: true
+                });
+                clearWorkspaceProgress('3d');
+                logProcess('success', '3d.export', `Saved "${suggestedName}" as a local 3D scene JSON${describeSavedLocation(saveResult)}.`);
+                if (!libraryProject) {
+                    logProcess('warning', '3d.export', 'Saved the 3D scene JSON locally, but could not update the matching Library project.');
+                    setNotice('3D scene JSON saved locally, but the matching Library project could not be updated.', 'warning', 7000);
+                    return saveResult;
+                }
+                setNotice('3D scene JSON saved locally and synced to Library.', 'success');
+                return saveResult;
+            } catch (error) {
+                clearWorkspaceProgress('3d');
+                logProcess('error', '3d.export', error?.message || 'Could not save the 3D scene JSON.');
+                setNotice(error?.message || 'Could not save the 3D scene JSON.', 'error', 7000);
+                return null;
             }
         },
         async openCompare() {
@@ -4315,10 +4865,17 @@ window.addEventListener('DOMContentLoaded', async () => {
         async processLibraryPayloads(payloadsText, filenames, onProgress = null) {
             const state = store.getState();
             const originalSource = state.document.source;
+            const existingProjects = await getAllLibraryProjectRecords();
+            const knownFingerprints = new Set(
+                existingProjects.map((entry) => `${getLibraryProjectType(entry)}:${makeProjectFingerprint(entry.payload)}`)
+            );
             let savedCount = 0;
-            let failedCount = 0;
+            let updatedCount = 0;
+            let skippedDuplicateCount = 0;
+            let rejectedCount = 0;
             let lastError = null;
             const importedTags = [];
+            const importedProjectIds = [];
             logProcess('active', 'library.import', `Rendering ${payloadsText.length} imported project payload${payloadsText.length === 1 ? '' : 's'} into the Library database.`);
             setNotice(`Rendering ${payloadsText.length} variants to Library DB...`, 'info', 0);
 
@@ -4340,6 +4897,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                         dedupeWindowMs: 80
                     });
                     const prepared = await adapter.prepareImportedProject(rawState);
+                    const fingerprintKey = `${adapter.type}:${makeProjectFingerprint(prepared.payload)}`;
+                    if (knownFingerprints.has(fingerprintKey)) {
+                        skippedDuplicateCount += 1;
+                        logProcess('info', 'library.import', `Skipped duplicate Library project "${filenames[i] || `item ${i + 1}`}" because the same ${adapter.label} payload is already saved.`);
+                        continue;
+                    }
                     const projectName = stripProjectExtension(rawState._libraryName || filenames[i] || adapter.suggestName(prepared.payload))
                         || adapter.suggestName(prepared.payload)
                         || `Library Project ${i + 1}`;
@@ -4357,12 +4920,15 @@ window.addEventListener('DOMContentLoaded', async () => {
                     if (adapter.type === 'studio') {
                         await upsertDerivedStudioAsset(projectData);
                     }
+                    knownFingerprints.add(fingerprintKey);
                     importedTags.push(...projectData.tags);
                     savedCount += 1;
+                    importedProjectIds.push(projectData.id);
                 } catch (err) {
-                    failedCount += 1;
+                    rejectedCount += 1;
                     lastError = err;
                     console.error(`[Library] Error processing file ${filenames[i]}:`, err);
+                    logProcess('warning', 'library.import', `Skipped "${filenames[i] || `item ${i + 1}`}" during Library import: ${err?.message || 'Unknown import error.'}`);
                 }
 
                 onProgress?.({ phase: 'progress', count: i + 1, total: payloadsText.length, filename: filenames[i] });
@@ -4384,20 +4950,27 @@ window.addEventListener('DOMContentLoaded', async () => {
                 await registerLibraryTags(importedTags);
             }
             notifyLibraryChanged();
-            if (!savedCount) {
-                logProcess('error', 'library.import', lastError?.message || 'No imported Library items could be saved.');
-                throw new Error(lastError?.message || 'No Library items were saved to the database.');
-            }
-            logProcess(failedCount ? 'warning' : 'success', 'library.import', failedCount
-                ? `Imported ${savedCount} of ${payloadsText.length} Library item${payloadsText.length === 1 ? '' : 's'}; ${failedCount} failed.`
-                : `Imported ${savedCount} Library item${savedCount === 1 ? '' : 's'} into the database.`);
-            setNotice(
-                failedCount
-                    ? `Saved ${savedCount} of ${payloadsText.length} Library item${payloadsText.length === 1 ? '' : 's'}.`
-                    : 'Library renders saved to DB.',
-                failedCount ? 'warning' : 'success',
-                failedCount ? 5000 : 3000
+            const summaryBits = [];
+            if (savedCount) summaryBits.push(`saved ${savedCount}`);
+            if (updatedCount) summaryBits.push(`updated ${updatedCount}`);
+            if (skippedDuplicateCount) summaryBits.push(`skipped ${skippedDuplicateCount} duplicate${skippedDuplicateCount === 1 ? '' : 's'}`);
+            if (rejectedCount) summaryBits.push(`rejected ${rejectedCount} invalid project${rejectedCount === 1 ? '' : 's'}`);
+            logProcess(
+                rejectedCount || (!savedCount && skippedDuplicateCount) ? 'warning' : (savedCount ? 'success' : 'error'),
+                'library.import',
+                summaryBits.length
+                    ? `Library project import summary: ${summaryBits.join(', ')}.`
+                    : (lastError?.message || 'No imported Library items could be saved.')
             );
+            return {
+                savedCount,
+                updatedCount,
+                skippedDuplicateCount,
+                rejectedCount,
+                totalRequested: payloadsText.length,
+                importedTags,
+                importedProjectIds
+            };
         },
 
         openLibrary() {
@@ -4577,6 +5150,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 logProcess('success', '3d.assets', `Added ${items.length} model${items.length === 1 ? '' : 's'} to the 3D scene.`);
             } catch (error) {
                 clearWorkspaceProgress('3d');
+                if (isAbortError(error)) return;
                 logProcess('error', '3d.assets', error?.message || 'Could not import the selected 3D models.');
                 throw error;
             }
@@ -4658,6 +5232,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 logProcess('success', '3d.assets', `Added ${items.length} image plane${items.length === 1 ? '' : 's'} to the 3D scene.`);
             } catch (error) {
                 clearWorkspaceProgress('3d');
+                if (isAbortError(error)) return;
                 logProcess('error', '3d.assets', error?.message || 'Could not import the selected 3D image planes.');
                 throw error;
             }
@@ -4761,6 +5336,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return assets;
             } catch (error) {
                 clearWorkspaceProgress('3d');
+                if (isAbortError(error)) return [];
                 logProcess('error', '3d.assets', error?.message || 'Could not import the selected 3D fonts.');
                 throw error;
             }
@@ -4831,6 +5407,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return asset;
             } catch (error) {
                 clearWorkspaceProgress('3d');
+                if (isAbortError(error)) return null;
                 logProcess('error', '3d.assets', error?.message || 'Could not import the selected HDRI.');
                 throw error;
             }
@@ -5881,10 +6458,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                 store.setState((current) => ({ ...current, threeDDocument: validated }), { render: false });
                 setActiveLibraryOrigin('3d', libraryId, libraryName);
                 commitActiveSection('3d');
-                ensureLibraryAssetsFromThreeDItems(validated.scene?.items || []).catch((error) => {
+                try {
+                    await ensureLibraryAssetsFromThreeDItems(validated.scene?.items || []);
+                } catch (error) {
                     console.error(error);
                     logProcess('warning', 'library.assets', error?.message || 'Could not backfill scene assets while loading a 3D Library project.');
-                });
+                }
                 logProcess('success', 'library.projects', `Loaded "${libraryName || 'project'}" from the Library into 3D.`);
                 setNotice(`Loaded "${libraryName || 'project'}" from Library.`, 'success');
                 return true;

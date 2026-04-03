@@ -12,6 +12,7 @@ import { normalizeThreeDDocument } from './document.js';
 import { createGradientEnvironmentTexture, createSolidEnvironmentTexture } from './environment.js';
 import { createExtrudedTextObject, createFlatTextObject } from './text.js';
 import { alignCameraToLockedView, getLockedViewForward, resolveAttachmentTransform } from './viewMath.js';
+import { saveBlobLocally } from '../io/localSave.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -138,16 +139,6 @@ function createRenderCanvas(width, height) {
     canvas.style.background = '#050607';
     canvas.style.pointerEvents = 'none';
     return canvas;
-}
-
-function downloadBlob(blob, filename) {
-    const safeName = String(filename || 'render.png').trim() || 'render.png';
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.href = url;
-    link.download = safeName.endsWith('.png') ? safeName : `${safeName}.png`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 const LINKED_SCALE_AXES = {
@@ -1051,12 +1042,22 @@ export class ThreeDEngine {
         if (this._navigationMode === 'canvas') {
             this._cameraMode = 'orbit';
         }
-        this.transformControl.translationSnap = document.view.snapTranslationStep > 0
+        const translationSnap = document.view.snapTranslationStep > 0
             ? Number(document.view.snapTranslationStep)
             : null;
-        this.transformControl.rotationSnap = document.view.snapRotationDegrees > 0
+        const rotationSnap = document.view.snapRotationDegrees > 0
             ? THREE.MathUtils.degToRad(Number(document.view.snapRotationDegrees))
             : null;
+        if (typeof this.transformControl.setTranslationSnap === 'function') {
+            this.transformControl.setTranslationSnap(translationSnap);
+        } else {
+            this.transformControl.translationSnap = translationSnap;
+        }
+        if (typeof this.transformControl.setRotationSnap === 'function') {
+            this.transformControl.setRotationSnap(rotationSnap);
+        } else {
+            this.transformControl.rotationSnap = rotationSnap;
+        }
 
         let nextView = document.view;
         if (this._navigationMode === 'canvas') {
@@ -2241,7 +2242,8 @@ export class ThreeDEngine {
         samples = 256,
         width = 1920,
         height = 1080,
-        fileName = '3d-render.png'
+        fileName = '3d-render.png',
+        saveHandler = null
     } = {}) {
         if (this._backgroundRenderJob?.active) {
             throw new Error('A render is already running.');
@@ -2332,6 +2334,13 @@ export class ThreeDEngine {
         };
 
         const startedAt = Date.now();
+        const persistRenderBlob = typeof saveHandler === 'function'
+            ? saveHandler
+            : (blob, nextFileName) => saveBlobLocally(blob, nextFileName, {
+                title: 'Save 3D Render PNG',
+                buttonLabel: 'Save PNG',
+                filters: [{ name: 'PNG Image', extensions: ['png'] }]
+            });
         notifyUpdate({
             currentSamples: 0,
             startedAt,
@@ -2362,6 +2371,7 @@ export class ThreeDEngine {
             }
 
             if (job.aborted) {
+                const finishedAt = Date.now();
                 this.onBackgroundRenderUpdate?.({
                     active: false,
                     status: 'aborted',
@@ -2370,7 +2380,9 @@ export class ThreeDEngine {
                     outputWidth,
                     outputHeight,
                     fileName: job.fileName,
-                    finishedAt: Date.now(),
+                    startedAt,
+                    finishedAt,
+                    durationMs: Math.max(0, finishedAt - startedAt),
                     message: 'Render aborted.'
                 }, true);
                 return { aborted: true };
@@ -2391,7 +2403,35 @@ export class ThreeDEngine {
             if (!blob) {
                 throw new Error('The render finished, but the browser could not encode the PNG.');
             }
-            downloadBlob(blob, job.fileName);
+            const saveResult = await persistRenderBlob(blob, job.fileName);
+            if (saveResult?.status === 'cancelled') {
+                const finishedAt = Date.now();
+                this.onBackgroundRenderUpdate?.({
+                    active: false,
+                    status: 'cancelled',
+                    requestedSamples,
+                    currentSamples: Math.floor(tracer.samples),
+                    outputWidth,
+                    outputHeight,
+                    fileName: job.fileName,
+                    startedAt,
+                    finishedAt,
+                    durationMs: Math.max(0, finishedAt - startedAt),
+                    saveStatus: 'cancelled',
+                    saveSource: saveResult?.source || '',
+                    savePath: saveResult?.filePath || '',
+                    message: 'Render finished, but the PNG save was cancelled.'
+                }, true);
+                return {
+                    aborted: false,
+                    blob,
+                    saveResult
+                };
+            }
+            if (saveResult?.status === 'failed') {
+                throw new Error(saveResult?.error || 'The render finished, but the PNG could not be saved.');
+            }
+            const finishedAt = Date.now();
             this.onBackgroundRenderUpdate?.({
                 active: false,
                 status: 'complete',
@@ -2400,13 +2440,37 @@ export class ThreeDEngine {
                 outputWidth,
                 outputHeight,
                 fileName: job.fileName,
-                finishedAt: Date.now(),
+                startedAt,
+                finishedAt,
+                durationMs: Math.max(0, finishedAt - startedAt),
+                saveStatus: saveResult?.status || 'saved',
+                saveSource: saveResult?.source || '',
+                savePath: saveResult?.filePath || '',
+                libraryStatus: saveResult?.libraryStatus || 'skipped',
+                libraryError: saveResult?.libraryError || '',
                 message: 'Render complete. PNG exported.'
             }, true);
             return {
                 aborted: false,
-                blob
+                blob,
+                saveResult
             };
+        } catch (error) {
+            const finishedAt = Date.now();
+            this.onBackgroundRenderUpdate?.({
+                active: false,
+                status: 'error',
+                requestedSamples,
+                currentSamples: Math.floor(tracer.samples || 0),
+                outputWidth,
+                outputHeight,
+                fileName: job.fileName,
+                startedAt,
+                finishedAt,
+                durationMs: Math.max(0, finishedAt - startedAt),
+                message: error?.message || 'The render failed.'
+            }, true);
+            throw error;
         } finally {
             this.onBackgroundRenderViewport?.({
                 active: false,

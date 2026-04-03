@@ -1,6 +1,7 @@
 import { createThreeDAssetId, createThreeDSceneItemId } from '../../3d/document.js';
 import { blobToDataUrl } from '../../utils/dataUrl.js';
 import { readImageMetadata } from '../../utils/workerImage.js';
+import { reviveWorkerFileEntries, reviveWorkerSingleFile } from '../filePayload.js';
 
 function stripProjectExtension(name) {
     return String(name || '').replace(/\.[^/.]+$/, '');
@@ -12,7 +13,7 @@ function getThreeDFileExtension(name) {
 
 export const threeTaskHandlers = {
     async 'prepare-model-files'(payload = {}, context) {
-        const sourceFiles = (payload.files || []).filter((file) => {
+        const sourceFiles = reviveWorkerFileEntries(payload.fileEntries, payload.files).filter((file) => {
             const extension = getThreeDFileExtension(file?.name);
             return extension === 'glb' || extension === 'gltf';
         });
@@ -48,7 +49,8 @@ export const threeTaskHandlers = {
         return { items };
     },
     async 'prepare-image-plane-files'(payload = {}, context) {
-        const sourceFiles = (payload.files || []).filter((file) => String(file?.type || '').startsWith('image/'));
+        const sourceFiles = reviveWorkerFileEntries(payload.fileEntries, payload.files)
+            .filter((file) => String(file?.type || '').startsWith('image/'));
         const items = [];
         for (let index = 0; index < sourceFiles.length; index += 1) {
             context.assertNotCancelled();
@@ -85,7 +87,8 @@ export const threeTaskHandlers = {
         return { items };
     },
     async 'prepare-font-files'(payload = {}, context) {
-        const sourceFiles = (payload.files || []).filter((file) => ['ttf', 'otf', 'woff', 'woff2'].includes(getThreeDFileExtension(file?.name)));
+        const sourceFiles = reviveWorkerFileEntries(payload.fileEntries, payload.files)
+            .filter((file) => ['ttf', 'otf', 'woff', 'woff2'].includes(getThreeDFileExtension(file?.name)));
         const assets = [];
         for (let index = 0; index < sourceFiles.length; index += 1) {
             context.assertNotCancelled();
@@ -109,8 +112,8 @@ export const threeTaskHandlers = {
         return { assets };
     },
     async 'prepare-hdri-file'(payload = {}, context) {
-        const file = payload.file;
-        if (!(file instanceof File)) return { asset: null };
+        const file = reviveWorkerSingleFile(payload.fileEntry, payload.file);
+        if (!file) return { asset: null };
         const extension = getThreeDFileExtension(file?.name);
         if (extension !== 'hdr') return { asset: null };
         context.assertNotCancelled();

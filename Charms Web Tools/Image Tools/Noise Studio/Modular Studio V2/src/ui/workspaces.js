@@ -30,6 +30,15 @@ function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function formatNumber(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return String(value ?? '');
@@ -778,7 +787,7 @@ function renderStitchToolbar(state) {
     `;
 }
 
-function renderSectionTabs(state) {
+function renderSectionTabs(state, headerStatus = null) {
     const activeSection = state.ui.activeSection === 'library'
         ? 'library'
         : state.ui.activeSection === 'stitch'
@@ -788,13 +797,20 @@ function renderSectionTabs(state) {
                 : state.ui.activeSection === 'logs'
                     ? 'logs'
                 : 'editor';
+    const statusTone = headerStatus?.tone || 'info';
+    const statusText = String(headerStatus?.text || '').trim();
     return `
         <nav class="section-switcher">
-            <button type="button" class="mode-button ${activeSection === 'editor' ? 'is-active' : ''}" data-action="set-app-section" data-section="editor">Editor</button>
-            <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
-            <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
-            <button type="button" class="mode-button ${activeSection === '3d' ? 'is-active' : ''}" data-action="set-app-section" data-section="3d">3D</button>
-            <button type="button" class="mode-button ${activeSection === 'logs' ? 'is-active' : ''}" data-action="set-app-section" data-section="logs">Logs</button>
+            <div class="section-switcher-buttons">
+                <button type="button" class="mode-button ${activeSection === 'editor' ? 'is-active' : ''}" data-action="set-app-section" data-section="editor">Editor</button>
+                <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
+                <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
+                <button type="button" class="mode-button ${activeSection === '3d' ? 'is-active' : ''}" data-action="set-app-section" data-section="3d">3D</button>
+                <button type="button" class="mode-button ${activeSection === 'logs' ? 'is-active' : ''}" data-action="set-app-section" data-section="logs">Logs</button>
+            </div>
+            <div class="section-header-status ${statusText ? `is-${statusTone}` : 'is-empty'}" aria-live="polite" title="${escapeHtml(statusText)}">
+                ${statusText ? `<span>${escapeHtml(statusText)}</span>` : ''}
+            </div>
         </nav>
     `;
 }
@@ -817,7 +833,6 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         <div class="app-shell">
             <div id="sectionTabsSlot"></div>
             <div id="toolbarSlot"></div>
-            <div class="notice-strip" id="noticeStrip"></div>
             <div class="workspace-shell" id="workspaceShell">
                 <aside class="workspace-sidebar" id="sidebarPanel"></aside>
                 <section class="workspace-center">
@@ -851,6 +866,26 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             <input id="stateInput" type="file" accept=".json,.mns.json" hidden>
             <input id="paletteImageInput" type="file" accept="image/*" hidden>
             <div class="dialog" id="compareDialog"><div class="dialog-panel compare-panel"><div class="dialog-header"><div><div class="eyebrow">Comparison</div><h3>Original vs Processed</h3></div><button type="button" class="icon-button" data-action="compare-close">Close</button></div><div class="dialog-body"><div class="compare-grid"><div class="scope-card"><div class="scope-card-header">Original</div><canvas id="compareOriginal" width="640" height="360"></canvas></div><div class="scope-card"><div class="scope-card-header">Processed</div><canvas id="compareProcessed" width="640" height="360"></canvas></div></div><div class="scope-meta-line" id="compareInfo">Source -- | Render --</div><div class="button-cluster"><button type="button" class="secondary-button" data-action="compare-export" data-mode="side">Export Side</button><button type="button" class="secondary-button" data-action="compare-export" data-mode="stack">Export Stack</button></div></div></div></div>
+            <div class="dialog" id="appDialog" aria-hidden="true">
+                <div class="dialog-panel app-modal-panel">
+                    <div class="dialog-header">
+                        <div>
+                            <div class="eyebrow">App Dialog</div>
+                            <h3 id="appDialogTitle">Continue</h3>
+                        </div>
+                        <button type="button" class="icon-button" data-action="app-dialog-close">Close</button>
+                    </div>
+                    <div class="dialog-body app-modal-body">
+                        <p class="app-modal-text" id="appDialogText"></p>
+                        <div class="app-modal-content" id="appDialogContent"></div>
+                        <div class="library-modal-error" id="appDialogError"></div>
+                        <div class="library-modal-actions">
+                            <button type="button" class="toolbar-button" id="appDialogCancel" data-action="app-dialog-cancel">Cancel</button>
+                            <button type="button" class="primary-button" id="appDialogConfirm" data-action="app-dialog-confirm">Continue</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div id="toleranceTooltip" style="display: none; position: fixed; pointer-events: none; z-index: 1000; background: #222; color: #fff; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 11px; transform: translate(-50%, -100%); margin-top: -8px;"></div>
             <div id="batchSlot"></div>
             <div id="jsonCompareSlot"></div>
@@ -861,7 +896,6 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         root,
         sectionTabsSlot: root.querySelector('#sectionTabsSlot'),
         toolbarSlot: root.querySelector('#toolbarSlot'),
-        noticeStrip: root.querySelector('#noticeStrip'),
         workspaceShell: root.querySelector('#workspaceShell'),
         sidebarPanel: root.querySelector('#sidebarPanel'),
         libraryPanel: root.querySelector('#libraryPanel'),
@@ -886,6 +920,13 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         batchSlot: root.querySelector('#batchSlot'),
         jsonCompareSlot: root.querySelector('#jsonCompareSlot'),
         compareDialog: root.querySelector('#compareDialog'),
+        appDialog: root.querySelector('#appDialog'),
+        appDialogTitle: root.querySelector('#appDialogTitle'),
+        appDialogText: root.querySelector('#appDialogText'),
+        appDialogContent: root.querySelector('#appDialogContent'),
+        appDialogError: root.querySelector('#appDialogError'),
+        appDialogCancel: root.querySelector('#appDialogCancel'),
+        appDialogConfirm: root.querySelector('#appDialogConfirm'),
         compareOriginal: root.querySelector('#compareOriginal'),
         compareProcessed: root.querySelector('#compareProcessed'),
         compareInfo: root.querySelector('#compareInfo'),
@@ -920,6 +961,10 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     let lastSourceSignature = '';
     let logsTabPulse = '';
     let logsTabPulseTimer = null;
+    let logsTabPulseMessage = '';
+    let logsTabPulseTone = 'info';
+    let appDialogState = null;
+    let appDialogRestoreFocus = null;
     const viewportState = {
         pointer: { x: 0.5, y: 0.5 }
     };
@@ -946,16 +991,245 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         const activeSection = actions.getState?.()?.ui?.activeSection || latestState?.ui?.activeSection || 'editor';
         if (activeSection === 'logs') return;
         logsTabPulse = event.status === 'error' ? 'error' : 'success';
+        logsTabPulseTone = logsTabPulse;
+        logsTabPulseMessage = String(event.message || (logsTabPulse === 'error' ? 'A background task failed.' : 'A background task finished successfully.'));
         if (logsTabPulseTimer) clearTimeout(logsTabPulseTimer);
+        renderSectionTabsSlot();
         applyLogsTabPulse();
         logsTabPulseTimer = setTimeout(() => {
             logsTabPulse = '';
+            logsTabPulseMessage = '';
+            logsTabPulseTone = 'info';
+            renderSectionTabsSlot();
             applyLogsTabPulse();
         }, 1600);
     }) || (() => {});
 
     function getLiveState() {
         return actions.getState?.() || latestState;
+    }
+
+    function setAppDialogError(message = '') {
+        if (!refs.appDialogError) return;
+        const text = String(message || '').trim();
+        refs.appDialogError.textContent = text;
+        refs.appDialogError.classList.toggle('is-visible', !!text);
+    }
+
+    function setAppDialogBusy(busy) {
+        if (!refs.appDialog || !refs.appDialogConfirm || !refs.appDialogCancel) return;
+        const isBusy = !!busy;
+        refs.appDialogConfirm.disabled = isBusy;
+        refs.appDialogCancel.disabled = isBusy;
+        refs.appDialog.querySelector('.app-modal-panel')?.classList.toggle('is-busy', isBusy);
+        refs.appDialog.dataset.busy = isBusy ? 'true' : 'false';
+        if (appDialogState) {
+            appDialogState.isBusy = isBusy;
+        }
+    }
+
+    function getAppDialogContext() {
+        return {
+            root: refs.appDialogContent,
+            setError: setAppDialogError,
+            close: () => hideAppDialog(true)
+        };
+    }
+
+    function hideAppDialog(restoreFocus = false) {
+        if (!refs.appDialog) return;
+        refs.appDialog.classList.remove('is-open');
+        refs.appDialog.setAttribute('aria-hidden', 'true');
+        refs.appDialogContent.innerHTML = '';
+        refs.appDialogText.textContent = '';
+        refs.appDialogText.style.display = 'none';
+        refs.appDialogCancel.style.display = '';
+        refs.appDialogConfirm.classList.remove('is-danger');
+        setAppDialogError('');
+        setAppDialogBusy(false);
+        const focusTarget = restoreFocus ? appDialogRestoreFocus : null;
+        appDialogState = null;
+        appDialogRestoreFocus = null;
+        if (focusTarget && typeof focusTarget.focus === 'function') {
+            requestAnimationFrame(() => focusTarget.focus());
+        }
+    }
+
+    function showAppDialog(options = {}) {
+        if (!refs.appDialog || !refs.appDialogTitle || !refs.appDialogText || !refs.appDialogContent) {
+            options.resolve?.(null);
+            return;
+        }
+        if (appDialogState?.resolve) {
+            appDialogState.resolve(null);
+        }
+        hideAppDialog(false);
+        appDialogRestoreFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        appDialogState = {
+            title: String(options.title || 'Continue'),
+            text: String(options.text || ''),
+            html: String(options.html || ''),
+            confirmLabel: String(options.confirmLabel || 'Continue'),
+            cancelLabel: String(options.cancelLabel || 'Cancel'),
+            isAlert: !!options.isAlert,
+            isDanger: !!options.isDanger,
+            closeOnOverlay: options.closeOnOverlay !== false,
+            onConfirm: options.onConfirm || null,
+            onCancel: options.onCancel || null,
+            onOpen: options.onOpen || null,
+            resolve: typeof options.resolve === 'function' ? options.resolve : null,
+            isBusy: false
+        };
+        refs.appDialogTitle.textContent = appDialogState.title;
+        refs.appDialogText.textContent = appDialogState.text;
+        refs.appDialogText.style.display = appDialogState.text ? 'block' : 'none';
+        refs.appDialogContent.innerHTML = appDialogState.html || '';
+        refs.appDialogCancel.textContent = appDialogState.cancelLabel;
+        refs.appDialogCancel.style.display = appDialogState.isAlert ? 'none' : '';
+        refs.appDialogConfirm.textContent = appDialogState.confirmLabel;
+        refs.appDialogConfirm.classList.toggle('is-danger', appDialogState.isDanger);
+        setAppDialogError('');
+        setAppDialogBusy(false);
+        refs.appDialog.classList.add('is-open');
+        refs.appDialog.setAttribute('aria-hidden', 'false');
+        requestAnimationFrame(() => {
+            appDialogState?.onOpen?.(getAppDialogContext());
+        });
+    }
+
+    async function confirmAppDialog() {
+        if (!appDialogState || appDialogState.isBusy) return;
+        const callback = appDialogState.onConfirm;
+        if (!callback) {
+            const resolve = appDialogState.resolve;
+            hideAppDialog(true);
+            resolve?.(true);
+            return;
+        }
+        try {
+            setAppDialogBusy(true);
+            const result = await callback(getAppDialogContext());
+            if (result === false) {
+                setAppDialogBusy(false);
+                return;
+            }
+            const resolve = appDialogState.resolve;
+            const resolvedValue = result === undefined ? true : result;
+            hideAppDialog(true);
+            resolve?.(resolvedValue);
+        } catch (error) {
+            setAppDialogBusy(false);
+            setAppDialogError(error?.message || 'Could not continue.');
+        }
+    }
+
+    async function cancelAppDialog() {
+        if (!appDialogState || appDialogState.isBusy) return;
+        try {
+            const result = await appDialogState.onCancel?.(getAppDialogContext());
+            if (result === false) return;
+        } catch (error) {
+            setAppDialogError(error?.message || 'Could not close this dialog yet.');
+            return;
+        }
+        const resolve = appDialogState.resolve;
+        hideAppDialog(true);
+        resolve?.(null);
+    }
+
+    function focusAppDialogField(selector) {
+        const field = refs.appDialogContent?.querySelector(selector);
+        if (field && typeof field.focus === 'function') {
+            requestAnimationFrame(() => field.focus());
+        }
+    }
+
+    function runAppDialog(options = {}) {
+        return new Promise((resolve) => {
+            showAppDialog({
+                ...options,
+                resolve
+            });
+        });
+    }
+
+    async function requestAppConfirm(options = {}) {
+        const result = await runAppDialog({
+            title: options.title || 'Confirm',
+            text: options.text || '',
+            html: options.html || '',
+            confirmLabel: options.confirmLabel || 'Continue',
+            cancelLabel: options.cancelLabel || 'Cancel',
+            isDanger: !!options.isDanger,
+            isAlert: !!options.isAlert,
+            closeOnOverlay: options.closeOnOverlay !== false,
+            onOpen: options.onOpen,
+            onCancel: options.onCancel,
+            onConfirm: options.onConfirm || (() => true)
+        });
+        return !!result;
+    }
+
+    async function requestAppText(options = {}) {
+        const inputId = 'app-dialog-input';
+        const fieldLabel = escapeHtml(options.fieldLabel || 'Value');
+        const placeholder = escapeHtml(options.placeholder || '');
+        const defaultValue = String(options.defaultValue ?? '');
+        const html = options.html || `
+            <label class="library-modal-field">
+                <span>${fieldLabel}</span>
+                <input type="text" class="library-modal-input" id="${inputId}" value="${escapeHtml(defaultValue)}" placeholder="${placeholder}">
+            </label>
+        `;
+        return runAppDialog({
+            title: options.title || 'Enter A Value',
+            text: options.text || '',
+            html,
+            confirmLabel: options.confirmLabel || 'Continue',
+            cancelLabel: options.cancelLabel || 'Cancel',
+            isDanger: !!options.isDanger,
+            closeOnOverlay: options.closeOnOverlay !== false,
+            onOpen: (context) => {
+                options.onOpen?.(context);
+                focusAppDialogField(`#${inputId}`);
+            },
+            onConfirm: ({ root, setError }) => {
+                const rawValue = root.querySelector(`#${inputId}`)?.value ?? '';
+                const value = options.trim === false ? String(rawValue) : String(rawValue).trim();
+                if (options.required !== false && !value) {
+                    setError(options.requiredMessage || 'Enter a value first.');
+                    return false;
+                }
+                if (typeof options.validate === 'function') {
+                    const validationResult = options.validate(value, { root, setError });
+                    if (validationResult === false) return false;
+                    if (validationResult !== undefined) return validationResult;
+                }
+                return value;
+            }
+        });
+    }
+
+    function getHeaderStatus(state = getLiveState()) {
+        const activeSection = state?.ui?.activeSection || '';
+        if (logsTabPulseMessage && activeSection !== 'logs') {
+            return {
+                text: logsTabPulseMessage,
+                tone: logsTabPulseTone
+            };
+        }
+        if (state?.notice?.text) {
+            return {
+                text: state.notice.text,
+                tone: state.notice.type || 'info'
+            };
+        }
+        return null;
+    }
+
+    function renderSectionTabsSlot(state = getLiveState()) {
+        if (!state || !refs.sectionTabsSlot) return;
+        refs.sectionTabsSlot.innerHTML = renderSectionTabs(state, getHeaderStatus(state));
     }
 
     function applyLogsTabPulse() {
@@ -1272,6 +1546,19 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         brushInteraction = null;
     });
     window.addEventListener('keydown', (event) => {
+        if (appDialogState) {
+            const key = String(event.key || '').toLowerCase();
+            if (key === 'escape' && !appDialogState.isAlert) {
+                event.preventDefault();
+                cancelAppDialog();
+                return;
+            }
+            if (key === 'enter' && refs.appDialog?.contains(event.target) && String(event.target?.tagName || '').toLowerCase() !== 'textarea') {
+                event.preventDefault();
+                confirmAppDialog();
+                return;
+            }
+        }
         if (!event.key || (event.key.toLowerCase() !== 'l' && event.code !== 'KeyL')) return;
         const tag = document.activeElement?.tagName;
         const type = document.activeElement?.type;
@@ -1288,12 +1575,11 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         const actionMap = {
             'set-app-section': () => actions.setActiveSection(node.dataset.section),
             'trigger-image-input': () => refs.imageInput.click(),
-            'new-project': () => {
-                if (confirm('Create a new project? You may be prompted to save or discard the current project first.')) {
-                    actions.newProject();
-                }
-            },
+            'new-project': actions.newProject,
             'open-library': () => actions.setActiveSection('library'),
+            'app-dialog-close': cancelAppDialog,
+            'app-dialog-cancel': cancelAppDialog,
+            'app-dialog-confirm': confirmAppDialog,
             'json-compare-close': () => actions.setJsonCompareModal(false),
             'json-compare-view-grid': () => actions.setJsonCompareView('grid'),
             'json-compare-view-single': () => actions.setJsonCompareView('single'),
@@ -1389,6 +1675,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         const target = event.target.closest('[data-action]');
         if (target) return handleAction(target);
         if (event.target === refs.compareDialog) actions.closeCompare();
+        if (event.target === refs.appDialog && appDialogState?.closeOnOverlay && !appDialogState?.isAlert) {
+            cancelAppDialog();
+        }
     });
     root.addEventListener('pointermove', (event) => {
         const specCanvas = event.target.closest('.tolerance-spectrum-canvas');
@@ -1592,7 +1881,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         }
 
         document.documentElement.dataset.theme = state.document.view.theme === 'dark' ? 'dark' : 'light';
-        refs.sectionTabsSlot.innerHTML = renderSectionTabs(state);
+        renderSectionTabsSlot(state);
         applyLogsTabPulse();
         refs.toolbarSlot.innerHTML = activeSection === 'editor'
             ? renderStudioToolbar(state)
@@ -1600,9 +1889,6 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 ? renderStitchToolbar(state)
                 : '';
         refs.toolbarSlot.style.display = (activeSection === 'editor' || activeSection === 'stitch') ? 'block' : 'none';
-        refs.noticeStrip.className = `notice-strip ${state.notice ? `is-${state.notice.type || 'info'}` : ''}`;
-        refs.noticeStrip.textContent = state.notice?.text || '';
-        refs.noticeStrip.style.display = state.notice ? 'flex' : 'none';
         refs.workspaceShell.className = `workspace-shell mode-${state.document.mode} tab-${state.document.workspace.studioView}`;
         refs.workspaceShell.style.display = activeSection === 'editor' ? 'grid' : 'none';
         refs.libraryPanel.style.display = activeSection === 'library' ? 'block' : 'none';
@@ -1811,6 +2097,8 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 subLayerLabel: root.querySelector('#subLayerLabel')
             };
         },
+        requestAppConfirm,
+        requestAppText,
         destroy() {
             if (logsTabPulseTimer) clearTimeout(logsTabPulseTimer);
             unsubscribeLogEvents();

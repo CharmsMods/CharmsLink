@@ -1,4 +1,5 @@
 import { createThreeDAssetPreview } from '../3d/assetPreview.js';
+import { didSaveFile, saveDataUrlLocally, saveJsonLocally, wasSaveCancelled } from '../io/localSave.js';
 import { maybeYieldToUi, nextPaint } from './scheduling.js';
 
 const SKIP_PARAMS = new Set(['_libraryName', '_libraryTags', '_libraryProjectType', '_libraryHoverSource', '_librarySourceArea', '_librarySourceCount']);
@@ -182,6 +183,20 @@ function normalizeLibraryDocumentPayload(payload) {
 }
 
 function buildLibraryProjectExportPayload(project) {
+    const payload = normalizeLibraryDocumentPayload(project.payload);
+    if (payload?.preview && typeof payload.preview === 'object') {
+        delete payload.preview.imageData;
+        delete payload.preview.width;
+        delete payload.preview.height;
+        delete payload.preview.updatedAt;
+        if (!Object.keys(payload.preview).length) {
+            delete payload.preview;
+        }
+    }
+    if (payload?.render && typeof payload.render === 'object') {
+        delete payload.render.currentSamples;
+    }
+    delete payload.renderJob;
     return {
         _libraryName: project.name,
         _libraryTags: normalizeTagList(project.tags),
@@ -189,7 +204,7 @@ function buildLibraryProjectExportPayload(project) {
         _libraryHoverSource: project.hoverSource || null,
         _librarySourceArea: Number(project.sourceAreaOverride || project.sourceArea || 0) || 0,
         _librarySourceCount: Number(project.sourceCount || 0) || 0,
-        ...normalizeLibraryDocumentPayload(project.payload)
+        ...payload
     };
 }
 
@@ -208,7 +223,6 @@ function buildLibraryAssetExportPayload(asset) {
         format: String(asset.format || ''),
         mimeType: String(asset.mimeType || ''),
         dataUrl: String(asset.dataUrl || ''),
-        previewDataUrl: String(asset.previewDataUrl || ''),
         tags: normalizeTagList(asset.tags),
         width: Number(asset.width || 0),
         height: Number(asset.height || 0),
@@ -521,14 +535,13 @@ async function decryptLibraryBytes(copy, passphrase, iterations = LIBRARY_SECURE
     return new Uint8Array(decrypted);
 }
 
-function downloadJsonFile(payload, filename) {
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = toJsonFilename(stripJsonExtension(filename));
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+async function downloadJsonFile(payload, filename, options = {}) {
+    return saveJsonLocally(payload, toJsonFilename(stripJsonExtension(filename)), {
+        title: options.title || 'Save JSON',
+        buttonLabel: options.buttonLabel || 'Save JSON',
+        pretty: options.pretty !== false,
+        filters: [{ name: 'JSON File', extensions: ['json'] }]
+    });
 }
 
 function getTagKey(tag) {
@@ -867,7 +880,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 </div>
             </aside>
             <div class="library-loading-overlay">
-                <p class="library-status-text">Working...</p>
+                <p class="library-status-text">Preparing Library...</p>
                 <p class="library-count-text"></p>
                 <div class="library-progress-bar">
                     <div class="library-progress-fill"></div>
@@ -1396,12 +1409,26 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         return getAssetFileExtension(asset);
     }
 
-    function downloadAssetFile(asset) {
-        if (!asset?.dataUrl) return;
-        const link = document.createElement('a');
-        link.href = asset.dataUrl;
-        link.download = `${sanitizeFileStem(stripJsonExtension(asset.name || 'library-asset'), 'library-asset')}.${getAssetDownloadExtension(asset)}`;
-        link.click();
+    async function downloadAssetFile(asset) {
+        if (!asset?.dataUrl) return false;
+        const fileName = `${sanitizeFileStem(stripJsonExtension(asset.name || 'library-asset'), 'library-asset')}.${getAssetDownloadExtension(asset)}`;
+        const saveResult = await saveDataUrlLocally(asset.dataUrl, fileName, {
+            title: 'Save Library Asset',
+            buttonLabel: 'Save Asset',
+            filters: [{ name: 'Library Asset', extensions: [getAssetDownloadExtension(asset)] }]
+        });
+        if (wasSaveCancelled(saveResult)) {
+            logLibrary('info', 'library.export', `Cancelled Library asset save for "${asset.name || fileName}".`);
+            return false;
+        }
+        if (!didSaveFile(saveResult)) {
+            const message = saveResult?.error || `Could not save "${asset.name || fileName}".`;
+            logLibrary('error', 'library.export', message);
+            showAlert(message);
+            return false;
+        }
+        logLibrary('success', 'library.export', `Saved Library asset "${asset.name || fileName}".`);
+        return true;
     }
 
     function ensureAssetPreview() {
@@ -2323,36 +2350,6 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         });
     }
 
-    async function promptDuplicateCopyChoice() {
-        return runModalStep({
-            title: 'Duplicate Secure Copies',
-            text: 'Do you want this encrypted export to carry two sealed copies of the packed Library data?',
-            html: `
-                <div class="library-modal-choice-grid">
-                    <label class="library-modal-choice">
-                        <input type="radio" name="library-duplicate-copies" value="double" checked>
-                        <strong>Store Two Copies</strong>
-                        <span>Lets the import path recover from one damaged or altered encrypted copy more easily.</span>
-                    </label>
-                    <label class="library-modal-choice">
-                        <input type="radio" name="library-duplicate-copies" value="single">
-                        <strong>Store One Copy</strong>
-                        <span>Keeps the file smaller, but there is no backup ciphertext to compare or recover from.</span>
-                    </label>
-                </div>
-            `,
-            confirmLabel: 'Save Export',
-            onConfirm: ({ root, setError }) => {
-                const selected = root.querySelector('input[name="library-duplicate-copies"]:checked')?.value;
-                if (!selected) {
-                    setError('Choose how many encrypted copies to store.');
-                    return false;
-                }
-                return selected === 'double';
-            }
-        });
-    }
-
     async function promptReplaceMode({ scope = 'combined', projectCount = 0, assetCount = 0 } = {}) {
         const scopeLabel = formatScopeLabel(scope);
         return runModalStep({
@@ -2469,11 +2466,11 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
     }
 
     function showProgress(text, countText = '', ratio = 0) {
-        refs.statusText.textContent = text || 'Working...';
+        refs.statusText.textContent = text || 'Preparing Library task...';
         refs.countText.textContent = countText || '';
         refs.progressFill.style.width = `${Math.round(clamp01(ratio) * 100)}%`;
         refs.loadingOverlay.classList.add('is-active');
-        const message = [text || 'Working...', countText || ''].filter(Boolean).join(' | ');
+        const message = [text || 'Preparing Library task...', countText || ''].filter(Boolean).join(' | ');
         const signature = `${message}|${Math.round(clamp01(ratio) * 1000)}`;
         if (signature !== lastProgressLogSignature) {
             lastProgressLogSignature = signature;
@@ -2503,7 +2500,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         const previousById = new Map(previousData.map((item) => [item.id, item]));
         const previousAssetById = new Map(previousAssets.map((item) => [item.id, item]));
         if (shouldShowInitialProgress) {
-            showProgress('Loading Library...', 'Reading saved projects and assets', 0.08);
+            showProgress('Loading Library...', 'Reading saved projects, asset records, and tag catalog', 0.08);
         }
         logLibrary('active', 'library.sync', shouldShowInitialProgress
             ? 'Loading Library projects, tags, and assets from memory.'
@@ -2518,7 +2515,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
 
             if (shouldShowInitialProgress && token === refreshToken) {
                 const summary = `${projects.length} project${projects.length === 1 ? '' : 's'} | ${(nextAssetsRaw || []).length} asset${(nextAssetsRaw || []).length === 1 ? '' : 's'}`;
-                showProgress('Preparing Library...', summary, 0.56);
+                showProgress('Preparing Library metadata...', summary, 0.56);
             }
 
             const nextData = await Promise.all(projects.map(async (project) => {
@@ -2589,7 +2586,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             }));
 
             if (shouldShowInitialProgress && token === refreshToken) {
-                showProgress('Preparing Library...', 'Building asset gallery', 0.82);
+                showProgress('Building Library gallery...', 'Creating project and asset cards', 0.82);
             }
 
             const nextAssetData = await Promise.all(((nextAssetsRaw || []) || []).map(async (asset) => {
@@ -2747,59 +2744,36 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         await refresh();
     }
 
-    function downloadProject(project) {
-        if (!project) return;
-        downloadJsonFile(buildLibraryProjectExportPayload(project), project.name);
+    async function downloadProject(project) {
+        if (!project) return false;
+        const saveResult = await downloadJsonFile(buildLibraryProjectExportPayload(project), project.name, {
+            title: 'Save Library Project JSON',
+            buttonLabel: 'Save JSON',
+            pretty: true
+        });
+        if (wasSaveCancelled(saveResult)) {
+            logLibrary('info', 'library.export', `Cancelled Library project download for "${project.name || 'project'}".`);
+            return false;
+        }
+        if (!didSaveFile(saveResult)) {
+            const message = saveResult?.error || `Could not save "${project.name || 'project'}".`;
+            logLibrary('error', 'library.export', message);
+            showAlert(message);
+            return false;
+        }
+        logLibrary('success', 'library.export', `Saved Library project JSON "${toJsonFilename(project.name)}".`);
+        return true;
     }
 
     async function buildSecureLibraryExportRecord(bundle, { secureMode, passphrase = '', duplicateCopies = false }) {
-        const bundleText = JSON.stringify(bundle);
-        const compressed = await gzipText(bundleText);
-        if (secureMode === 'compressed') {
-            return {
-                type: LIBRARY_EXPORT_TYPE,
-                format: LIBRARY_SECURE_EXPORT_FORMAT,
-                version: 1,
-                name: bundle.name,
-                exportedAt: new Date().toISOString(),
-                mode: 'compressed',
-                payloadFormat: LIBRARY_EXPORT_FORMAT,
-                compression: 'gzip',
-                encoding: 'base64',
-                payload: {
-                    data: bytesToBase64(compressed)
-                }
-            };
-        }
-
-        if (!crypto?.subtle) {
-            throw new Error('This browser does not support encrypted Library exports.');
-        }
-
-        const copyCount = duplicateCopies ? 2 : 1;
-        const copies = [];
-        for (let index = 0; index < copyCount; index += 1) {
-            copies.push(await encryptLibraryBytes(compressed, passphrase, LIBRARY_SECURE_KDF_ITERATIONS));
-        }
-        return {
-            type: LIBRARY_EXPORT_TYPE,
-            format: LIBRARY_SECURE_EXPORT_FORMAT,
-            version: 1,
-            name: bundle.name,
-            exportedAt: new Date().toISOString(),
-            mode: 'encrypted',
-            payloadFormat: LIBRARY_EXPORT_FORMAT,
-            compression: 'gzip',
-            encoding: 'base64',
-            duplicateCopies,
-            encryption: {
-                algorithm: 'AES-GCM',
-                kdf: 'PBKDF2',
-                hash: 'SHA-256',
-                iterations: LIBRARY_SECURE_KDF_ITERATIONS
-            },
-            payload: { copies }
-        };
+        const result = typeof actions.buildSecureLibraryExportRecord === 'function'
+            ? await actions.buildSecureLibraryExportRecord(bundle, {
+                secureMode,
+                passphrase,
+                duplicateCopies
+            })
+            : null;
+        return result?.record || result;
     }
 
     async function saveLibraryWorkflow(options = {}) {
@@ -2825,7 +2799,21 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         logLibrary('active', 'library.export', `Preparing a ${exportChoice.scope === 'assets' ? 'Assets' : exportChoice.scope === 'combined' ? 'combined Library + Assets' : 'Library'} export named "${filename}".`);
 
         if (exportChoice.exportMode === 'plain') {
-            downloadJsonFile(bundle, filename);
+            const saveResult = await downloadJsonFile(bundle, filename, {
+                title: 'Save Library Export',
+                buttonLabel: 'Save JSON',
+                pretty: false
+            });
+            if (wasSaveCancelled(saveResult)) {
+                logLibrary('info', 'library.export', `Cancelled plain JSON export "${toJsonFilename(filename)}".`);
+                return false;
+            }
+            if (!didSaveFile(saveResult)) {
+                const message = saveResult?.error || 'Could not save the Library export JSON.';
+                logLibrary('error', 'library.export', message);
+                showAlert(message);
+                return false;
+            }
             logLibrary('success', 'library.export', `Saved plain JSON export "${toJsonFilename(filename)}".`);
             return true;
         }
@@ -2838,9 +2826,6 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         if (secureMode === 'encrypted') {
             passphrase = await promptEncryptionPassphrase();
             if (!passphrase) return false;
-            const duplicateChoice = await promptDuplicateCopyChoice();
-            if (duplicateChoice === null) return false;
-            duplicateCopies = duplicateChoice;
         }
 
         try {
@@ -2851,7 +2836,18 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 duplicateCopies
             });
             showProgress('Saving export...', toJsonFilename(filename), 1);
-            downloadJsonFile(payload, filename);
+            const saveResult = await downloadJsonFile(payload, filename, {
+                title: 'Save Library Export',
+                buttonLabel: 'Save JSON',
+                pretty: false
+            });
+            if (wasSaveCancelled(saveResult)) {
+                logLibrary('info', 'library.export', `Cancelled secure ${secureMode} export "${toJsonFilename(filename)}".`);
+                return false;
+            }
+            if (!didSaveFile(saveResult)) {
+                throw new Error(saveResult?.error || 'Could not save the secure Library export JSON.');
+            }
             logLibrary('success', 'library.export', `Saved secure ${secureMode} export "${toJsonFilename(filename)}".`);
             return true;
         } catch (error) {
@@ -2866,8 +2862,14 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
 
     async function resolveSecureImportPayload(parsed, fallbackName) {
         if (parsed.mode === 'compressed') {
-            const compressedText = await gunzipText(base64ToBytes(parsed?.payload?.data || ''));
-            return extractLibraryImportBundle(JSON.parse(compressedText), fallbackName);
+            const resolved = typeof actions.resolveSecureLibraryImportRecord === 'function'
+                ? await actions.resolveSecureLibraryImportRecord(parsed, '')
+                : null;
+            const recoveredText = String(resolved?.recoveredText || '');
+            if (!recoveredText) {
+                throw new Error('This secure Library file could not be unpacked.');
+            }
+            return extractLibraryImportBundle(JSON.parse(recoveredText), fallbackName);
         }
 
         if (parsed.mode !== 'encrypted') {
@@ -2886,29 +2888,14 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             throw new Error('This secure Library file does not contain any encrypted copies.');
         }
 
-        const iterations = Number(parsed?.encryption?.iterations || LIBRARY_SECURE_KDF_ITERATIONS) || LIBRARY_SECURE_KDF_ITERATIONS;
-        const successes = [];
-        let failedCount = 0;
-
-        for (const copy of copies) {
-            try {
-                const decompressedBytes = await decryptLibraryBytes(copy, passphrase, iterations);
-                const recoveredText = await gunzipText(decompressedBytes);
-                successes.push(recoveredText);
-            } catch (_error) {
-                failedCount += 1;
-            }
-        }
-
-        if (!successes.length) {
+        const resolved = typeof actions.resolveSecureLibraryImportRecord === 'function'
+            ? await actions.resolveSecureLibraryImportRecord(parsed, passphrase)
+            : null;
+        const recoveredText = String(resolved?.recoveredText || '');
+        const failedCount = Math.max(0, Number(resolved?.failedCount || 0));
+        if (!recoveredText) {
             throw new Error('Could not decrypt this secure Library file with that key.');
         }
-
-        const recoveredText = successes[0];
-        if (successes.some((entry) => entry !== recoveredText)) {
-            throw new Error('This secure Library file contains mismatched encrypted copies and could not be trusted automatically.');
-        }
-
         const recoveredParsed = JSON.parse(recoveredText);
         const extracted = extractLibraryImportBundle(recoveredParsed, fallbackName);
 
@@ -2940,7 +2927,19 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                         duplicateCopies: Boolean(parsed.duplicateCopies || copies.length > 1)
                     }
                 );
-                downloadJsonFile(repairedPayload, `${stripJsonExtension(parsed.name || fallbackName)} repaired`);
+                const saveResult = await downloadJsonFile(repairedPayload, `${stripJsonExtension(parsed.name || fallbackName)} repaired`, {
+                    title: 'Save Repaired Library Export',
+                    buttonLabel: 'Save JSON',
+                    pretty: false
+                });
+                if (wasSaveCancelled(saveResult)) {
+                    logLibrary('info', 'library.import', `Cancelled repaired secure Library export download for "${parsed.name || fallbackName}".`);
+                } else if (!didSaveFile(saveResult)) {
+                    showAlert(saveResult?.error || 'Could not save the repaired secure Library export.');
+                    logLibrary('warning', 'library.import', saveResult?.error || 'Could not save the repaired secure Library export.');
+                } else {
+                    logLibrary('success', 'library.import', `Saved a repaired secure Library export for "${parsed.name || fallbackName}".`);
+                }
             }
         }
 
@@ -3006,6 +3005,15 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
     }
 
     async function applyImportPackages(importPackages, { allowReplacePrompt = true } = {}) {
+        const emptyImportSummary = {
+            savedCount: 0,
+            updatedCount: 0,
+            skippedDuplicateCount: 0,
+            rejectedCount: 0,
+            importedProjectIds: [],
+            importedIds: [],
+            updatedIds: []
+        };
         const projectEntries = importPackages.flatMap((entry) => entry.projectEntries || []);
         const assetEntries = normalizeImportedAssetEntries(importPackages.flatMap((entry) => entry.assetEntries || []));
         const importedCatalog = normalizeTagList([
@@ -3055,10 +3063,11 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             }
         }
 
+        let projectSummary = emptyImportSummary;
         if (projectEntries.length) {
             showProgress('Preparing Library import...', `${projectEntries.length} project${projectEntries.length === 1 ? '' : 's'}`, 0.02);
             await nextPaint();
-            await actions.processLibraryPayloads(
+            projectSummary = (await actions.processLibraryPayloads(
                 projectEntries.map((entry) => entry.text),
                 projectEntries.map((entry) => entry.name),
                 ({ phase, count = 0, total = projectEntries.length, filename = '' }) => {
@@ -3071,13 +3080,14 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                         showProgress(assetEntries.length ? 'Preparing asset import...' : 'Finalizing Library import...', assetEntries.length ? formatCountLabel(assetEntries.length, 'asset') : `${total} file${total === 1 ? '' : 's'}`, assetEntries.length ? 0.72 : 1);
                     }
                 }
-            );
+            )) || emptyImportSummary;
         }
 
+        let assetSummary = emptyImportSummary;
         if (assetEntries.length) {
             showProgress('Importing Library assets...', `0 of ${assetEntries.length}`, projectEntries.length ? 0.76 : 0.1);
             await nextPaint();
-            await actions.importLibraryAssets?.(assetEntries);
+            assetSummary = (await actions.importLibraryAssets?.(assetEntries)) || emptyImportSummary;
             showProgress('Finalizing asset import...', `${assetEntries.length} of ${assetEntries.length}`, 1);
         }
 
@@ -3090,7 +3100,47 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         }
 
         await refresh();
-        logLibrary('success', 'library.import', `Library import applied ${projectEntries.length} project${projectEntries.length === 1 ? '' : 's'} and ${assetEntries.length} asset${assetEntries.length === 1 ? '' : 's'}.`);
+        const totalSaved = Number(projectSummary.savedCount || 0) + Number(assetSummary.savedCount || 0);
+        const totalUpdated = Number(projectSummary.updatedCount || 0) + Number(assetSummary.updatedCount || 0);
+        const totalSkipped = Number(projectSummary.skippedDuplicateCount || 0) + Number(assetSummary.skippedDuplicateCount || 0);
+        const totalRejected = Number(projectSummary.rejectedCount || 0) + Number(assetSummary.rejectedCount || 0);
+        const visibleProjectIds = new Set(visibleLibraryData.map((item) => item.id));
+        const visibleAssetIds = new Set(visibleAssetData.map((item) => item.id));
+        const hiddenProjectCount = activePageMode === 'library' && activeTagMode !== 'all'
+            ? (projectSummary.importedProjectIds || []).filter((id) => !visibleProjectIds.has(id)).length
+            : 0;
+        const hiddenAssetCount = activePageMode === 'assets' && activeTagMode !== 'all'
+            ? ([...(assetSummary.importedIds || []), ...(assetSummary.updatedIds || [])]).filter((id) => !visibleAssetIds.has(id)).length
+            : 0;
+        const hiddenByFiltersCount = hiddenProjectCount + hiddenAssetCount;
+        const summaryBits = [];
+        if (totalSaved) summaryBits.push(`saved ${totalSaved}`);
+        if (totalUpdated) summaryBits.push(`updated ${totalUpdated}`);
+        if (totalSkipped) summaryBits.push(`skipped ${totalSkipped} duplicate${totalSkipped === 1 ? '' : 's'}`);
+        if (totalRejected) summaryBits.push(`rejected ${totalRejected} invalid item${totalRejected === 1 ? '' : 's'}`);
+        if (hiddenByFiltersCount) summaryBits.push(`${hiddenByFiltersCount} hidden by active filters`);
+        logLibrary(
+            totalRejected || (!totalSaved && !totalUpdated) || hiddenByFiltersCount ? 'warning' : 'success',
+            'library.import',
+            summaryBits.length
+                ? `Library import summary: ${summaryBits.join(', ')}.`
+                : 'Library import completed with no visible changes.'
+        );
+
+        if (!totalSaved && !totalUpdated) {
+            if (totalSkipped && !totalRejected) {
+                showAlert('Import finished without changes because everything in that package was already present in the Library.');
+            } else if (totalRejected && !totalSkipped) {
+                showAlert('Import finished without changes because every imported item was invalid, unsupported, or missing required data.');
+            } else {
+                showAlert('Import finished without changes. The package only contained duplicates or invalid items.');
+            }
+            return;
+        }
+
+        if (hiddenByFiltersCount) {
+            showAlert(`Import completed, but ${hiddenByFiltersCount} imported item${hiddenByFiltersCount === 1 ? '' : 's'} are hidden by the current tag filters on this page.`);
+        }
     }
 
     async function parseAssetFolder(directoryHandle) {
@@ -3432,7 +3482,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             : project.projectType === '3d'
                 ? '3D'
                 : 'Editor';
-        showProgress('Loading Library project...', `Opening in ${targetLabel}`, 0.18);
+        showProgress('Loading Library project...', `Validating "${project.name || 'project'}" and opening it in ${targetLabel}`, 0.18);
         await nextPaint();
         try {
             const loaded = await actions.loadLibraryProject(project.payload, project.id, project.name);
@@ -3689,7 +3739,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             }
 
             if (action === 'download-project') {
-                downloadProject(detailData || getSelectedProject());
+                await downloadProject(detailData || getSelectedProject());
                 return;
             }
 
@@ -3699,7 +3749,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             }
 
             if (action === 'download-asset') {
-                downloadAssetFile(detailData || getSelectedProject());
+                await downloadAssetFile(detailData || getSelectedProject());
                 return;
             }
 

@@ -34,6 +34,31 @@ function downloadTextFile(text, filename) {
     setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function compactEntries(entries = []) {
+    const compacted = [];
+    for (const entry of entries) {
+        const last = compacted[compacted.length - 1];
+        if (
+            last
+            && last.level === entry.level
+            && last.status === entry.status
+            && last.message === entry.message
+        ) {
+            last.count += 1;
+            last.lastTimestamp = entry.timestamp;
+            last.id = entry.id;
+            continue;
+        }
+        compacted.push({
+            ...entry,
+            count: 1,
+            firstTimestamp: entry.timestamp,
+            lastTimestamp: entry.timestamp
+        });
+    }
+    return compacted;
+}
+
 export function createLogsPanel(root, { logger = null } = {}) {
     root.innerHTML = `
         <style data-logs-panel-style>
@@ -69,6 +94,8 @@ export function createLogsPanel(root, { logger = null } = {}) {
             .log-line{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;font-size:11px;line-height:1.35}
             .log-line-time{color:rgba(245,241,232,.46);white-space:nowrap}
             .log-line-text{min-width:0;color:#f5f1e8;word-break:break-word}
+            .log-line-meta{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+            .log-line-repeat{display:inline-flex;align-items:center;justify-content:center;min-height:16px;padding:0 6px;border:1px solid rgba(255,255,255,0.12);background:#171717;color:rgba(245,241,232,.72);font-size:10px;letter-spacing:.04em;text-transform:uppercase}
             .log-line[data-level="warning"] .log-line-text{color:#ffd39a}
             .log-line[data-level="error"] .log-line-text{color:#ffb0b0}
             .log-line[data-level="success"] .log-line-text{color:#aff4c6}
@@ -159,10 +186,20 @@ export function createLogsPanel(root, { logger = null } = {}) {
         }
         refs.grid.innerHTML = processes.map((process) => {
             const progress = process.progress == null ? null : Math.max(0, Math.min(1, Number(process.progress) || 0));
-            const lines = (process.entries || []).slice().reverse().map((entry) => `
+            const compactedEntries = compactEntries(process.entries || []);
+            const lines = compactedEntries.slice().reverse().map((entry) => `
                 <div class="log-line" data-level="${escapeHtml(entry.level || 'info')}">
-                    <span class="log-line-time">${escapeHtml(formatTime(entry.timestamp))}</span>
-                    <span class="log-line-text">${escapeHtml(entry.message || '')}</span>
+                    <span class="log-line-time">${escapeHtml(
+                        entry.count > 1
+                            ? `${formatTime(entry.firstTimestamp)} - ${formatTime(entry.lastTimestamp)}`
+                            : formatTime(entry.firstTimestamp || entry.timestamp)
+                    )}</span>
+                    <span class="log-line-text">
+                        <span class="log-line-meta">
+                            <span>${escapeHtml(entry.message || '')}</span>
+                            ${entry.count > 1 ? `<span class="log-line-repeat">x${escapeHtml(entry.count)}</span>` : ''}
+                        </span>
+                    </span>
                 </div>
             `).join('');
             return `

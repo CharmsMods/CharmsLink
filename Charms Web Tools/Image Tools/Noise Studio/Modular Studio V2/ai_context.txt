@@ -1633,3 +1633,684 @@ Start with:
 6. `src/workers/tasks/three.js`
 7. `src/perf/bootstrapMetrics.js`
 8. `src/ui/bootShell.js`
+
+## 22. Worker hardening and transferable request prep
+
+The shared worker runtime has now been hardened beyond the first bootstrap pass.
+
+### New broker behavior
+
+`src/workers/runtime.js` now supports:
+
+- per-attempt worker request materialization through `options.createRequest`
+- active-task cancellation that restarts the worker process for that domain instead of only posting `cancel`
+- section/domain cancellation through the existing broker API, now used by the UI on workspace switches
+- replay-safe worker request rebuilding, which matters for file-based tasks that transfer `ArrayBuffer` payloads
+
+Important runtime rule:
+
+- if a worker-backed task may transfer ownership of buffers, the task should prepare those buffers through `createRequest` so retries can rebuild them from the original source payload instead of reusing detached buffers
+
+### Worker file payload helper
+
+New file:
+
+- `src/workers/filePayload.js`
+
+This helper centralizes:
+
+- converting `File` / `Blob` inputs into worker-safe `{ name, type, size, lastModified, buffer }` entries
+- building transfer lists for worker dispatch
+- checking cancellation while those request payloads are being prepared on the main thread
+- reviving transferred entries back into `File`-like objects inside worker task handlers
+
+Current use:
+
+- Studio state-file parse
+- Stitch uploaded image preparation
+- 3D model/image/font/HDRI import preparation
+
+This is an input-side optimization/hardening step only.
+
+- worker task outputs for these flows still often resolve to `dataUrl`-based payloads because the current document/library formats still expect them
+- future performance work can reduce output-side `dataUrl` traffic, but this pass mainly makes request dispatch safer and cheaper to retry
+
+### Section-scoped worker ownership now enforced by the UI
+
+`src/main.js` now cancels section-scoped worker jobs when the user leaves:
+
+- `section:editor`
+- `section:stitch`
+- `section:3d`
+
+Current worker-backed UI tasks now opt into scoped replacement:
+
+- Studio state-file parsing uses:
+  - `scope: section:editor`
+  - `replaceKey: section:editor:read-studio-state-file`
+- Stitch file preparation uses:
+  - `scope: section:stitch`
+  - `replaceKey: section:stitch:prepare-input-files`
+- 3D file preparation uses:
+  - `scope: section:3d`
+  - task-specific replace keys for model/image/font/HDRI imports
+
+Meaning:
+
+- switching away from a workspace should stop its in-flight worker prep instead of letting it continue quietly in the background
+- repeating the same import/open action should replace the previous in-flight prep job instead of stacking duplicate work
+
+### Current reliability assumptions
+
+- domain workers are still treated as stateless task executors
+- restarting a worker on active cancellation is currently safe for `app-library`, `editor`, `stitch`, and `three`
+- if a future worker starts holding expensive in-memory state or WASM warm state, cancellation strategy should be re-evaluated per domain before changing this default
+
+### Current main-thread-only boundaries remain
+
+This hardening pass still does **not** move:
+
+- Studio live rendering/export/preview capture
+- Stitch OpenCV photo worker onto the shared broker
+- 3D scene hydration, viewport rendering, or path tracing
+- IndexedDB ownership
+
+### Files to read before the next worker phase
+
+1. `src/workers/runtime.js`
+2. `src/workers/filePayload.js`
+3. `src/main.js`
+4. `src/workers/tasks/editor.js`
+5. `src/workers/tasks/stitch.js`
+6. `src/workers/tasks/three.js`
+
+## 23. Shared worker references and perf observer guard
+
+Two small but important follow-up fixes landed after the worker hardening pass.
+
+### Shared broker references
+
+`backgroundTasks` and `workerCapabilities` now live at module scope in `src/main.js`.
+
+Reason:
+
+- some shared Library/helper functions are also defined at module scope
+- those helpers can run during Library restore/backfill flows for Editor/Stitch/3D projects
+- keeping the worker broker reference only inside the `DOMContentLoaded` closure caused a real `ReferenceError` during certain Library-driven 3D restore paths
+
+Rule going forward:
+
+- any module-scope helper that may use the shared worker broker must only reference the module-scope `backgroundTasks`
+- avoid shadowing those shared worker references inside the bootstrap closure
+
+### Performance observer guard
+
+`src/perf/bootstrapMetrics.js` now checks `PerformanceObserver.supportedEntryTypes` before registering a `longtask` observer.
+
+Reason:
+
+- Firefox/local browser runs may not support `longtask`
+- calling `observe({ entryTypes: ['longtask'] })` in those environments can produce noisy console warnings even when the app still works
+
+Current behavior:
+
+- if `longtask` is supported, bootstrap metrics keep recording long-task entries
+- if `longtask` is not supported, the observer is skipped quietly and the rest of the startup metrics still work
+
+## 24. Persistence parity, shared save contract, and header reliability pass
+
+Tranche 1 now has a concrete persistence foundation for browser and Electron builds.
+
+### Electron desktop bridge
+
+The Electron shell no longer depends only on browser-style anchor downloads when running under `loadFile`.
+
+New desktop bridge pieces:
+
+- `electron-main.js`
+  - now registers IPC handlers for:
+    - `desktop-save-file`
+    - `desktop-show-open-dialog`
+  - now creates the BrowserWindow with:
+    - `preload: path.join(__dirname, 'preload.js')`
+- `preload.js`
+  - exposes `window.desktopBridge`
+  - current bridge shape:
+    - `isElectron`
+    - `platform`
+    - `capabilities`
+    - `saveFile(options)`
+    - `showOpenDialog(options)`
+
+Current Electron capabilities exposed to the renderer:
+
+- save dialog
+- open dialog
+- file writes
+
+Current rule:
+
+- browser builds keep browser-native download behavior
+- Electron builds should prefer the desktop bridge for local saves
+
+### Shared local save/export contract
+
+All primary local save/export flows now use the shared renderer-side service in:
+
+- `src/io/localSave.js`
+
+Current shared result shape:
+
+- `status: 'saved' | 'cancelled' | 'failed'`
+- `source`
+- `fileName`
+- optional `filePath`
+- optional `error`
+
+Current helper exports:
+
+- `saveBlobLocally`
+- `saveTextLocally`
+- `saveJsonLocally`
+- `saveDataUrlLocally`
+- `didSaveFile`
+- `wasSaveCancelled`
+
+Current save-result policy:
+
+- cancelled dialogs are non-errors
+- failed saves should surface a visible error and a log entry
+- success logs may include the resolved desktop path when the Electron bridge returns one
+
+### Save/export paths now routed through the shared contract
+
+Implemented save/export paths:
+
+- Editor PNG export
+- Editor self-contained state JSON save
+- Stitch PNG export
+- Library bundle JSON export
+- Library per-project JSON download
+- Library asset download
+- repaired secure Library export download
+- 3D local scene JSON export
+- 3D final render PNG save
+
+Files to read first for persistence behavior:
+
+1. `preload.js`
+2. `electron-main.js`
+3. `src/io/localSave.js`
+4. `src/io/documents.js`
+5. `src/main.js`
+6. `src/ui/libraryPanel.js`
+7. `src/3d/engine.js`
+8. `src/3d/ui.js`
+
+### Browser vs Electron save behavior
+
+Current default behavior:
+
+- in Electron:
+  - saves open an explicit desktop save dialog through IPC
+  - successful saves return the final path
+- in browser:
+  - saves still use object-URL/download behavior
+  - successful saves do not have a final filesystem path
+
+Current assumption:
+
+- local directory-picking flows are still browser/File System Access based and are not yet part of the Electron bridge pass
+
+### Library export integrity changes
+
+The Library export overflow issue is now addressed by saving large disk exports in compact JSON form instead of pretty-printed JSON.
+
+Current rule:
+
+- Library bundle exports use compact JSON on disk
+- secure/compressed/encrypted Library exports use compact JSON on disk
+- repaired secure export downloads use compact JSON on disk
+- per-project JSON downloads can remain pretty-printed because they are much smaller and easier to inspect
+
+### Library import/refresh diagnosability
+
+Current import behavior improvements:
+
+- duplicate asset skips now produce explicit Library import logs
+- per-file Library import failures now produce explicit warning logs, not only console errors
+- 3D Library project restore now waits for asset backfill instead of kicking it off fire-and-forget
+
+Current consequence:
+
+- loading a 3D Library project should now finish with any missing model/image assets registered into the Assets Library before the load path is considered complete
+
+### 3D reliability changes
+
+3D now has an explicit local scene JSON export path in the main app action layer.
+
+Current action:
+
+- `actions.exportThreeDSceneJson()`
+
+Current UI entry points:
+
+- main 3D panel button: `Save JSON`
+- compact fullscreen mini-bar button: `JSON`
+
+3D render completion events now carry:
+
+- `startedAt`
+- `finishedAt`
+- `durationMs`
+- terminal status including:
+  - `complete`
+  - `cancelled`
+  - `aborted`
+  - `error`
+
+Current render-status behavior:
+
+- successful, cancelled, and aborted terminal messages are temporary and fall back to the normal base status after the timeout
+- render logs now include elapsed time for success, abort, cancel, and error states
+
+3D snapping reliability:
+
+- the engine now prefers `TransformControls.setTranslationSnap(...)`
+- the engine now prefers `TransformControls.setRotationSnap(...)`
+- property fallback remains in place if those methods are unavailable in the current Three build
+
+### Header status surface
+
+The old extra transient notice strip below the toolbar has been removed.
+
+Current behavior:
+
+- the universal section header now includes an inline status surface to the right of the Logs button
+- normal `state.notice` messages render there
+- when Logs is hidden and the Logs button pulses red/green, the same header surface temporarily shows the associated completion/error message
+
+Files to read for this behavior:
+
+- `src/ui/workspaces.js`
+- `style.css`
+
+### Library side panel behavior
+
+The Library side panel now overlays the grid instead of pushing the Library content sideways with extra right padding.
+
+Current visual rule:
+
+- opening the Library tools panel should no longer reflow the Library content area
+
+### Remaining persistence boundaries after this pass
+
+Still not part of the Electron bridge/persistence parity pass:
+
+- folder import/export parity for Electron directory pickers
+- a desktop-native open-file replacement for current hidden file-input flows
+- IndexedDB ownership changes
+- any render-worker or WASM changes
+
+## 25. Shared app dialogs, dual-save persistence, Library import closure, and logs compaction
+
+Tranche 2 adds the next reliability layer on top of the persistence/header work from tranche 1.
+
+### Shared app dialog service
+
+The app now has a shell-level dialog service mounted in:
+
+- `src/ui/workspaces.js`
+
+Current dialog service responsibilities:
+
+- shared confirm dialogs
+- shared text-entry dialogs
+- shared validation/error surface inside the modal
+- consistent cancel/confirm handling in browser and Electron
+
+Current public access path:
+
+- workspace shell exposes:
+  - `requestAppConfirm(options)`
+  - `requestAppText(options)`
+- main action layer mirrors those as:
+  - `actions.requestConfirmDialog(options)`
+  - `actions.requestTextDialog(options)`
+
+Current rule:
+
+- app code should no longer use native `window.confirm(...)` or `window.prompt(...)`
+- any future prompt/confirm flow should route through the shell dialog service
+
+Current flows migrated off native browser dialogs:
+
+- 3D camera preset naming
+- 3D item rename from the custom context menu
+- main app Library save naming / overwrite / replace flows
+- project replacement confirmation flows
+
+### Electron-safe 3D context menu reliability
+
+3D keeps the custom in-app context menu approach instead of switching to native Electron menus.
+
+Current reliability additions in `src/3d/ui.js`:
+
+- canvas and hierarchy `contextmenu` handling still exists
+- right-button `pointerup` fallback also opens the menu
+- `Shift+F10` opens the item context menu for the current selection
+- the Inspector header now includes an explicit `Item Menu` fallback button
+
+Current rule:
+
+- right-click should remain the primary path
+- keyboard and visible-button fallbacks should keep the menu reachable if Electron/browser event behavior is inconsistent
+
+### Dual-save persistence rules
+
+Local save flows can now have an automatic Library side effect after a successful local write.
+
+Current policy:
+
+- local save happens first
+- Library sync only happens after a successful local save
+- cancelled local saves skip the Library side effect
+- if the local save succeeds and the Library sync fails:
+  - the operation is treated as partial success
+  - the user should get a warning notice
+  - logs should record both outcomes
+
+Implemented dual-save paths:
+
+- Editor self-contained state JSON local save
+  - successful local save now attempts a promptless sync into the Editor/Studio Library projects
+- 3D scene JSON local save
+  - successful local save now attempts a promptless sync into the 3D Library projects
+- 3D final render PNG local save
+  - successful local save now attempts a Library asset create/update
+
+Current promptless Library-save rule:
+
+- reuse the active Library origin when present
+- otherwise allow exact-match reuse through the existing `preferExisting` path
+- otherwise create a new entry using the current suggested project name
+
+Current non-goal:
+
+- Stitch does not yet have an equivalent local-state dual-save path in this tranche
+
+### Library import/load trust and summary contract
+
+Library imports now have a stronger verified summary path instead of only best-effort refresh behavior.
+
+Current import summary fields:
+
+- `savedCount`
+- `updatedCount`
+- `skippedDuplicateCount`
+- `rejectedCount`
+
+Current import behavior:
+
+- duplicate projects can be skipped explicitly instead of silently reappearing as no-op work
+- duplicate assets can be skipped explicitly
+- matching source-project assets with changed fingerprints can update existing asset records
+- invalid payloads/assets are counted as rejected and logged
+- Library refresh waits for DB writes, tag writes, derived work, and panel refresh before success notice/reporting
+
+Current user-facing explanations when imports appear to do nothing:
+
+- everything was a duplicate
+- imported files were invalid
+- imported items were written but are hidden by current Library filters
+
+### 3D Library restore completion rule
+
+The 3D project restore path is now tighter about asset backfill completion.
+
+Current rule:
+
+- loading a 3D project from the Library should not report full success until scene-item asset backfill has been attempted as part of the load path
+
+### Logs UI compaction rule
+
+Logs tab rendering in `src/ui/logsPanel.js` now compacts only consecutive identical entries in the UI layer.
+
+Current compaction rule:
+
+- same process card
+- same level
+- same status
+- same message
+- no different entry in between
+
+Current display behavior:
+
+- compacted rows show the first timestamp
+- compacted rows show the last timestamp when repeated
+- compacted rows show a repeat count badge
+
+Current export rule:
+
+- TXT/raw log export remains unchanged and un-compacted
+- card-level totals should still reflect raw process history rather than compacted UI rows
+
+### Files to read first for tranche 2 behavior
+
+1. `src/ui/workspaces.js`
+2. `style.css`
+3. `src/main.js`
+4. `src/3d/ui.js`
+5. `src/3d/engine.js`
+6. `src/ui/libraryPanel.js`
+7. `src/ui/logsPanel.js`
+8. `Plan Files/plans current.md`
+
+## Editor + Library WASM Phase 1
+
+### Scope and boundaries
+
+This tranche adds the first WASM-ready runtime path for the `Editor` and `Library` domains only.
+
+Current non-goals for this tranche:
+
+- no 3D WASM work
+- no new Stitch WASM work beyond the existing OpenCV path
+- no main-thread WASM execution
+- no pthreads / SharedArrayBuffer / cross-origin-isolated WASM threading
+
+### Toolchain and packaging model
+
+Current native source roots:
+
+- `native/editor-wasm/editor_kernels.cpp`
+- `native/library-wasm/library_codec.cpp`
+
+Current build entrypoint:
+
+- `scripts/build-wasm.mjs`
+
+Current package scripts:
+
+- `npm run build:wasm`
+- `npm run build:wasm:editor`
+- `npm run build:wasm:library`
+
+Current expected generated artifact locations:
+
+- `src/vendor/wasm/editor/editor-kernels.mjs`
+- `src/vendor/wasm/editor/editor-kernels.wasm`
+- `src/vendor/wasm/editor/editor-kernels-simd.mjs`
+- `src/vendor/wasm/editor/editor-kernels-simd.wasm`
+- `src/vendor/wasm/library/library-codec.mjs`
+- `src/vendor/wasm/library/library-codec.wasm`
+- `src/vendor/wasm/library/library-codec-simd.mjs`
+- `src/vendor/wasm/library/library-codec-simd.wasm`
+
+Current build flags expected by the repo-owned build script:
+
+- `-O3`
+- `-std=c++17`
+- `-sWASM=1`
+- `-sMODULARIZE=1`
+- `-sEXPORT_ES6=1`
+- `-sALLOW_MEMORY_GROWTH=1`
+- `-sFILESYSTEM=0`
+- `-sENVIRONMENT=web,worker`
+- SIMD variants add `-msimd128`
+
+Current native export policy:
+
+- direct `extern "C"` exports only
+- exported `_malloc` / `_free`
+- no Embind
+
+### Current runtime integration
+
+Worker capability detection now includes:
+
+- `wasm`
+- `wasmSimd`
+
+Current WASM runtime loader files:
+
+- `src/wasm/common.js`
+- `src/wasm/editorRuntime.js`
+- `src/wasm/libraryRuntime.js`
+
+Current runtime behavior:
+
+- worker domains attempt SIMD first when `wasmSimd` is true
+- otherwise worker domains attempt the baseline module
+- if the module cannot be loaded, validated, or initialized, the worker logs the reason and uses the JS fallback path
+- `locateFile` is set so `.wasm` resolves next to its `.mjs` in browser dev servers and Electron `loadFile`
+
+Current important truth in this environment:
+
+- the JS/worker integration is landed
+- the real Editor and Library baseline + SIMD `.mjs` / `.wasm` artifacts have now been built under `src/vendor/wasm/`
+- the placeholder stub modules were overwritten by the generated Emscripten outputs during the local build
+- a local Emscripten SDK is installed under `tools/emsdk`
+- the repo build script was adjusted to work on Windows by invoking Emscripten through `EMSDK_PYTHON` + `emcc.py`, avoiding `.bat` + path-space issues
+
+Current local build status on this machine:
+
+- `tools/emsdk/emsdk.bat install latest` succeeded
+- `tools/emsdk/emsdk.bat activate latest` succeeded
+- `npm run build:wasm` succeeded
+
+Current practical testing rule:
+
+- the app can now exercise the real Editor/Library WASM runtime path on this machine without any additional compiler install steps
+
+### Follow-up fix after first live Library WASM test
+
+The first real secure Library export test exposed a runtime wrapper bug.
+
+Root cause:
+
+- the first generated Emscripten outputs did not export `Module.HEAPU8` / `Module.HEAP32`
+- the Library WASM codec wrapper assumed those heap views already existed
+- that caused a crash during secure export codec setup with `Cannot read properties of undefined (reading 'buffer')`
+
+Fix:
+
+- `scripts/build-wasm.mjs` now compiles with `-sEXPORT_ALL=1`
+- the runtime wrappers now use dynamic heap accessors instead of one-time cached typed-array references
+- the WASM artifacts were rebuilt after that change
+
+### Secure Library export policy change
+
+The encrypted Library export flow no longer asks whether to store duplicate ciphertext copies.
+
+Current rule:
+
+- encrypted Library exports always write a single encrypted copy
+- import logic still tolerates older duplicated-copy exports for backward compatibility
+
+### Library export payload trimming
+
+Library export payloads now strip non-essential preview data to reduce export size and memory pressure.
+
+Current trimmed fields during project export:
+
+- `preview.imageData`
+- `preview.width`
+- `preview.height`
+- `preview.updatedAt`
+- `render.currentSamples`
+- `renderJob`
+
+Current trimmed fields during asset JSON export:
+
+- `previewDataUrl`
+
+Current expectation:
+
+- imported projects/assets can still restore correctly
+- missing previews can be regenerated by the existing Library preview backfill paths
+
+### Editor worker tasks and behavior
+
+New `editor` worker tasks:
+
+- `compute-analysis-visuals`
+- `compute-diff-preview`
+- `extract-palette-from-image`
+
+Current Editor runtime behavior:
+
+- the main-thread Editor engine now routes scope analysis through async worker hooks when the scope canvases are visible
+- the main-thread Editor engine now routes changed-pixels diff preview through an async worker hook
+- both paths cancel stale in-flight work with `AbortController`
+- both paths keep the synchronous JS fallback behavior if workers/WASM fail or are unavailable
+- analysis and diff payload buffers are transferred into the worker request instead of only cloned
+
+Current Editor palette behavior:
+
+- palette extraction now has a shared deterministic JS implementation in `src/editor/palette.js`
+- the `editor` worker task uses that deterministic logic as the fallback path
+- once native artifacts exist, the worker will prefer the WASM palette kernel
+
+Current Editor metrics/logging behavior:
+
+- worker-side analysis, diff, and palette tasks log which backend was used: `simd`, `baseline`, or `js-fallback`
+- task runtime and module init time are included in the returned telemetry payload
+
+### Library worker tasks and behavior
+
+New `app-library` worker tasks:
+
+- `build-secure-library-export-record`
+- `resolve-secure-library-import-record`
+
+Current Library runtime behavior:
+
+- secure export/import heavy payload transforms now route through the `app-library` worker action path
+- browser-native `CompressionStream` / `DecompressionStream` stay in JS
+- browser-native `crypto.subtle` AES-GCM and PBKDF2 stay in JS
+- the codec hook boundary is now ready for WASM-backed base64 encode/decode
+- if the Library WASM runtime is unavailable, the worker keeps using the JS codec path
+
+Current Library UI integration behavior:
+
+- `src/ui/libraryPanel.js` still owns the prompts, notices, repair-download choice, and final file save/import wiring
+- the expensive secure payload build/resolve step now delegates through `actions.buildSecureLibraryExportRecord(...)`
+- secure import recovery now delegates through `actions.resolveSecureLibraryImportRecord(...)`
+
+### Files to read first for this WASM tranche
+
+1. `src/main.js`
+2. `src/engine/pipeline.js`
+3. `src/ui/libraryPanel.js`
+4. `src/editor/backgroundCompute.js`
+5. `src/editor/palette.js`
+6. `src/library/secureTransfer.js`
+7. `src/workers/tasks/editor.js`
+8. `src/workers/tasks/appLibrary.js`
+9. `src/wasm/common.js`
+10. `src/wasm/editorRuntime.js`
+11. `src/wasm/libraryRuntime.js`
+12. `scripts/build-wasm.mjs`
+13. `native/editor-wasm/editor_kernels.cpp`
+14. `native/library-wasm/library_codec.cpp`

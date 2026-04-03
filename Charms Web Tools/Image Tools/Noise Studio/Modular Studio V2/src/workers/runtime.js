@@ -7,6 +7,9 @@ const PRIORITY_ORDER = {
     idle: 3
 };
 
+const DEFAULT_BOOT_TIMEOUT_MS = 12000;
+const MAX_RETIRED_DISPATCH_IDS = 160;
+
 function abortError(message = 'Task cancelled.') {
     const error = new Error(message);
     error.name = 'AbortError';
@@ -36,6 +39,38 @@ function createTaskId() {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function createDispatchId(job) {
+    job.attempt = (job.attempt || 0) + 1;
+    job.dispatchId = `${job.id}:${job.attempt}`;
+    return job.dispatchId;
+}
+
+function matchesScope(job, scope) {
+    if (!scope || !job?.scope) return false;
+    if (job.scope === scope) return true;
+    return job.scope.startsWith(`${scope}:`);
+}
+
+function rememberRetiredDispatch(domainState, dispatchId) {
+    if (!dispatchId) return;
+    domainState.retiredDispatchIds.add(dispatchId);
+    domainState.retiredDispatchOrder.push(dispatchId);
+    if (domainState.retiredDispatchOrder.length > MAX_RETIRED_DISPATCH_IDS) {
+        const staleId = domainState.retiredDispatchOrder.shift();
+        if (staleId) {
+            domainState.retiredDispatchIds.delete(staleId);
+        }
+    }
+}
+
+function workerSupports(domainState, task, capabilities, payload) {
+    return !!domainState.config.workerUrl
+        && capabilities.worker
+        && capabilities.moduleWorker
+        && (typeof domainState.config.supportsTask !== 'function'
+            || domainState.config.supportsTask(task, capabilities, payload));
+}
+
 export function createBackgroundTaskBroker(options = {}) {
     const capabilities = { ...(options.capabilities || {}) };
     const onEvent = typeof options.onEvent === 'function' ? options.onEvent : null;
@@ -52,7 +87,11 @@ export function createBackgroundTaskBroker(options = {}) {
             worker: null,
             workerReady: null,
             handleMessage: null,
-            handleError: null
+            handleError: null,
+            handleMessageError: null,
+            bootTimer: null,
+            retiredDispatchIds: new Set(),
+            retiredDispatchOrder: []
         });
     }
 
@@ -62,6 +101,7 @@ export function createBackgroundTaskBroker(options = {}) {
             domain: domainState.name,
             task: job?.task || event.task || '',
             processId: job?.processId || event.processId || null,
+            scope: job?.scope || null,
             ...event
         });
     }
@@ -70,126 +110,317 @@ export function createBackgroundTaskBroker(options = {}) {
         onTaskMetric?.(metric);
     }
 
-    function finalizeTask(domainState, job) {
-        if (domainState.active?.id === job.id) {
-            domainState.active = null;
-        }
+    function settleJob(job, method, value) {
+        if (!job || job.settled) return false;
+        job.settled = true;
         if (job.abortHandler && job.signal) {
             job.signal.removeEventListener('abort', job.abortHandler);
+        }
+        if (method === 'resolve') job.resolve?.(value);
+        if (method === 'reject') job.reject?.(value);
+        return true;
+    }
+
+    function clearWorkerState(domainState) {
+        if (domainState.bootTimer) {
+            clearTimeout(domainState.bootTimer);
+            domainState.bootTimer = null;
+        }
+        if (domainState.worker && domainState.handleMessage) {
+            domainState.worker.removeEventListener('message', domainState.handleMessage);
+        }
+        if (domainState.worker && domainState.handleError) {
+            domainState.worker.removeEventListener('error', domainState.handleError);
+        }
+        if (domainState.worker && domainState.handleMessageError) {
+            domainState.worker.removeEventListener('messageerror', domainState.handleMessageError);
+        }
+        if (domainState.worker) {
+            try {
+                domainState.worker.terminate();
+            } catch (_error) {
+                // Ignore worker shutdown errors.
+            }
+        }
+        domainState.worker = null;
+        domainState.workerReady = null;
+        domainState.handleMessage = null;
+        domainState.handleError = null;
+        domainState.handleMessageError = null;
+    }
+
+    function queueNext(domainState) {
+        if (domainState.active || !domainState.queue.length) return;
+        const nextJob = domainState.queue.shift();
+        if (!nextJob) return;
+        if (nextJob.cancelled || nextJob.signal?.aborted || nextJob.settled) {
+            settleJob(nextJob, 'reject', abortError());
+            queueNext(domainState);
+            return;
+        }
+        startTask(domainState, nextJob);
+    }
+
+    function finalizeTask(domainState, job) {
+        if (!job) return;
+        rememberRetiredDispatch(domainState, job.dispatchId);
+        if (domainState.active?.id === job.id) {
+            domainState.active = null;
+        } else {
+            domainState.queue = domainState.queue.filter((queuedJob) => queuedJob.id !== job.id);
         }
         queueNext(domainState);
     }
 
-    function resolveActiveJob(domainState, message) {
-        const active = domainState.active;
-        if (active && active.id === message.id) return active;
-        return null;
+    function requeueTaskFront(domainState, job) {
+        if (!job || job.settled) return;
+        rememberRetiredDispatch(domainState, job.dispatchId);
+        job.dispatchId = '';
+        job.startedAt = 0;
+        job.cancelled = false;
+        if (domainState.active?.id === job.id) {
+            domainState.active = null;
+        }
+        domainState.queue.unshift(job);
+        sortQueue(domainState.queue);
+        queueNext(domainState);
+    }
+
+    function retireJob(domainState, job, reason = 'Task cancelled.', options = {}) {
+        if (!job) return false;
+        const wasActive = domainState.active?.id === job.id;
+        job.cancelled = true;
+        rememberRetiredDispatch(domainState, job.dispatchId);
+        if (wasActive) {
+            domainState.active = null;
+        } else {
+            domainState.queue = domainState.queue.filter((queuedJob) => queuedJob.id !== job.id);
+        }
+        if (options.emitEvent !== false) {
+            emitEvent(domainState, job, {
+                type: WORKER_EVENT_TYPES.CANCELLED,
+                id: job.dispatchId || job.id,
+                task: job.task,
+                processId: job.processId || null,
+                message: reason
+            });
+        }
+        const shouldRestartWorker = wasActive
+            && options.restartWorker !== false
+            && !!domainState.worker;
+        if (shouldRestartWorker) {
+            clearWorkerState(domainState);
+        } else if (wasActive && options.sendCancel !== false && domainState.worker && job.dispatchId) {
+            try {
+                domainState.worker.postMessage({
+                    type: WORKER_MESSAGE_TYPES.CANCEL,
+                    id: job.dispatchId
+                });
+            } catch (_error) {
+                // Ignore cancellation-post failures while shutting down a task.
+            }
+        }
+        settleJob(job, 'reject', options.error || abortError(reason));
+        queueNext(domainState);
+        return true;
+    }
+
+    async function createWorkerRequest(job) {
+        const dynamicRequest = typeof job.createRequest === 'function'
+            ? await job.createRequest({
+                id: job.id,
+                task: job.task,
+                payload: job.payload,
+                attempt: job.attempt,
+                processId: job.processId || null,
+                isCancelled() {
+                    return !!job.cancelled || !!job.settled;
+                },
+                assertNotCancelled() {
+                    if (job.cancelled || job.settled) {
+                        throw abortError();
+                    }
+                }
+            })
+            : null;
+        if (job.cancelled || job.settled) {
+            throw abortError();
+        }
+        const hasPayload = !!dynamicRequest && Object.prototype.hasOwnProperty.call(dynamicRequest, 'payload');
+        const dynamicTransfer = Array.isArray(dynamicRequest?.transfer) ? dynamicRequest.transfer : [];
+        return {
+            payload: hasPayload ? dynamicRequest.payload : job.payload,
+            transfer: [...(job.transfer || []), ...dynamicTransfer]
+        };
+    }
+
+    function replayJobAfterWorkerFailure(domainState, job, error) {
+        const replayAllowed = !!job.replayOnWorkerCrash && job.replayCount < job.maxCrashReplays;
+        if (!replayAllowed) {
+            retireJob(domainState, job, error?.message || `Worker "${domainState.name}" failed.`, {
+                error: error || new Error(`Worker "${domainState.name}" failed.`),
+                sendCancel: false
+            });
+            emitMetric({
+                domain: domainState.name,
+                task: job.task,
+                queueWaitMs: job.startedAt ? job.startedAt - job.enqueuedAt : 0,
+                durationMs: job.startedAt ? now() - job.startedAt : 0,
+                mode: 'worker',
+                failed: true
+            });
+            return;
+        }
+
+        job.replayCount += 1;
+        emitEvent(domainState, job, {
+            type: WORKER_EVENT_TYPES.LOG,
+            id: job.dispatchId || job.id,
+            task: job.task,
+            processId: job.processId || null,
+            level: 'warning',
+            message: `Worker "${domainState.name}" failed. Retrying ${job.task} (attempt ${job.replayCount + 1}).`
+        });
+        requeueTaskFront(domainState, job);
+    }
+
+    function handleWorkerFailure(domainState, error, options = {}) {
+        const activeJob = domainState.active;
+        clearWorkerState(domainState);
+        if (options.duringBoot) {
+            throw error;
+        }
+        if (activeJob) {
+            replayJobAfterWorkerFailure(domainState, activeJob, error);
+        }
     }
 
     function ensureWorker(domainState) {
         if (domainState.workerReady) return domainState.workerReady;
-        const { config } = domainState;
-        if (!config.workerUrl || !capabilities.worker || !capabilities.moduleWorker) {
+        if (!domainState.config.workerUrl || !capabilities.worker || !capabilities.moduleWorker) {
             return Promise.resolve(null);
         }
+
+        const bootTimeoutMs = Math.max(1000, Number(domainState.config.bootTimeoutMs) || DEFAULT_BOOT_TIMEOUT_MS);
+
         domainState.workerReady = new Promise((resolve, reject) => {
+            let worker = null;
+            let ready = false;
             try {
-                const worker = new Worker(config.workerUrl, { type: config.type || 'module' });
+                worker = new Worker(domainState.config.workerUrl, { type: domainState.config.type || 'module' });
                 domainState.worker = worker;
-                let ready = false;
+
+                const failBoot = (error) => {
+                    if (ready) return;
+                    clearWorkerState(domainState);
+                    reject(error);
+                };
+
+                domainState.bootTimer = setTimeout(() => {
+                    failBoot(new Error(`Worker "${domainState.name}" did not become ready within ${bootTimeoutMs}ms.`));
+                }, bootTimeoutMs);
 
                 domainState.handleMessage = (event) => {
                     const message = event.data || {};
                     if (!ready && message.type === WORKER_EVENT_TYPES.READY) {
                         ready = true;
+                        if (domainState.bootTimer) {
+                            clearTimeout(domainState.bootTimer);
+                            domainState.bootTimer = null;
+                        }
                         resolve(worker);
                         return;
                     }
 
-                    const job = resolveActiveJob(domainState, message);
-                    if (!job) return;
+                    const activeJob = domainState.active;
+                    if (!activeJob || activeJob.dispatchId !== message.id || domainState.retiredDispatchIds.has(message.id)) {
+                        return;
+                    }
 
                     if (message.type === WORKER_EVENT_TYPES.PROGRESS) {
-                        job.onProgress?.({
+                        activeJob.onProgress?.({
                             progress: message.progress,
                             message: message.message,
                             payload: message.payload,
-                            task: job.task,
+                            task: activeJob.task,
                             domain: domainState.name
                         });
-                        emitEvent(domainState, job, message);
+                        emitEvent(domainState, activeJob, message);
                         return;
                     }
 
                     if (message.type === WORKER_EVENT_TYPES.LOG) {
-                        job.onLog?.(message);
-                        emitEvent(domainState, job, message);
+                        activeJob.onLog?.(message);
+                        emitEvent(domainState, activeJob, message);
                         return;
                     }
 
                     if (message.type === WORKER_EVENT_TYPES.RESULT) {
                         emitMetric({
                             domain: domainState.name,
-                            task: job.task,
-                            queueWaitMs: job.startedAt - job.enqueuedAt,
-                            durationMs: now() - job.startedAt,
+                            task: activeJob.task,
+                            queueWaitMs: activeJob.startedAt - activeJob.enqueuedAt,
+                            durationMs: now() - activeJob.startedAt,
                             mode: 'worker'
                         });
-                        finalizeTask(domainState, job);
-                        job.resolve(message.payload);
+                        finalizeTask(domainState, activeJob);
+                        settleJob(activeJob, 'resolve', message.payload);
                         return;
                     }
 
                     if (message.type === WORKER_EVENT_TYPES.CANCELLED) {
-                        finalizeTask(domainState, job);
-                        job.reject(abortError());
+                        finalizeTask(domainState, activeJob);
+                        settleJob(activeJob, 'reject', abortError(message.message || 'Task cancelled.'));
                         return;
                     }
 
                     if (message.type === WORKER_EVENT_TYPES.ERROR) {
                         emitMetric({
                             domain: domainState.name,
-                            task: job.task,
-                            queueWaitMs: job.startedAt - job.enqueuedAt,
-                            durationMs: now() - job.startedAt,
+                            task: activeJob.task,
+                            queueWaitMs: activeJob.startedAt - activeJob.enqueuedAt,
+                            durationMs: now() - activeJob.startedAt,
                             mode: 'worker',
                             failed: true
                         });
-                        finalizeTask(domainState, job);
-                        job.reject(new Error(message.error || `Worker task "${job.task}" failed.`));
+                        finalizeTask(domainState, activeJob);
+                        settleJob(activeJob, 'reject', new Error(message.error || `Worker task "${activeJob.task}" failed.`));
                     }
                 };
 
                 domainState.handleError = (event) => {
+                    const error = event?.error || new Error(`Worker "${domainState.name}" failed.`);
                     if (!ready) {
-                        reject(event?.error || new Error(`Worker "${domainState.name}" failed to start.`));
-                    } else if (domainState.active) {
-                        const job = domainState.active;
-                        finalizeTask(domainState, job);
-                        job.reject(event?.error || new Error(`Worker "${domainState.name}" failed.`));
+                        failBoot(error);
+                        return;
                     }
+                    handleWorkerFailure(domainState, error);
+                };
+
+                domainState.handleMessageError = () => {
+                    const error = new Error(`Worker "${domainState.name}" sent an unreadable message.`);
+                    if (!ready) {
+                        failBoot(error);
+                        return;
+                    }
+                    handleWorkerFailure(domainState, error);
                 };
 
                 worker.addEventListener('message', domainState.handleMessage);
                 worker.addEventListener('error', domainState.handleError);
+                worker.addEventListener('messageerror', domainState.handleMessageError);
                 worker.postMessage({
                     type: WORKER_MESSAGE_TYPES.INIT,
                     domain: domainState.name,
                     capabilities
                 });
             } catch (error) {
+                clearWorkerState(domainState);
                 reject(error);
             }
         }).catch((error) => {
+            clearWorkerState(domainState);
             domainState.workerReady = null;
-            if (domainState.worker) {
-                try {
-                    domainState.worker.terminate();
-                } catch (_error) {
-                    // Ignore cleanup failures.
-                }
-            }
-            domainState.worker = null;
             throw error;
         });
 
@@ -202,7 +433,7 @@ export function createBackgroundTaskBroker(options = {}) {
             throw new Error(`No fallback handler is registered for ${domainState.name}:${job.task}.`);
         }
         const context = {
-            id: job.id,
+            id: job.dispatchId || job.id,
             domain: domainState.name,
             task: job.task,
             processId: job.processId,
@@ -211,12 +442,13 @@ export function createBackgroundTaskBroker(options = {}) {
                 return !!job.cancelled;
             },
             assertNotCancelled() {
-                if (job.cancelled) throw abortError();
+                if (job.cancelled || job.settled) throw abortError();
             },
             progress(progress, message = '', payload = null) {
-                if (job.cancelled) return;
+                if (job.cancelled || job.settled) return;
                 const event = {
                     type: WORKER_EVENT_TYPES.PROGRESS,
+                    id: job.dispatchId || job.id,
                     progress,
                     message,
                     payload
@@ -231,9 +463,10 @@ export function createBackgroundTaskBroker(options = {}) {
                 emitEvent(domainState, job, event);
             },
             log(level, message, payload = null) {
-                if (job.cancelled) return;
+                if (job.cancelled || job.settled) return;
                 const event = {
                     type: WORKER_EVENT_TYPES.LOG,
+                    id: job.dispatchId || job.id,
                     level,
                     message,
                     payload
@@ -248,15 +481,14 @@ export function createBackgroundTaskBroker(options = {}) {
     async function startTask(domainState, job) {
         domainState.active = job;
         job.startedAt = now();
-        const useWorker = !!domainState.config.workerUrl
-            && capabilities.worker
-            && capabilities.moduleWorker
-            && (typeof domainState.config.supportsTask !== 'function'
-                || domainState.config.supportsTask(job.task, capabilities, job.payload));
+        createDispatchId(job);
+
+        const useWorker = workerSupports(domainState, job.task, capabilities, job.payload);
 
         if (!useWorker) {
             try {
                 const result = await runFallback(domainState, job);
+                if (job.settled || job.cancelled) return;
                 emitMetric({
                     domain: domainState.name,
                     task: job.task,
@@ -265,10 +497,11 @@ export function createBackgroundTaskBroker(options = {}) {
                     mode: 'fallback'
                 });
                 finalizeTask(domainState, job);
-                job.resolve(result);
+                settleJob(job, 'resolve', result);
             } catch (error) {
+                if (job.settled) return;
                 finalizeTask(domainState, job);
-                job.reject(error);
+                settleJob(job, 'reject', error);
             }
             return;
         }
@@ -277,20 +510,25 @@ export function createBackgroundTaskBroker(options = {}) {
             await ensureWorker(domainState);
             if (!domainState.worker) {
                 const result = await runFallback(domainState, job);
+                if (job.settled || job.cancelled) return;
                 finalizeTask(domainState, job);
-                job.resolve(result);
+                settleJob(job, 'resolve', result);
                 return;
             }
+            const request = await createWorkerRequest(job);
+            if (job.settled || job.cancelled) return;
             domainState.worker.postMessage({
                 type: WORKER_MESSAGE_TYPES.RUN,
-                id: job.id,
+                id: job.dispatchId,
                 task: job.task,
                 processId: job.processId || null,
-                payload: job.payload
-            }, job.transfer || []);
+                payload: request.payload
+            }, request.transfer);
         } catch (_error) {
+            if (job.settled) return;
             try {
                 const result = await runFallback(domainState, job);
+                if (job.settled || job.cancelled) return;
                 emitMetric({
                     domain: domainState.name,
                     task: job.task,
@@ -299,24 +537,13 @@ export function createBackgroundTaskBroker(options = {}) {
                     mode: 'fallback'
                 });
                 finalizeTask(domainState, job);
-                job.resolve(result);
+                settleJob(job, 'resolve', result);
             } catch (fallbackError) {
+                if (job.settled) return;
                 finalizeTask(domainState, job);
-                job.reject(fallbackError);
+                settleJob(job, 'reject', fallbackError);
             }
         }
-    }
-
-    function queueNext(domainState) {
-        if (domainState.active || !domainState.queue.length) return;
-        const nextJob = domainState.queue.shift();
-        if (!nextJob) return;
-        if (nextJob.cancelled || nextJob.signal?.aborted) {
-            nextJob.reject(abortError());
-            queueNext(domainState);
-            return;
-        }
-        startTask(domainState, nextJob);
     }
 
     function runTask(domain, task, payload, options = {}) {
@@ -327,18 +554,27 @@ export function createBackgroundTaskBroker(options = {}) {
 
         const job = {
             id: createTaskId(),
+            dispatchId: '',
             task,
             payload,
             transfer: options.transfer || [],
             priority: options.priority || 'background',
             processId: options.processId || null,
+            scope: options.scope ? String(options.scope) : '',
             onProgress: typeof options.onProgress === 'function' ? options.onProgress : null,
             onLog: typeof options.onLog === 'function' ? options.onLog : null,
             signal: options.signal || null,
             replaceKey: options.replaceKey ? String(options.replaceKey) : '',
+            replaceActive: options.replaceActive !== false,
+            replayOnWorkerCrash: options.replayOnWorkerCrash !== false,
+            createRequest: typeof options.createRequest === 'function' ? options.createRequest : null,
+            maxCrashReplays: Math.max(0, Number(options.maxCrashReplays) || 1),
+            attempt: 0,
+            replayCount: 0,
             enqueuedAt: now(),
             startedAt: 0,
             cancelled: false,
+            settled: false,
             abortHandler: null,
             resolve: null,
             reject: null
@@ -356,24 +592,19 @@ export function createBackgroundTaskBroker(options = {}) {
             if (job.replaceKey) {
                 domainState.queue = domainState.queue.filter((queuedJob) => {
                     if (queuedJob.replaceKey !== job.replaceKey) return true;
-                    queuedJob.cancelled = true;
-                    queuedJob.reject(abortError('Replaced by a newer task.'));
+                    retireJob(domainState, queuedJob, 'Replaced by a newer queued task.', {
+                        sendCancel: false
+                    });
                     return false;
                 });
+                if (job.replaceActive && domainState.active?.replaceKey === job.replaceKey) {
+                    retireJob(domainState, domainState.active, 'Replaced by a newer active task.');
+                }
             }
 
             if (job.signal) {
                 job.abortHandler = () => {
-                    job.cancelled = true;
-                    if (domainState.active?.id === job.id && domainState.worker) {
-                        domainState.worker.postMessage({
-                            type: WORKER_MESSAGE_TYPES.CANCEL,
-                            id: job.id
-                        });
-                    } else {
-                        domainState.queue = domainState.queue.filter((queuedJob) => queuedJob.id !== job.id);
-                        reject(abortError());
-                    }
+                    retireJob(domainState, job, 'Task aborted by caller.');
                 };
                 job.signal.addEventListener('abort', job.abortHandler, { once: true });
             }
@@ -384,28 +615,53 @@ export function createBackgroundTaskBroker(options = {}) {
         });
     }
 
+    function cancelTasks(options = {}) {
+        const scope = options.scope ? String(options.scope) : '';
+        const domain = options.domain ? String(options.domain) : '';
+        const reason = options.reason || 'Task cancelled.';
+        const includeActive = options.includeActive !== false;
+
+        domains.forEach((domainState) => {
+            if (domain && domainState.name !== domain) return;
+            domainState.queue.slice().forEach((job) => {
+                if (scope && !matchesScope(job, scope)) return;
+                retireJob(domainState, job, reason, { sendCancel: false });
+            });
+            if (includeActive && domainState.active) {
+                if (scope && !matchesScope(domainState.active, scope)) return;
+                retireJob(domainState, domainState.active, reason);
+            }
+        });
+    }
+
     function destroy() {
         domains.forEach((domainState) => {
-            domainState.queue.splice(0).forEach((job) => job.reject(abortError('Broker shut down.')));
+            domainState.queue.slice().forEach((job) => {
+                retireJob(domainState, job, 'Broker shut down.', { sendCancel: false });
+            });
             if (domainState.active) {
-                domainState.active.reject(abortError('Broker shut down.'));
-                domainState.active = null;
+                retireJob(domainState, domainState.active, 'Broker shut down.');
             }
-            if (domainState.worker) {
-                try {
-                    domainState.worker.terminate();
-                } catch (_error) {
-                    // Ignore worker shutdown errors.
-                }
-            }
-            domainState.worker = null;
-            domainState.workerReady = null;
+            clearWorkerState(domainState);
         });
     }
 
     return {
         registerDomain,
         runTask,
+        cancelTasks,
+        cancelScope(scope, options = {}) {
+            cancelTasks({
+                ...options,
+                scope
+            });
+        },
+        cancelDomain(domain, options = {}) {
+            cancelTasks({
+                ...options,
+                domain
+            });
+        },
         destroy,
         getCapabilities() {
             return { ...capabilities };

@@ -8,8 +8,12 @@ export function createBootstrapMetrics(options = {}) {
     const workerTasks = [];
     const onLongTask = typeof options.onLongTask === 'function' ? options.onLongTask : null;
     let longTaskObserver = null;
+    const supportedEntryTypes = typeof PerformanceObserver === 'function' && Array.isArray(PerformanceObserver.supportedEntryTypes)
+        ? PerformanceObserver.supportedEntryTypes
+        : [];
+    const supportsLongTask = supportedEntryTypes.includes('longtask');
 
-    if (typeof PerformanceObserver === 'function') {
+    if (typeof PerformanceObserver === 'function' && supportsLongTask) {
         try {
             longTaskObserver = new PerformanceObserver((list) => {
                 list.getEntries().forEach((entry) => {
