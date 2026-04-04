@@ -7,6 +7,7 @@ import { createThreeDWorkspace } from '../3d/ui.js';
 import { createLogsPanel } from './logsPanel.js';
 import { createSettingsPanel } from './settingsPanel.js';
 import { createProgressOverlayController } from './progressOverlay.js';
+import { getCropTransformMetrics } from '../engine/cropTransformShared.js';
 
 const GROUP_LABELS = {
     base: 'Base',
@@ -102,6 +103,10 @@ function computeResolutionThroughInstance(state, stopInstanceId = null) {
                 const padding = Math.max(0, Math.round(Number(stackItem.params.expanderPadding || 0)));
                 width += padding * 2;
                 height += padding * 2;
+            } else if (stackItem.layerId === 'cropTransform') {
+                const cropMetrics = getCropTransformMetrics(stackItem.params, width, height);
+                width = cropMetrics.outputWidth;
+                height = cropMetrics.outputHeight;
             }
         }
 
@@ -444,9 +449,19 @@ function layerHasControlKey(layerDef, key) {
 }
 
 function renderControl(instance, control, state, layerDef) {
+    const presentedControl = getControlPresentation(instance, control, layerDef);
     switch (control.type) {
         case 'range':
-            return rangeRow(instance, control.key, control.label, control.min ?? 0, control.max ?? 100, control.step ?? 1, control.default ?? control.min ?? 0, control.hidden);
+            return rangeRow(
+                instance,
+                presentedControl.key,
+                presentedControl.label,
+                presentedControl.min ?? 0,
+                presentedControl.max ?? 100,
+                presentedControl.step ?? 1,
+                presentedControl.default ?? presentedControl.min ?? 0,
+                presentedControl.hidden
+            );
         case 'select': {
             const value = String(instance.params[control.key] ?? control.options?.find((option) => option.selected)?.value ?? control.options?.[0]?.value ?? '');
             return `
@@ -466,6 +481,9 @@ function renderControl(instance, control, state, layerDef) {
             if (control.dynamic === 'resolution') {
                 const { width, height } = computeResolutionThroughInstance(state, instance.instanceId);
                 return `<div class="info-banner is-data"><span>${control.text}</span><strong>${width} x ${height}</strong></div>`;
+            }
+            if (layerDef.layerId === 'noise' && control.text === 'Advanced Settings' && !hasVisibleNoiseAdvancedControls(instance, layerDef)) {
+                return '';
             }
             return `<div class="info-banner ${control.tone === 'section' ? 'is-section' : ''}">${control.text || layerDef.description}</div>`;
         case 'separator':
@@ -814,15 +832,110 @@ function renderSectionTabs(state, headerStatus = null) {
 
 function buildWheelColor(surface, clientX, clientY) {
     const rect = surface.getBoundingClientRect();
-    const radius = Math.min(rect.width, rect.height) / 2;
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
-    const dx = clientX - centerX;
-    const dy = clientY - centerY;
+    return buildWheelColorFromOffset(surface, clientX - centerX, clientY - centerY);
+}
+
+const GRADE_WHEEL_DRAG_DIVISOR = 3;
+
+function buildWheelColorFromOffset(surface, dx, dy) {
+    const rect = surface.getBoundingClientRect();
+    const radius = Math.min(rect.width, rect.height) / 2;
     const distance = Math.min(Math.hypot(dx, dy), radius);
     const saturation = clamp(distance / radius, 0, 1);
     const hue = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
     return hsvToHex(hue, saturation, 1);
+}
+
+function getWheelOffsetFromHex(surface, hex) {
+    const rect = surface.getBoundingClientRect();
+    const radius = Math.min(rect.width, rect.height) / 2;
+    const rgb = hexToRgb(hex || '#ffffff');
+    const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+    const angle = (hsv.h * Math.PI) / 180;
+    const distance = clamp(hsv.s, 0, 1) * radius;
+    return {
+        x: Math.cos(angle) * distance,
+        y: Math.sin(angle) * distance
+    };
+}
+
+const NOISE_ADVANCED_CONTROL_KEYS = new Set(['noiseParamA', 'noiseParamB', 'noiseParamC']);
+
+const NOISE_ADVANCED_PRESENTATIONS = {
+    '5': {
+        noiseParamA: { label: 'Detail Layers' },
+        noiseParamB: { label: 'Cloud Scale' },
+        noiseParamC: { label: 'Roughness' }
+    },
+    '6': {
+        noiseParamA: { label: 'Cell Jitter' },
+        noiseParamB: { label: 'Cell Density' },
+        noiseParamC: { label: 'Distance Blend' }
+    },
+    '7': {
+        noiseParamA: { label: 'Line Thickness' },
+        noiseParamB: { label: 'Vertical Jitter' },
+        noiseParamC: { label: 'Grain Mix' }
+    },
+    '8': {
+        noiseParamA: { label: 'Speck Density' },
+        noiseParamB: { label: 'Edge Softness' },
+        noiseParamC: { label: 'Size Variation' }
+    },
+    '9': {
+        noiseParamA: { label: 'Block Height' },
+        noiseParamB: { label: 'Horizontal Shift' },
+        noiseParamC: { label: 'RGB Split' }
+    },
+    '10': {
+        noiseParamA: { label: 'Fiber Stretch' },
+        noiseParamB: { label: 'Rotation' },
+        noiseParamC: { label: 'Variation' }
+    },
+    '11': {
+        noiseParamA: { label: 'Cell Scale' },
+        noiseParamB: { label: 'Point Jitter' },
+        noiseParamC: { label: 'Color Mix' }
+    },
+    '12': {
+        noiseParamA: { label: 'Line Density' },
+        noiseParamB: { label: 'Angle' },
+        noiseParamC: { label: 'Variation' }
+    }
+};
+
+function getNoiseAdvancedPresentation(instance, control, layerDef) {
+    if (layerDef?.layerId !== 'noise' || !NOISE_ADVANCED_CONTROL_KEYS.has(control?.key)) {
+        return null;
+    }
+    const noiseType = String(instance?.params?.noiseType ?? '');
+    return NOISE_ADVANCED_PRESENTATIONS[noiseType]?.[control.key] || null;
+}
+
+function hasVisibleNoiseAdvancedControls(instance, layerDef) {
+    if (layerDef?.layerId !== 'noise') return false;
+    const noiseType = String(instance?.params?.noiseType ?? '');
+    return Boolean(NOISE_ADVANCED_PRESENTATIONS[noiseType]);
+}
+
+function getControlPresentation(instance, control, layerDef) {
+    const noisePresentation = getNoiseAdvancedPresentation(instance, control, layerDef);
+    if (!noisePresentation) {
+        if (layerDef?.layerId === 'noise' && NOISE_ADVANCED_CONTROL_KEYS.has(control?.key)) {
+            return {
+                ...control,
+                hidden: true
+            };
+        }
+        return control;
+    }
+    return {
+        ...control,
+        ...noisePresentation,
+        hidden: false
+    };
 }
 
 export function createWorkspaceUI(root, registry, actions, extras = {}) {
@@ -1450,7 +1563,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         const selector = `.grade-wheel-surface[data-wheel-instance="${wheelDrag.instanceId}"][data-wheel-key="${wheelDrag.key}"]`;
         const surface = root.querySelector(selector);
         if (!surface) return;
-        queueWheelUpdate(wheelDrag.instanceId, wheelDrag.key, buildWheelColor(surface, clientX, clientY));
+        const offsetX = wheelDrag.startOffsetX + ((clientX - wheelDrag.originX) / GRADE_WHEEL_DRAG_DIVISOR);
+        const offsetY = wheelDrag.startOffsetY + ((clientY - wheelDrag.originY) / GRADE_WHEEL_DRAG_DIVISOR);
+        queueWheelUpdate(wheelDrag.instanceId, wheelDrag.key, buildWheelColorFromOffset(surface, offsetX, offsetY));
     }
 
     function updateBgPatchDrag(clientX, clientY) {
@@ -1714,12 +1829,19 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     root.addEventListener('pointerdown', (event) => {
         const surface = event.target.closest('.grade-wheel-surface');
         if (!surface) return;
+        if (typeof event.button === 'number' && event.button !== 0) return;
         event.preventDefault();
+        const clickedColor = buildWheelColor(surface, event.clientX, event.clientY);
+        const clickedOffset = getWheelOffsetFromHex(surface, clickedColor);
         wheelDrag = {
             instanceId: surface.dataset.wheelInstance,
-            key: surface.dataset.wheelKey
+            key: surface.dataset.wheelKey,
+            originX: event.clientX,
+            originY: event.clientY,
+            startOffsetX: clickedOffset.x,
+            startOffsetY: clickedOffset.y
         };
-        updateWheelFromPointer(event.clientX, event.clientY);
+        queueWheelUpdate(wheelDrag.instanceId, wheelDrag.key, clickedColor);
     });
     refs.previewScaleWrap.addEventListener('pointerdown', (event) => {
         const liveState = getLiveState();
@@ -2097,12 +2219,16 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         },
         primeLibrary() {
             libraryPanel.refresh({ forceInactive: true });
+            threedPanel.refreshLibraryAssets?.();
         },
         openStitchPicker() {
             stitchPanel.openPicker?.();
         },
         captureThreeDPreview() {
             return threedPanel.capturePreview?.();
+        },
+        captureThreeDViewportPng() {
+            return threedPanel.captureViewportPng?.();
         },
         clientToImageUv(clientX, clientY) {
             return clientToImageUv(clientX, clientY, refs.previewScaleWrap.getBoundingClientRect());

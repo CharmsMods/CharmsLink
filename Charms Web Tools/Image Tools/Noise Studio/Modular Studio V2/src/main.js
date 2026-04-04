@@ -5573,6 +5573,61 @@ window.addEventListener('DOMContentLoaded', async () => {
                 };
             }
         },
+        async exportThreeDViewportPng() {
+            if (isThreeDRenderJobActive()) {
+                logProcess('warning', '3d.export', 'Blocked viewport PNG save because a final 3D render is still active.');
+                setNotice('Abort the active 3D render before saving the current viewport PNG.', 'warning', 6000);
+                return null;
+            }
+            const documentState = store.getState().threeDDocument;
+            const baseName = stripProjectExtension(getSuggestedThreeDProjectName(documentState) || '3d-scene') || '3d-scene';
+            const fileName = `${baseName}-viewport.png`;
+            await showWorkspaceProgress('3d', {
+                title: 'Saving Viewport PNG',
+                message: 'Capturing the current 3D viewport...',
+                progress: 0.22
+            });
+            logProcess('active', '3d.export', `Capturing the current 3D viewport for "${fileName}".`);
+            try {
+                const capture = await view?.captureThreeDViewportPng?.();
+                if (!(capture?.blob instanceof Blob)) {
+                    throw new Error('Could not capture the current 3D viewport.');
+                }
+                setThreeDProgress({
+                    active: true,
+                    title: 'Saving Viewport PNG',
+                    message: `Writing "${fileName}"...`,
+                    progress: 0.88
+                });
+                const saveResult = await actions.persistThreeDRenderSave(capture.blob, fileName, {
+                    documentState,
+                    width: capture.width,
+                    height: capture.height
+                });
+                clearWorkspaceProgress('3d');
+                if (wasSaveCancelled(saveResult)) {
+                    logProcess('info', '3d.export', 'Cancelled the current 3D viewport PNG save dialog.');
+                    setNotice('Viewport PNG save cancelled.', 'info', 4200);
+                    return null;
+                }
+                if (!didSaveFile(saveResult)) {
+                    throw new Error(saveResult?.error || 'Could not save the current 3D viewport PNG.');
+                }
+                if (saveResult.libraryStatus === 'failed') {
+                    logProcess('warning', '3d.export', `Saved the current 3D viewport PNG locally${describeSavedLocation(saveResult)}, but could not update the Assets Library.`);
+                    setNotice('Viewport PNG saved locally, but the Assets Library copy could not be updated.', 'warning', 7000);
+                    return saveResult;
+                }
+                logProcess('success', '3d.export', `Saved the current 3D viewport PNG${describeSavedLocation(saveResult)}.`);
+                setNotice('Viewport PNG saved.', 'success');
+                return saveResult;
+            } catch (error) {
+                clearWorkspaceProgress('3d');
+                logProcess('error', '3d.export', error?.message || 'Could not save the current 3D viewport PNG.');
+                setNotice(error?.message || 'Could not save the current 3D viewport PNG.', 'error', 7000);
+                return null;
+            }
+        },
         async exportThreeDSceneJson() {
             if (isThreeDRenderJobActive()) {
                 logProcess('warning', '3d.export', 'Blocked 3D scene JSON save because a render is still active.');

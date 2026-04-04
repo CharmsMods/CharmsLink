@@ -10,7 +10,7 @@ export function createDefaultAppSettings() {
             maxBackgroundWorkers: 0
         },
         library: {
-            autoLoadOnStartup: false,
+            autoLoadOnStartup: true,
             storagePressureThreshold: 0.8,
             defaultViewLayout: 'grid',
             defaultSortKey: 'timestamp',

@@ -3,6 +3,7 @@ import { renderLayer, renderMaskPreview, renderPreviewTexture } from './executor
 import { updateHistogram, updateVectorscope, updateParade } from '../analysis/scopes.js';
 import { hasRenderableLayers } from '../state/documentHelpers.js';
 import { getLayerPreviewViews } from './layerPreviewProviders.js';
+import { applyCropTransformToPlacement, getCropTransformMetrics } from './cropTransformShared.js';
 
 function createTexture(gl, source, width, height, highPrecision = false) {
     const texture = gl.createTexture();
@@ -343,6 +344,13 @@ export class NoiseStudioEngine {
                     };
                     currentWidth = Math.max(1, Math.round(currentWidthFloat));
                     currentHeight = Math.max(1, Math.round(currentHeightFloat));
+                } else if (instance.layerId === 'cropTransform') {
+                    const cropMetrics = getCropTransformMetrics(instance.params, currentWidthFloat, currentHeightFloat);
+                    sourcePlacement = applyCropTransformToPlacement(sourcePlacement, cropMetrics);
+                    currentWidthFloat = cropMetrics.cropWidthFloat;
+                    currentHeightFloat = cropMetrics.cropHeightFloat;
+                    currentWidth = cropMetrics.outputWidth;
+                    currentHeight = cropMetrics.outputHeight;
                 }
                 this.runtime.layerResolutions[instance.instanceId] = { w: currentWidth, h: currentHeight };
                 this.runtime.layerLayouts[instance.instanceId] = {
@@ -710,6 +718,14 @@ export class NoiseStudioEngine {
                 } else if (selectedCanvasPlacement && layerDef.layerId === 'expander') {
                     selectedCanvasPlacement.x += Math.max(0, (resolution.w - inputResolution.w) * 0.5);
                     selectedCanvasPlacement.y += Math.max(0, (resolution.h - inputResolution.h) * 0.5);
+                } else if (selectedCanvasPlacement && layerDef.layerId === 'cropTransform') {
+                    const cropMetrics = getCropTransformMetrics(instance.params, inputResolution.w, inputResolution.h);
+                    const scaleX = resolution.w / Math.max(1, cropMetrics.cropWidthFloat);
+                    const scaleY = resolution.h / Math.max(1, cropMetrics.cropHeightFloat);
+                    selectedCanvasPlacement.x = (selectedCanvasPlacement.x - cropMetrics.leftPx) * scaleX;
+                    selectedCanvasPlacement.y = (selectedCanvasPlacement.y - cropMetrics.topPx) * scaleY;
+                    selectedCanvasPlacement.w *= scaleX;
+                    selectedCanvasPlacement.h *= scaleY;
                 }
             }
             currentResolution = { w: resolution.w, h: resolution.h };
@@ -1294,6 +1310,14 @@ export class NoiseStudioEngine {
                 } else if (layerDef.layerId === 'expander') {
                     inputCanvasPlacement.x += Math.max(0, (resolution.w - stageResolution.w) * 0.5);
                     inputCanvasPlacement.y += Math.max(0, (resolution.h - stageResolution.h) * 0.5);
+                } else if (layerDef.layerId === 'cropTransform') {
+                    const cropMetrics = getCropTransformMetrics(instance.params, stageResolution.w, stageResolution.h);
+                    const scaleX = resolution.w / Math.max(1, cropMetrics.cropWidthFloat);
+                    const scaleY = resolution.h / Math.max(1, cropMetrics.cropHeightFloat);
+                    inputCanvasPlacement.x = (inputCanvasPlacement.x - cropMetrics.leftPx) * scaleX;
+                    inputCanvasPlacement.y = (inputCanvasPlacement.y - cropMetrics.topPx) * scaleY;
+                    inputCanvasPlacement.w *= scaleX;
+                    inputCanvasPlacement.h *= scaleY;
                 }
             }
 

@@ -808,6 +808,13 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 <div class="library-progress-bar">
                     <div class="library-progress-fill"></div>
                 </div>
+                <div class="library-loading-log-shell">
+                    <div class="library-loading-log-head">
+                        <span>Live Library Log</span>
+                        <span>Same feed as Logs</span>
+                    </div>
+                    <div class="library-loading-log-lines" data-library-role="loading-log-lines"></div>
+                </div>
             </div>
             <div class="library-modal-overlay">
                 <div class="library-modal-box">
@@ -885,6 +892,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         statusText: root.querySelector('.library-status-text'),
         countText: root.querySelector('.library-count-text'),
         progressFill: root.querySelector('.library-progress-fill'),
+        loadingLogLines: root.querySelector('[data-library-role="loading-log-lines"]'),
         modalOverlay: root.querySelector('.library-modal-overlay'),
         modalBox: root.querySelector('.library-modal-box'),
         modalTitle: root.querySelector('.library-modal-title'),
@@ -973,6 +981,47 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             ? logger[level].bind(logger)
             : logger.info.bind(logger);
         method(processId, label, message, progressOrOptions);
+    }
+
+    function formatLoadingOverlayTime(timestamp) {
+        if (!timestamp) return '--:--:--';
+        try {
+            return new Date(timestamp).toLocaleTimeString();
+        } catch (_error) {
+            return '--:--:--';
+        }
+    }
+
+    function collectLoadingOverlayLogs(limit = 6) {
+        if (typeof logger?.getSnapshot !== 'function') return [];
+        return logger.getSnapshot()
+            .filter((process) => String(process?.id || '').startsWith('library.'))
+            .flatMap((process) => (process.entries || []).map((entry) => ({
+                ...entry,
+                processLabel: process.label || 'Library'
+            })))
+            .sort((a, b) => Number(a.timestamp || 0) - Number(b.timestamp || 0))
+            .slice(-Math.max(1, Number(limit) || 6));
+    }
+
+    function renderLoadingOverlayLogs() {
+        if (!refs.loadingLogLines) return;
+        const lines = collectLoadingOverlayLogs(6);
+        refs.loadingLogLines.innerHTML = lines.length
+            ? lines.map((entry) => `
+                <div class="library-loading-log-line" data-level="${escapeHtml(entry.level || 'info')}">
+                    <span class="library-loading-log-time">${escapeHtml(formatLoadingOverlayTime(entry.timestamp))}</span>
+                    <span class="library-loading-log-text">${escapeHtml(`${entry.processLabel}: ${entry.message || 'Status updated.'}`)}</span>
+                </div>
+            `).join('')
+            : '<div class="library-loading-log-empty">Library activity details will appear here while the overlay is active.</div>';
+    }
+
+    if (typeof logger?.subscribeEvents === 'function') {
+        logger.subscribeEvents((event) => {
+            if (!String(event?.processId || '').startsWith('library.')) return;
+            renderLoadingOverlayLogs();
+        });
     }
 
     function getLibraryProcessId(message = '') {
@@ -2533,6 +2582,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         refs.countText.textContent = countText || '';
         refs.progressFill.style.width = `${Math.round(clamp01(ratio) * 100)}%`;
         refs.loadingOverlay.classList.add('is-active');
+        renderLoadingOverlayLogs();
         const message = [text || 'Preparing Library task...', countText || ''].filter(Boolean).join(' | ');
         const signature = `${message}|${Math.round(clamp01(ratio) * 1000)}`;
         if (signature !== lastProgressLogSignature) {

@@ -2659,3 +2659,109 @@ Current Library UI integration behavior:
   - hard photo pair
   - weak-overlap failure set
   - mixed auto-mode routing
+
+## 2026-04-03 Library / Editor / 3D usability pass
+
+### Light-theme field hardening
+
+- shared site CSS now gives generic text inputs, search inputs, and textareas explicit theme-aware background/text/placeholder styling so stray controls do not fall back to unreadable white-on-white combinations in light mode
+- shared form-control font/color inheritance now includes `textarea`
+
+### Editor noise advanced controls
+
+- the shared editor control-row shell now actually respects `.is-hidden`
+- this currently matters for the Noise layer's advanced parameter trio:
+  - `noiseParamA`
+  - `noiseParamB`
+  - `noiseParamC`
+- those controls are no longer shown as generic placeholder `Param A/B/C` sliders all the time
+- the Noise layer now only shows the advanced section for noise modes that really use those shader parameters
+- the advanced sliders now get mode-specific labels that match the active noise generator, such as:
+  - Perlin: `Detail Layers`, `Cloud Scale`, `Roughness`
+  - Worley: `Cell Jitter`, `Cell Density`, `Distance Blend`
+  - Glitch: `Block Height`, `Horizontal Shift`, `RGB Split`
+
+### Library loading overlay logs
+
+- the Library loading/progress overlay now includes a `Live Library Log` panel
+- that panel is driven from the same `library.*` logger events used by the top-level `Logs` tab
+- recent Library sync/import/export lines now stream into the overlay while the Library overlay is active, so users can see what the Library is doing without switching tabs
+
+### 3D asset drawer drag/drop
+
+- the 3D content drawer no longer force-closes itself during `dragstart`
+- internal asset drags now advertise a dedicated `application/x-noise-studio-library-asset` payload in addition to the plain-text fallback
+- viewport `dragover` / `drop` now recognize that dedicated asset-drag payload, and the drawer closes only after a successful scene placement
+
+## 2026-04-03 Editor transform + startup Library pass
+
+### Editor crop / rotate / flip layer
+
+- the Editor registry now includes a new base-group shader layer:
+  - `cropTransform`
+  - label: `Crop / Rotate / Flip`
+- implementation files:
+  - `src/registry/layerRegistry.json`
+  - `Shaders/cropTransform.frag`
+  - `src/engine/cropTransformShared.js`
+  - `src/engine/pipeline.js`
+  - `src/engine/executors/index.js`
+  - `src/ui/workspaces.js`
+- current behavior:
+  - the layer crops by defining kept margins on the left/right/top/bottom
+  - crop is now a true layout-changing pass inside the Editor pipeline, so the live canvas resolution shrinks and expands with the crop margins instead of stretching the remaining pixels to fill the old canvas
+  - rotation is continuous in degrees
+  - horizontal and vertical flips are supported
+  - pixels sampled outside the source bounds after rotation are returned transparent
+- the pipeline now tracks cropped source placement through preview, hover/original alignment, and layer-input sampling so the crop layer behaves like a real canvas crop across the Editor UI
+- this is still non-destructive in document terms, but it now behaves like a true cropped canvas stage inside the live Editor render chain
+
+### Editor 3-way wheel precision
+
+- the Editor `3-Way Color Grade` wheels now use damped drag movement
+- current drag behavior:
+  - the initial click still picks a new wheel point immediately
+  - subsequent drag motion is divided by `3` relative to that click anchor before updating the wheel handle/color
+- implementation lives in `src/ui/workspaces.js`
+- intent:
+  - give the user finer control on the small wheel surfaces without redesigning that UI yet
+
+### Library startup loading defaults
+
+- `settings.library.autoLoadOnStartup` now defaults to `true` for new/reset settings states
+- startup Library priming still happens without forcing the user onto the Library tab
+- `view.primeLibrary()` now:
+  - refreshes the hidden Library panel with `forceInactive: true`
+  - also nudges the 3D content drawer asset refresh path so hidden 3D sections keep a pending Library-asset sync ready for activation
+
+## 2026-04-03 Crop correction + 3D viewport usability pass
+
+### 3D viewport path-trace responsiveness
+
+- the live 3D path-trace viewport now uses a responsiveness-first accumulation cadence instead of blindly pushing a heavy sample every animation frame
+- current behavior:
+  - viewport path-trace pixel ratio is capped lower than the full device pixel ratio on high-DPI displays
+  - if a live path-trace sample takes too long, the next accumulation step is delayed briefly so the rest of the UI can breathe
+  - viewport denoising is now throttled and only refreshes on meaningful sample/time intervals instead of every frame
+- implementation lives primarily in `src/3d/engine.js`
+
+### 3D current-viewport PNG capture
+
+- the 3D UI now includes a dedicated `Viewport PNG` action separate from the final path-trace `Render PNG` workflow
+- this captures the current viewport at its current onscreen resolution with whatever samples are already accumulated
+- current save flow:
+  - captures the current viewport image from the live 3D engine
+  - saves it locally as `*-viewport.png`
+  - reuses the existing 3D rendered-image asset-save path so the saved PNG also updates the Assets Library when possible
+- implementation spans:
+  - `src/3d/engine.js`
+  - `src/3d/ui.js`
+  - `src/ui/workspaces.js`
+  - `src/main.js`
+
+### 3D slider numeric entry
+
+- every current `input[type="range"]` control on the 3D tab now gets a synced numeric entry box beside it
+- users can drag the slider as before or type exact numeric values directly into the paired box
+- the mirror inputs respect the original slider min/max/step values and stay disabled whenever the owning slider is disabled
+- implementation lives in `src/3d/ui.js`

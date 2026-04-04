@@ -41,6 +41,12 @@ const MATERIAL_MAP_KEYS = [
 ];
 
 const EDIT_VIEW_MAX_PIXEL_RATIO = 1.25;
+const PATH_TRACE_VIEW_MAX_PIXEL_RATIO = 1;
+const VIEWPORT_PATH_TRACE_SAMPLE_BUDGET_MS = 22;
+const VIEWPORT_PATH_TRACE_COOLDOWN_MIN_MS = 16;
+const VIEWPORT_PATH_TRACE_COOLDOWN_MAX_MS = 96;
+const VIEWPORT_PATH_TRACE_DENOISE_INTERVAL_MS = 120;
+const VIEWPORT_PATH_TRACE_DENOISE_SAMPLE_INTERVAL = 4;
 
 function normalizeHexColor(value, fallback = '#ffffff') {
     const text = String(value || '').trim();
@@ -254,6 +260,24 @@ function renderDenoisedTexture(renderer, pass, sourceTexture, renderSettings = {
     renderer.setRenderTarget(previousRenderTarget);
 }
 
+async function encodeCanvasPng(canvas) {
+    if (!canvas) {
+        return {
+            blob: null,
+            dataUrl: '',
+            width: 0,
+            height: 0
+        };
+    }
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    return {
+        blob,
+        dataUrl: canvas.toDataURL('image/png'),
+        width: Math.max(1, canvas.width || 0),
+        height: Math.max(1, canvas.height || 0)
+    };
+}
+
 export class ThreeDEngine {
     constructor(container) {
         this.container = container;
@@ -299,6 +323,9 @@ export class ThreeDEngine {
         this._pathTraceLoadingActive = false;
         this._pathTraceLoadingMessage = 'Preparing path tracer...';
         this._pathTracerSceneDirty = true;
+        this._nextViewportPathTraceSampleAt = 0;
+        this._lastViewportDenoiseAt = 0;
+        this._lastViewportDenoiseSample = 0;
         this._worldEnvironmentSignature = '';
         this._worldBackgroundTexture = null;
         this._worldLightingTexture = null;
@@ -510,10 +537,53 @@ export class ThreeDEngine {
     }
 
     queuePathTraceWarmup(message = 'Preparing path tracer...') {
+        this.resetViewportPathTraceCadence();
         this._pathTraceLoadingMessage = message;
         if (this.renderMode !== 'pathtrace') return;
         this._pathTraceWarmupPending = true;
         this.emitPathTraceLoading(true, message);
+    }
+
+    resetViewportPathTraceCadence() {
+        this._nextViewportPathTraceSampleAt = 0;
+        this._lastViewportDenoiseAt = 0;
+        this._lastViewportDenoiseSample = 0;
+    }
+
+    scheduleNextViewportPathTraceSample(durationMs = 0) {
+        const sampleDuration = Math.max(0, Number(durationMs) || 0);
+        if (sampleDuration <= VIEWPORT_PATH_TRACE_SAMPLE_BUDGET_MS) {
+            this._nextViewportPathTraceSampleAt = 0;
+            return;
+        }
+        const cooldownMs = Math.min(
+            VIEWPORT_PATH_TRACE_COOLDOWN_MAX_MS,
+            Math.max(VIEWPORT_PATH_TRACE_COOLDOWN_MIN_MS, sampleDuration * 0.7)
+        );
+        this._nextViewportPathTraceSampleAt = performance.now() + cooldownMs;
+    }
+
+    shouldDenoiseViewport(now = performance.now(), { force = false, finalFrame = false } = {}) {
+        const currentSamples = Math.floor(this.pathTracer?.samples || 0);
+        if (!this.activeDocument.render?.denoiseEnabled || currentSamples < 1) {
+            return false;
+        }
+        if (force) {
+            return true;
+        }
+        if (currentSamples === this._lastViewportDenoiseSample) {
+            return false;
+        }
+        if (currentSamples <= 1 || finalFrame) {
+            return true;
+        }
+        return (currentSamples - this._lastViewportDenoiseSample) >= VIEWPORT_PATH_TRACE_DENOISE_SAMPLE_INTERVAL
+            || (now - this._lastViewportDenoiseAt) >= VIEWPORT_PATH_TRACE_DENOISE_INTERVAL_MS;
+    }
+
+    markViewportDenoised(now = performance.now()) {
+        this._lastViewportDenoiseAt = now;
+        this._lastViewportDenoiseSample = Math.floor(this.pathTracer?.samples || 0);
     }
 
     getAspect() {
@@ -526,7 +596,7 @@ export class ThreeDEngine {
             return devicePixelRatio;
         }
         if (this.canRunViewportPathTrace()) {
-            return devicePixelRatio;
+            return Math.min(devicePixelRatio, PATH_TRACE_VIEW_MAX_PIXEL_RATIO);
         }
         return Math.min(devicePixelRatio, EDIT_VIEW_MAX_PIXEL_RATIO);
     }
@@ -994,6 +1064,7 @@ export class ThreeDEngine {
     setViewportActive(active) {
         this.viewportActive = active !== false;
         if (this.viewportActive) {
+            this.resetViewportPathTraceCadence();
             this.clock.getDelta();
             this.onResize();
         }
@@ -1099,6 +1170,9 @@ export class ThreeDEngine {
         const qualityChanged = configurePathTracerQuality(this.pathTracer, document.render);
         this.renderMode = document.render.mode;
         this.targetSamples = document.render.samplesTarget;
+        if (previousRenderMode !== this.renderMode || qualityChanged) {
+            this.resetViewportPathTraceCadence();
+        }
         this.syncViewportResolution(previousRenderMode !== this.renderMode);
         if (this.renderMode === 'pathtrace' && !this.hasViewportPathTraceContent(document)) {
             this._pathTraceWarmupPending = false;
@@ -1899,11 +1973,7 @@ export class ThreeDEngine {
     }
 
     async capturePreview(size = 320) {
-        if (this.renderMode === 'mesh') {
-            this.renderMeshScene();
-        } else if (this.renderMode === 'raster' || !this.canRunViewportPathTrace() || this.pathTracer.samples < 1) {
-            this.renderer.render(this.scene, this.camera);
-        }
+        this.renderViewportSnapshot({ forceDenoise: true });
         const sourceCanvas = this.renderer.domElement;
         const aspect = sourceCanvas.width / Math.max(1, sourceCanvas.height);
         const width = size;
@@ -1915,14 +1985,43 @@ export class ThreeDEngine {
         context.fillStyle = normalizeHexColor(this.activeDocument.scene.backgroundColor, '#202020');
         context.fillRect(0, 0, width, height);
         context.drawImage(sourceCanvas, 0, 0, width, height);
-        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-        const dataUrl = canvas.toDataURL('image/png');
-        return {
-            blob,
-            dataUrl,
-            width,
-            height
-        };
+        return encodeCanvasPng(canvas);
+    }
+
+    renderViewportSnapshot({ forceDenoise = false } = {}) {
+        if (this.renderMode === 'mesh') {
+            this.renderMeshScene();
+            this.renderEditorOverlay();
+            return;
+        }
+        if (this.renderMode === 'pathtrace') {
+            if (!this.canRunViewportPathTrace() || this._pathTraceWarmupPending || this.pathTracer.samples < 1) {
+                this.withEditorObjectsHidden(() => {
+                    this.renderer.render(this.scene, this.camera);
+                });
+                this.renderEditorOverlay();
+                return;
+            }
+            if (forceDenoise && this.activeDocument.render.denoiseEnabled) {
+                renderDenoisedTexture(this.renderer, this.viewportDenoisePass, this.pathTracer.target.texture, this.activeDocument.render);
+                this.markViewportDenoised();
+            }
+            this.renderEditorOverlay();
+            return;
+        }
+        this.renderer.render(this.scene, this.camera);
+        this.renderSelectionEditorOverlay();
+    }
+
+    async captureViewportPng() {
+        this.renderViewportSnapshot({ forceDenoise: true });
+        const sourceCanvas = this.renderer.domElement;
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, sourceCanvas.width);
+        canvas.height = Math.max(1, sourceCanvas.height);
+        const context = canvas.getContext('2d');
+        context.drawImage(sourceCanvas, 0, 0, canvas.width, canvas.height);
+        return encodeCanvasPng(canvas);
     }
 
     updateLight(itemId, patch = {}) {
@@ -2332,6 +2431,8 @@ export class ThreeDEngine {
                 this.onSamplesUpdated?.(0);
                 return;
             }
+            const now = performance.now();
+            const viewportRenderIncomplete = this.targetSamples <= 0 || this.pathTracer.samples < this.targetSamples;
             if (this._pathTraceWarmupPending) {
                 this._pathTraceWarmupPending = false;
                 this.renderer.render(this.scene, this.camera);
@@ -2339,17 +2440,20 @@ export class ThreeDEngine {
                 this.onSamplesUpdated?.(0);
                 return;
             }
-            if (this.targetSamples <= 0 || this.pathTracer.samples < this.targetSamples) {
+            if (viewportRenderIncomplete && now >= this._nextViewportPathTraceSampleAt) {
                 if (this.pathTracer.samples < 1 && !this._pathTraceLoadingActive) {
                     this.emitPathTraceLoading(true, 'Preparing path tracer...');
                 }
+                const sampleStartedAt = performance.now();
                 this.pathTracer.renderSample();
+                this.scheduleNextViewportPathTraceSample(performance.now() - sampleStartedAt);
             }
             if (this.pathTracer.samples > 0) {
                 this.emitPathTraceLoading(false);
             }
-            if (this.activeDocument.render.denoiseEnabled && this.pathTracer.samples > 0) {
+            if (this.shouldDenoiseViewport(now, { finalFrame: !viewportRenderIncomplete })) {
                 renderDenoisedTexture(this.renderer, this.viewportDenoisePass, this.pathTracer.target.texture, this.activeDocument.render);
+                this.markViewportDenoised(now);
             }
             this.renderEditorOverlay();
             this.onSamplesUpdated?.(Math.round(this.pathTracer.samples));

@@ -107,9 +107,23 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
     font: inherit;
     color: inherit;
+}
+
+:where(input[type='text'], input[type='search'], textarea) {
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--text);
+    padding: 5px 6px;
+    caret-color: currentColor;
+}
+
+:where(input[type='text'], input[type='search'], textarea)::placeholder {
+    color: var(--muted);
+    opacity: 1;
 }
 
 button {
@@ -622,6 +636,10 @@ button {
     display: flex;
     flex-direction: column;
     gap: 6px;
+}
+
+.control-row.is-hidden {
+    display: none;
 }
 
 .control-row-range .control-stack {
@@ -1452,6 +1470,71 @@ code {
     width: 0%;
     background: var(--line);
     transition: width 0.2s ease;
+}
+
+.library-loading-log-shell {
+    width: min(520px, calc(100% - 40px));
+    margin-top: 16px;
+    padding: 12px;
+    border: 1px solid var(--line-soft);
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    display: grid;
+    gap: 8px;
+}
+
+.library-loading-log-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.library-loading-log-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 152px;
+    overflow: auto;
+}
+
+.library-loading-log-line {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    font: 11px/1.4 var(--mono);
+}
+
+.library-loading-log-time {
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.library-loading-log-text {
+    min-width: 0;
+    word-break: break-word;
+}
+
+.library-loading-log-line[data-level='warning'] .library-loading-log-text {
+    color: #b66a00;
+}
+
+.library-loading-log-line[data-level='error'] .library-loading-log-text {
+    color: #a12121;
+}
+
+.library-loading-log-line[data-level='success'] .library-loading-log-text {
+    color: #1b6b3d;
+}
+
+.library-loading-log-empty {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
 }
 
 .library-modal-overlay.is-active,

@@ -1,3 +1,5 @@
+import { getCropTransformMetrics, isCropTransformIdentity } from '../cropTransformShared.js';
+
 function toLegacyField(value) {
     if (typeof value === 'boolean') {
         return { value: value ? '1' : '0', checked: value };
@@ -721,6 +723,31 @@ function renderExpander(gl, runtime, inputTex, outputFbo, instance, options = {}
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
+function renderCropTransform(gl, runtime, inputTex, outputFbo, instance, options = {}) {
+    const inputResolution = options.inputResolution || { w: runtime.renderWidth, h: runtime.renderHeight };
+    if (isCropTransformIdentity(instance?.params) && runtime.renderWidth === inputResolution.w && runtime.renderHeight === inputResolution.h) {
+        bindCopy(gl, runtime, inputTex, outputFbo, 0);
+        return;
+    }
+
+    const cropMetrics = getCropTransformMetrics(instance?.params, inputResolution.w, inputResolution.h);
+    const program = runtime.programs.cropTransform;
+
+    gl.useProgram(program);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, inputTex);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_tex'), 0);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_inputRes'), inputResolution.w, inputResolution.h);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_outputRes'), runtime.renderWidth, runtime.renderHeight);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_cropOffset'), cropMetrics.leftPx, cropMetrics.bottomPx);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_cropSize'), cropMetrics.cropWidthFloat, cropMetrics.cropHeightFloat);
+    gl.uniform1f(gl.getUniformLocation(program, 'u_rotationDegrees'), parseFloat(instance?.params?.cropRotation || 0));
+    gl.uniform1i(gl.getUniformLocation(program, 'u_flipX'), instance?.params?.cropFlipX ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_flipY'), instance?.params?.cropFlipY ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
 function renderBgPatcher(gl, runtime, inputTex, outputFbo, instance, options = {}, documentState) {
     const inputResolution = options.inputResolution || { w: runtime.renderWidth, h: runtime.renderHeight };
     const params = instance.params || {};
@@ -918,6 +945,9 @@ export function renderLayer(gl, runtime, layerDef, instance, inputTex, outputFbo
             break;
         case 'expander':
             renderExpander(gl, runtime, inputTex, outputFbo, instance, options);
+            break;
+        case 'cropTransform':
+            renderCropTransform(gl, runtime, inputTex, outputFbo, instance, options);
             break;
         case 'tiltShiftBlur':
             renderTiltShiftBlur(gl, runtime, inputTex, outputFbo, instance, options);

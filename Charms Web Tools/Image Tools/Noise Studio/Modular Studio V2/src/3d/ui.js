@@ -93,6 +93,8 @@ function formatLibraryAssetSize(asset) {
     return asset?.assetType === 'model' ? '3D Asset' : 'Image Asset';
 }
 
+const LIBRARY_ASSET_DRAG_TYPE = 'application/x-noise-studio-library-asset';
+
 function getPathTraceLoadingProgress(message = '') {
     const normalized = String(message || '').trim().toLowerCase();
     if (!normalized) return 0.18;
@@ -736,6 +738,9 @@ export function createThreeDWorkspace(actions, store) {
             .threed-button-row-2 { grid-template-columns:repeat(2, minmax(0, 1fr)); }
             .threed-button-row-3 { grid-template-columns:repeat(3, minmax(0, 1fr)); }
             .threed-button-row-4 { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+            .threed-range-control { display:grid; grid-template-columns:minmax(0, 1fr) 68px; gap:8px; align-items:center; }
+            .threed-range-control input[type="range"] { min-width:0; margin:0; }
+            .threed-range-control .control-number { width:100%; }
             .threed-foldout { border:1px solid var(--threed-border); background:var(--threed-panel-alt); }
             .threed-foldout summary { list-style:none; cursor:pointer; user-select:none; padding:7px 8px; color:var(--threed-text); font-weight:600; }
             .threed-foldout summary::-webkit-details-marker { display:none; }
@@ -1150,9 +1155,10 @@ export function createThreeDWorkspace(actions, store) {
         renderBasics.className = 'threed-stack';
         [renderModeField, samplesTargetField, sampleCountRow].filter(Boolean).forEach((node) => renderBasics.appendChild(node));
         const renderActions = document.createElement('div');
-        renderActions.className = 'threed-button-row threed-button-row-2';
+        renderActions.className = 'threed-button-row threed-button-row-3';
         renderActions.innerHTML = `
             <button type="button" class="primary-button" data-threed-action="render-scene">Render PNG</button>
+            <button type="button" class="toolbar-button" data-threed-action="save-viewport-png">Viewport PNG</button>
             <button type="button" class="toolbar-button" data-threed-action="abort-render">Abort</button>
         `;
         renderBasics.appendChild(renderActions);
@@ -1248,6 +1254,7 @@ export function createThreeDWorkspace(actions, store) {
                 <button type="button" class="toolbar-button" data-threed-action="frame-item">Frame</button>
                 <button type="button" class="toolbar-button" data-threed-action="reset-camera">Reset</button>
                 <button type="button" class="toolbar-button" data-threed-action="render-scene">Render PNG</button>
+                <button type="button" class="toolbar-button" data-threed-action="save-viewport-png">Viewport PNG</button>
                 <button type="button" class="toolbar-button" data-threed-action="abort-render">Abort</button>
                 <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="edit">Panels</button>
                 <button type="button" class="toolbar-button" data-threed-action="ui-mode" data-ui-mode="fullscreen">Fullscreen</button>
@@ -1336,6 +1343,88 @@ export function createThreeDWorkspace(actions, store) {
     refs.assetSearch = root.querySelector('[data-threed-role="asset-search"]');
     refs.assetGrid = root.querySelector('[data-threed-role="asset-grid"]');
     refs.assetEmpty = root.querySelector('[data-threed-role="asset-empty"]');
+
+    function clampRangeMirrorValue(rangeInput, rawValue) {
+        const numeric = Number(rawValue);
+        if (!Number.isFinite(numeric)) return null;
+        const min = rangeInput.min === '' ? -Infinity : Number(rangeInput.min);
+        const max = rangeInput.max === '' ? Infinity : Number(rangeInput.max);
+        return Math.min(max, Math.max(min, numeric));
+    }
+
+    function buildRangeInputMirror(rangeInput) {
+        if (!rangeInput || rangeInput._numberMirror || !rangeInput.parentNode) {
+            return rangeInput?._numberMirror || null;
+        }
+        const wrapper = document.createElement('div');
+        wrapper.className = 'threed-range-control';
+        rangeInput.parentNode.insertBefore(wrapper, rangeInput);
+        wrapper.appendChild(rangeInput);
+
+        const numberInput = document.createElement('input');
+        numberInput.type = 'number';
+        numberInput.className = 'control-number threed-range-number';
+        if (rangeInput.min !== '') numberInput.min = rangeInput.min;
+        if (rangeInput.max !== '') numberInput.max = rangeInput.max;
+        if (rangeInput.step !== '') numberInput.step = rangeInput.step;
+        numberInput.value = rangeInput.value;
+        wrapper.appendChild(numberInput);
+
+        rangeInput._numberMirror = numberInput;
+        numberInput._rangeSource = rangeInput;
+
+        const syncNumberInput = () => {
+            if (document.activeElement !== numberInput) {
+                numberInput.value = rangeInput.value;
+            }
+            numberInput.disabled = rangeInput.disabled;
+        };
+
+        rangeInput.addEventListener('input', syncNumberInput);
+        rangeInput.addEventListener('change', syncNumberInput);
+        numberInput.addEventListener('input', () => {
+            if (numberInput.value === '') return;
+            const normalized = clampRangeMirrorValue(rangeInput, numberInput.value);
+            if (!Number.isFinite(normalized)) return;
+            rangeInput.value = String(normalized);
+            rangeInput.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        numberInput.addEventListener('change', () => {
+            if (numberInput.value === '') {
+                numberInput.value = rangeInput.value;
+                return;
+            }
+            const normalized = clampRangeMirrorValue(rangeInput, numberInput.value);
+            if (!Number.isFinite(normalized)) {
+                numberInput.value = rangeInput.value;
+                return;
+            }
+            const nextValue = String(normalized);
+            rangeInput.value = nextValue;
+            numberInput.value = nextValue;
+            rangeInput.dispatchEvent(new Event('input', { bubbles: true }));
+            rangeInput.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+
+        syncNumberInput();
+        return numberInput;
+    }
+
+    function enhanceRangeInputs() {
+        root.querySelectorAll('input[type="range"]').forEach((rangeInput) => buildRangeInputMirror(rangeInput));
+    }
+
+    function syncRangeInputMirrors() {
+        root.querySelectorAll('input[type="range"]').forEach((rangeInput) => {
+            if (!rangeInput._numberMirror) return;
+            rangeInput._numberMirror.disabled = rangeInput.disabled;
+            if (document.activeElement !== rangeInput._numberMirror) {
+                rangeInput._numberMirror.value = rangeInput.value;
+            }
+        });
+    }
+
+    enhanceRangeInputs();
     const progressOverlay = createProgressOverlayController(root.querySelector('.threed-viewport-stage'), {
         zIndex: 5,
         defaultTitle: 'Working',
@@ -1583,8 +1672,14 @@ export function createThreeDWorkspace(actions, store) {
     }
 
     function setInputValue(input, value) {
-        if (!input || document.activeElement === input) return;
-        input.value = String(value);
+        if (!input) return;
+        const nextValue = String(value);
+        if (document.activeElement !== input) {
+            input.value = nextValue;
+        }
+        if (input._numberMirror && document.activeElement !== input._numberMirror) {
+            input._numberMirror.value = nextValue;
+        }
     }
 
     function waitForUiPaint() {
@@ -2164,6 +2259,12 @@ export function createThreeDWorkspace(actions, store) {
                 console.error(error);
                 setStatus(error?.message || 'Could not save the 3D scene JSON.', 'error', 7000);
             });
+        } else if (action === 'save-viewport-png') {
+            setStatus('Capturing the current 3D viewport to PNG...', 'info', 2400);
+            actions.exportThreeDViewportPng?.().catch((error) => {
+                console.error(error);
+                setStatus(error?.message || 'Could not save the current 3D viewport PNG.', 'error', 7000);
+            });
         } else if (action === 'selection-menu') {
             const selected = getSelectedItem(store.getState());
             if (!selected) {
@@ -2415,9 +2516,9 @@ export function createThreeDWorkspace(actions, store) {
         if (!draggedAssetId) return;
         if (event.dataTransfer) {
             event.dataTransfer.effectAllowed = 'copy';
+            event.dataTransfer.setData(LIBRARY_ASSET_DRAG_TYPE, draggedAssetId);
             event.dataTransfer.setData('text/plain', draggedAssetId);
         }
-        setAssetDrawerOpen(false);
         const assetName = libraryAssets.find((asset) => asset.id === draggedAssetId)?.name || 'Library asset';
         logThreeD('info', '3d.assets', `Dragging "${assetName}" from the content drawer into the 3D scene.`, {
             dedupeKey: `drag-asset:${draggedAssetId}`,
@@ -2430,7 +2531,8 @@ export function createThreeDWorkspace(actions, store) {
     });
 
     refs.canvasContainer.addEventListener('dragover', (event) => {
-        if (!draggedAssetId) return;
+        const dragTypes = Array.from(event.dataTransfer?.types || []);
+        if (!draggedAssetId && !dragTypes.includes(LIBRARY_ASSET_DRAG_TYPE)) return;
         event.preventDefault();
         if (event.dataTransfer) {
             event.dataTransfer.dropEffect = 'copy';
@@ -2438,13 +2540,19 @@ export function createThreeDWorkspace(actions, store) {
     });
 
     refs.canvasContainer.addEventListener('drop', async (event) => {
-        const assetId = (event.dataTransfer?.getData('text/plain') || draggedAssetId || '').trim();
+        const assetId = (
+            event.dataTransfer?.getData(LIBRARY_ASSET_DRAG_TYPE)
+            || event.dataTransfer?.getData('text/plain')
+            || draggedAssetId
+            || ''
+        ).trim();
         draggedAssetId = '';
         if (!assetId) return;
         event.preventDefault();
         try {
             const didPlace = await actions.addLibraryAssetToThreeDScene?.(assetId);
             if (didPlace) {
+                setAssetDrawerOpen(false);
                 setStatus('Placed Library asset into the 3D scene.', 'success');
             }
         } catch (error) {
@@ -3376,6 +3484,7 @@ export function createThreeDWorkspace(actions, store) {
             refs.worldLightGradientStops.querySelectorAll('input, button').forEach((node) => {
                 node.disabled = renderLocked || worldLight.mode !== 'gradient';
             });
+            syncRangeInputMirrors();
 
             if (!statusResetTimer && statusTone !== 'error') {
                 applyBaseStatus(state);
@@ -3405,6 +3514,13 @@ export function createThreeDWorkspace(actions, store) {
                 await engine.queueSync(store.getState().threeDDocument);
             }
             return engine.capturePreview();
+        },
+        async captureViewportPng() {
+            if (!engine) {
+                hydrateEngine();
+                await engine.queueSync(store.getState().threeDDocument);
+            }
+            return engine.captureViewportPng();
         },
         setProgressOverlay(payload = null) {
             if (payload?.active) {

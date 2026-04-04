@@ -41,23 +41,29 @@
 
 ## Not Done
 
-fix 3D tab's assets drawer: when the user trys to drag and drop something from it into the scene, nothing happens or gets loaded, and the logs tab says nothing
+[ DONE ] FIX light mode across the site's tabs, light mode has a bad effect on text boxes where the text and the background of the box, are both white, making it impossible to read in light mode, making the user only use dark mode all the time.
 
-for the editor tab, the 3 wheel color grading layer, when the mouse clicks on a wheel, divide the movement of the orignal mouse's movement distance, in order to give the user greater precision when moving inside the wheel, since currently the sensitivity is way too high and the wheels are small so that makes it worse, possibly stacking wheels would allow them to be bigger.
+[ DONE ] fix 3D tab's assets drawer: when the user trys to drag and drop something from it into the scene, nothing happens or gets loaded, and the logs tab says nothing
 
-look into a solution for making the UI stay responsive during the 3D viewport rendering in path trace mode (not png renders, just with the viewport open and on path trace mode) 
+[ DONE ] fix the 3 place holder sliders A B and C on the noise layer for the editor tab.
 
-while the library is loading, show the library's logs from the log tab, on the loading overlay since many new users may not understand that they can see this info on the logs tab.
+[ DONE ] add a crop/rotate/flip layer to the editor tab
 
-do a quick check to make sure the library will always load when the page loads even if the user doesnt load on the library page, and while they are on other pages.
+[ DONE ] for the editor tab, the 3 wheel color grading layer, when the mouse clicks on a wheel, divide the movement of the orignal mouse's movement distance, in order to give the user greater precision when moving inside the wheel, since currently the sensitivity is way too high and the wheels are small so that makes it worse, possibly stacking wheels would allow them to be bigger.
 
-explore adding ray tracing as an option for rendering since it's different than path tracing that we already have
+[ DONE ] look into a solution for making the UI stay responsive during the 3D viewport rendering in path trace mode (not png renders, just with the viewport open and on path trace mode) 
 
-add an option for rendering to do a render in the selected modes from the same camera setting automatically
+[ DONE ] while the library is loading, show the library's logs from the log tab, on the loading overlay since many new users may not understand that they can see this info on the logs tab.
 
-add UI option to render the current viewport as a png
+[ DONE ] do a quick check to make sure the library will always load when the page loads even if the user doesnt load on the library page, and while they are on other pages.
 
-give all the sliders on the 3D tab a value, instead of just being valueless sliders, and allow the user to custom set these values in boxes
+explore adding ray tracing as an option for viewport and rendering on the 3D tab since it's different than path tracing that we already have
+
+add an option for rendering to do a render in the selected modes from the same camera setting automatically (not all that important right now)
+
+[ DONE ] add UI option to render the current 3D viewport as a png with whatever samples exist currently
+
+[ DONE ] give all the sliders on the 3D tab a value, instead of just being valueless sliders, and allow the user to custom set these values in boxes
 
 options for the entire site should now be moved to right click where it makes sense for "context menus" allowing parts of the UI to be de-bloated, due to not needing to hide literally every setting and UI option behind a dropdown, tab, or button. (this idea must first rely on a verdict from figuring out if this still works on electron, and how to make it more reliable on browser, before switching to it more heaviliy)
 
@@ -79,8 +85,13 @@ add fog or some type of volumetric addition where emissive objects can have halo
 
 check to see if the current way the library indexs it's contents is making it slower in any way or not using teh web workers to full potential, especially on page load for the first time.
 
-perhaps adding a loading sequence where the page is unusable when it first loads, where this gives the entire site time to load the important things, and makes it much more likely that the UI will be 100% responsive, some sort of logo animation needed for after i iterate on a design. or add a screen that loads before anything on the site, that asks what the user wants to do, and lets them check whether or not they want to load certain tabs of the site on page load, by check boxes or toggles, and if the user visits a tab they did not check to have loaded on page load, there should be an overlay asking if they want to boot up that tab. Library however should not be apart of this, and should load every time and background process it's startup processes; use web workers to let it work in the background doing its loading and searching and healing of any assets along with everything else it does in the background, which is quite a lot on load and the first few interactions.
+
+A potentially large update, requiring an elevated attention to detail, and planning with context: assets for 3D scenes, should not be stored redundantly, where multple copies are used, instead, inside each json file for a 3D scene, it should store 1 copy, and just use that copy to rebuild the scene. the same thing should also apply to a library export, when the user exports an entire library, the library should have some reliable logic that looks at all assets, and stores only 1 copy of everything, even across multiple 3D scenes if they have the same assets used partly. this will greatly cut down on file sizes for the json library exports. we will need to make extra sure that the logic for "unbundling" these updated library files works reliably at parsing things, since different 3D scenes may have some of the same assets. assets should be identified as "the same" if their name is the same. and in order to keep it this simple, we need to update the naming for the 3D assets so that changing the name of an asset in a 3D scene, will open up a popup basically saying "hey, you're changing the name of this 3D asset, which is currently used in X number of 3D scenes, are you sure you want to do this?" and if they confirm, it will update the name in all of the scenes that use it.
+note that the "only storing one copy" mindset shouldnt apply to the parsed and loaded state of the library or 3D scenes when the site is just being used and each 3D scene is a project in the library, they can be seperate then, and need to be if we are to update them all when a name changes.
+
 
 potentially huge job in terms of making sure nothing is missed, but reorganizing any code files in the database to be in better groups, since there are many different files for different tabs, engines, and having things organized would be a life saver. it would be  extremely important to use move and copy commands,and then edit realtive paths and where files point to, rather than re-writing entire files from scratch and making errors.
 
 add animations to the entire site, and a toggle in settings to disable animations for the site
+
+add the option to include the currrent entire settings state in the library json file when exporting a copy of the library out. this would need the added logic for loading it with the library as well.
