@@ -20,6 +20,16 @@ import {
     updateInputOrder as updateStitchInputOrderHelper,
     updatePlacement as updateStitchPlacementHelper
 } from './stitch/document.js';
+import {
+    computeCompositeDocumentBounds,
+    createCompositeLayerId,
+    createEmptyCompositeDocument,
+    getSelectedCompositeLayer,
+    isCompositeDocumentPayload,
+    normalizeCompositeDocument,
+    serializeCompositeDocument,
+    summarizeCompositeDocument
+} from './composite/document.js';
 import { createWorkspaceUI } from './ui/workspaces.js';
 import { clamp, createDefaultViewState, normalizeViewState, MAX_PREVIEW_ZOOM } from './state/documentHelpers.js';
 import {
@@ -272,6 +282,13 @@ function getSuggestedProjectName(documentState, nameOverride = null) {
     return stripProjectExtension(nameOverride || documentState.source?.name || 'Untitled') || 'Untitled';
 }
 
+function getSuggestedCompositeProjectName(documentState, nameOverride = null) {
+    const normalized = normalizeCompositeDocument(documentState);
+    const topLayer = [...normalized.layers].sort((a, b) => (b.z || 0) - (a.z || 0))[0] || null;
+    const fallback = topLayer?.name || 'Composite Project';
+    return stripProjectExtension(nameOverride || fallback) || 'Composite Project';
+}
+
 function getSuggestedStitchProjectName(documentState, nameOverride = null) {
     const normalized = normalizeStitchDocument(documentState);
     const primary = normalized.inputs[0];
@@ -516,6 +533,10 @@ function buildStitchLibraryPayload(documentState) {
     return stripEphemeralStitchState(documentState);
 }
 
+function buildCompositeLibraryPayload(documentState) {
+    return serializeCompositeDocument(normalizeCompositeDocument(documentState));
+}
+
 function buildThreeDLibraryPayload(documentState) {
     const payload = serializeThreeDDocument(normalizeThreeDDocument(documentState));
     if (payload.render && typeof payload.render === 'object') {
@@ -539,6 +560,8 @@ function normalizeLegacyDocumentPayload(payload) {
 }
 
 function inferProjectTypeFromPayload(payload, fallbackType = null) {
+    if (fallbackType === 'composite') return 'composite';
+    if (isCompositeDocumentPayload(payload)) return 'composite';
     if (fallbackType === '3d') return '3d';
     if (isThreeDDocumentPayload(payload)) return '3d';
     if (fallbackType === 'stitch') return 'stitch';
@@ -558,6 +581,7 @@ function extractLibraryProjectMeta(rawPayload) {
 
 const activeLibraryOrigins = {
     studio: { id: null, name: null },
+    composite: { id: null, name: null },
     stitch: { id: null, name: null },
     '3d': { id: null, name: null }
 };
@@ -575,6 +599,7 @@ function setActiveLibraryOrigin(projectType, id, name) {
 function clearActiveLibraryOrigin(projectType = null) {
     if (!projectType) {
         setActiveLibraryOrigin('studio', null, null);
+        setActiveLibraryOrigin('composite', null, null);
         setActiveLibraryOrigin('stitch', null, null);
         setActiveLibraryOrigin('3d', null, null);
         return;
@@ -669,7 +694,24 @@ function createStudioPreviewSnapshot(studioEngine, documentState, dataUrl) {
     };
 }
 
+function createCompositePreviewSnapshot(documentState, dataUrl, width, height) {
+    if (!dataUrl) return null;
+    return {
+        imageData: dataUrl,
+        width: Math.max(0, Number(width) || 0),
+        height: Math.max(0, Number(height) || 0),
+        updatedAt: Date.now()
+    };
+}
+
 function stripStudioPreview(payload) {
+    if (!payload || typeof payload !== 'object') return payload;
+    const cloned = { ...payload };
+    delete cloned.preview;
+    return cloned;
+}
+
+function stripCompositePreview(payload) {
     if (!payload || typeof payload !== 'object') return payload;
     const cloned = { ...payload };
     delete cloned.preview;
@@ -684,6 +726,41 @@ async function captureStudioDocumentSnapshot(studioEngine, documentState, payloa
         blob,
         preview,
         payload: buildLibraryPayload(documentState, preview || payload?.preview || null)
+    };
+}
+
+async function captureCompositeDocumentSnapshot(documentState) {
+    const normalized = normalizeCompositeDocument(documentState);
+    let blob = null;
+    let preview = normalized.preview || null;
+
+    try {
+        blob = await view.exportCompositePng(normalized);
+    } catch (_error) {
+        blob = null;
+    }
+
+    try {
+        preview = await view.captureCompositePreview(normalized) || preview;
+    } catch (_error) {
+        preview = preview || null;
+    }
+
+    if (!blob && preview?.imageData) {
+        try {
+            blob = await dataUrlToBlob(preview.imageData);
+        } catch (_error) {
+            blob = null;
+        }
+    }
+
+    return {
+        blob,
+        preview,
+        payload: buildCompositeLibraryPayload({
+            ...normalized,
+            preview
+        })
     };
 }
 
@@ -1186,7 +1263,7 @@ function createEmptyBatchState() {
 function getInitialActiveSection() {
     try {
         const section = new URL(window.location.href).searchParams.get('section');
-        if (section === 'library' || section === 'stitch' || section === '3d' || section === 'settings' || section === 'logs') return section;
+        if (section === 'composite' || section === 'library' || section === 'stitch' || section === '3d' || section === 'settings' || section === 'logs') return section;
         return 'editor';
     } catch (_error) {
         return 'editor';
@@ -1196,7 +1273,8 @@ function getInitialActiveSection() {
 function syncSectionUrl(section) {
     try {
         const url = new URL(window.location.href);
-        if (section === 'library') url.searchParams.set('section', 'library');
+        if (section === 'composite') url.searchParams.set('section', 'composite');
+        else if (section === 'library') url.searchParams.set('section', 'library');
         else if (section === 'stitch') url.searchParams.set('section', 'stitch');
         else if (section === '3d') url.searchParams.set('section', '3d');
         else if (section === 'settings') url.searchParams.set('section', 'settings');
@@ -1224,6 +1302,7 @@ function createInitialState(settings = createDefaultAppSettings()) {
             export: { keepFolderStructure: false, playFps: 10 },
             batch: createEmptyBatchState()
         }, normalizedSettings),
+        compositeDocument: createEmptyCompositeDocument(),
         stitchDocument: createSettingsDrivenStitchDocument(normalizedSettings),
         threeDDocument: createSettingsDrivenThreeDDocument(normalizedSettings),
             ui: {
@@ -1234,7 +1313,13 @@ function createInitialState(settings = createDefaultAppSettings()) {
                 jsonCompareView: 'grid',
                 jsonCompareIndex: 0,
                 loadImageOnOpen: true,
-                settingsCategory: 'general'
+                settingsCategory: 'general',
+                compositeEditorBridge: {
+                    active: false,
+                    layerId: null,
+                    originalLibraryId: null,
+                    originalLibraryName: null
+                }
             },
             settings: normalizedSettings,
             notice: null,
@@ -1407,6 +1492,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         'settings.logs': 'Logs Settings',
         'editor.files': 'Editor Files',
         'editor.export': 'Editor Export',
+        'composite.workspace': 'Composite Workspace',
+        'composite.layers': 'Composite Layers',
+        'composite.render': 'Composite Render',
+        'composite.link': 'Composite Link',
+        'composite.export': 'Composite Export',
+        'composite.autosave': 'Composite Autosave',
         'library.projects': 'Library Projects',
         'library.assets': 'Library Assets',
         'library.sync': 'Library Sync',
@@ -1426,7 +1517,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     let registry = null;
     let store = null;
     let engine = null;
+    let compositeEditorRenderEngine = null;
+    let compositeEditorRenderCanvas = null;
+    let compositeEditorRenderReady = false;
     let stitchEngine = null;
+    let compositeAutosaveTimer = null;
+    let compositeAutosaveInFlight = false;
 
     let noticeTimer = null;
     let playbackTimer = null;
@@ -1644,6 +1740,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function clearWorkspaceProgress(projectType) {
+        if (projectType === 'composite') {
+            view?.setCompositeProgress?.(null);
+            return;
+        }
         if (projectType === 'stitch') {
             setStitchProgress(null);
             return;
@@ -1656,6 +1756,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     function setWorkspaceProgress(projectType, payload = null) {
+        if (projectType === 'composite') {
+            view?.setCompositeProgress?.(payload);
+            return;
+        }
         if (projectType === 'stitch') {
             setStitchProgress(payload);
             return;
@@ -2046,6 +2150,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         store.setState((state) => ({ ...state, document: mutator(state.document) }), meta);
     }
 
+    function updateCompositeDocument(mutator, meta = { renderComposite: true }) {
+        const previous = store.getState().compositeDocument;
+        const next = normalizeCompositeDocument(mutator(previous));
+        store.setState((state) => ({ ...state, compositeDocument: next }), meta);
+        if (!meta?.skipCompositeAutosave && stableSerialize(previous) !== stableSerialize(next)) {
+            scheduleCompositeAutosave('Queued Composite autosave after a document change.');
+        }
+    }
+
     function updateStitchDocument(mutator, meta = { renderStitch: true }) {
         const previous = store.getState().stitchDocument;
         const next = normalizeStitchDocument(mutator(previous));
@@ -2143,7 +2256,9 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function commitActiveSection(section) {
         const currentSection = store.getState().ui.activeSection;
-        const nextSection = section === 'library'
+        const nextSection = section === 'composite'
+            ? 'composite'
+            : section === 'library'
             ? 'library'
             : section === 'stitch'
                 ? 'stitch'
@@ -2156,14 +2271,16 @@ window.addEventListener('DOMContentLoaded', async () => {
                         : 'editor';
         if (nextSection !== 'editor') stopPlayback();
         syncSectionUrl(nextSection);
-        if (nextSection !== currentSection && backgroundTasks && ['editor', 'stitch', '3d'].includes(currentSection)) {
+        if (nextSection !== currentSection && backgroundTasks && ['editor', 'composite', 'stitch', '3d'].includes(currentSection)) {
             backgroundTasks.cancelScope(`section:${currentSection}`, {
-                reason: `Switched away from ${currentSection === '3d' ? '3D' : currentSection}.`
+                reason: `Switched away from ${currentSection === '3d' ? '3D' : currentSection === 'composite' ? 'Composite' : currentSection}.`
             });
         }
         if (nextSection !== currentSection) {
             const sectionLabel = nextSection === '3d'
                 ? '3D'
+                : nextSection === 'composite'
+                    ? 'Composite'
                 : nextSection === 'logs'
                     ? 'Logs'
                     : nextSection === 'settings'
@@ -2668,6 +2785,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     let projectAdapters = null;
 
     function getProjectTypeForSection(section) {
+        if (section === 'composite') return 'composite';
         if (section === '3d') return '3d';
         return section === 'stitch' ? 'stitch' : 'studio';
     }
@@ -2675,6 +2793,283 @@ window.addEventListener('DOMContentLoaded', async () => {
     function getLibraryProjectType(entry) {
         if (!entry) return 'studio';
         return inferProjectTypeFromPayload(entry.payload, entry.projectType || null);
+    }
+
+    function cloneSerializable(value) {
+        return value == null ? value : JSON.parse(JSON.stringify(value));
+    }
+
+    function getCompositeBridgeState() {
+        return store.getState().ui?.compositeEditorBridge || {
+            active: false,
+            layerId: null,
+            originalLibraryId: null,
+            originalLibraryName: null
+        };
+    }
+
+    function setCompositeBridgeState(nextBridge) {
+        store.setState((state) => ({
+            ...state,
+            ui: {
+                ...state.ui,
+                compositeEditorBridge: {
+                    active: !!nextBridge?.active,
+                    layerId: nextBridge?.layerId || null,
+                    originalLibraryId: nextBridge?.originalLibraryId || null,
+                    originalLibraryName: nextBridge?.originalLibraryName || null
+                }
+            }
+        }), { render: false });
+    }
+
+    function clearCompositeBridgeState() {
+        setCompositeBridgeState({
+            active: false,
+            layerId: null,
+            originalLibraryId: null,
+            originalLibraryName: null
+        });
+    }
+
+    function clearCompositeAutosaveTimer() {
+        if (!compositeAutosaveTimer) return;
+        clearTimeout(compositeAutosaveTimer);
+        compositeAutosaveTimer = null;
+    }
+
+    async function ensureCompositeEditorRenderEngineReady() {
+        if (!compositeEditorRenderEngine) {
+            compositeEditorRenderEngine = new NoiseStudioEngine(registry, {
+                onNotice: (text, type = 'info') => logTone('composite.render', text, type, {
+                    dedupeKey: `composite-hidden-editor:${type}:${text}`,
+                    dedupeWindowMs: 300
+                })
+            });
+        }
+        if (!compositeEditorRenderCanvas) {
+            compositeEditorRenderCanvas = document.createElement('canvas');
+            compositeEditorRenderCanvas.width = 1;
+            compositeEditorRenderCanvas.height = 1;
+        }
+        if (!compositeEditorRenderReady) {
+            await compositeEditorRenderEngine.init(compositeEditorRenderCanvas);
+            compositeEditorRenderReady = true;
+        }
+        return compositeEditorRenderEngine;
+    }
+
+    function buildEditorDocumentFromPayload(rawPayload) {
+        const studioAdapter = projectAdapters?.getAdapter('studio');
+        const validated = studioAdapter?.validatePayload
+            ? studioAdapter.validatePayload(rawPayload)
+            : stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload));
+        const baseDocument = store.getState().document;
+        const runtimePayload = stripStudioPreview(validated);
+        const layerStack = reindexStack(registry, runtimePayload.layerStack || [])
+            .map((instance) => applyEditorSettingsToLayerInstance(instance, store.getState().settings));
+        const requestedSelectionId = runtimePayload.selection?.layerInstanceId;
+        const selection = requestedSelectionId && layerStack.some((instance) => instance.instanceId === requestedSelectionId)
+            ? runtimePayload.selection
+            : { layerInstanceId: layerStack[0]?.instanceId || null };
+        return applyEditorSettingsToDocument({
+            ...baseDocument,
+            ...runtimePayload,
+            version: 'mns/v2',
+            kind: 'document',
+            mode: 'studio',
+            workspace: normalizeWorkspace('studio', runtimePayload.workspace || baseDocument.workspace, !!selection.layerInstanceId),
+            source: runtimePayload.source || baseDocument.source,
+            palette: runtimePayload.palette || baseDocument.palette,
+            layerStack,
+            selection,
+            view: normalizeViewState({ ...baseDocument.view, ...(runtimePayload.view || {}) }),
+            export: { ...baseDocument.export, ...(runtimePayload.export || {}) },
+            batch: createEmptyBatchState()
+        }, store.getState().settings);
+    }
+
+    async function captureCompositeEditorLayerDocument(rawPayload) {
+        const editorDocument = buildEditorDocumentFromPayload(rawPayload);
+        if (!editorDocument.source?.imageData) {
+            throw new Error('Editor-backed Composite layers require an embedded source image.');
+        }
+        const hiddenEngine = await ensureCompositeEditorRenderEngineReady();
+        const image = await loadImageFromDataUrl(editorDocument.source.imageData);
+        await hiddenEngine.loadImage(image, editorDocument.source);
+        return captureStudioDocumentSnapshot(hiddenEngine, editorDocument, rawPayload);
+    }
+
+    function getCompositeLayerInsertPosition(documentState, width = 0, spacing = 48) {
+        const bounds = computeCompositeDocumentBounds(documentState);
+        if (!(bounds.width > 0) || !(bounds.height > 0)) {
+            return { x: 0, y: 0 };
+        }
+        return {
+            x: Math.round(bounds.maxX + spacing),
+            y: Math.round(bounds.minY)
+        };
+    }
+
+    async function createCompositeImageLayerFromFile(file, documentState) {
+        const imageData = await fileToDataUrl(file);
+        const image = await loadImageFromDataUrl(imageData);
+        const width = Math.max(1, image.naturalWidth || image.width || 1);
+        const height = Math.max(1, image.naturalHeight || image.height || 1);
+        const position = getCompositeLayerInsertPosition(documentState, width);
+        return {
+            id: createCompositeLayerId('image'),
+            kind: 'image',
+            name: stripProjectExtension(file.name || 'Image') || 'Image',
+            visible: true,
+            locked: false,
+            z: normalizeCompositeDocument(documentState).layers.length,
+            x: position.x,
+            y: position.y,
+            scale: 1,
+            rotation: 0,
+            opacity: 1,
+            blendMode: 'normal',
+            source: {
+                originalLibraryId: null,
+                originalLibraryName: null,
+                originalProjectType: null
+            },
+            imageAsset: {
+                name: file.name || 'Image',
+                type: file.type || 'image/png',
+                imageData,
+                width,
+                height
+            }
+        };
+    }
+
+    function moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex) {
+        const normalized = normalizeCompositeDocument(documentState);
+        const visualLayers = [...normalized.layers].sort((a, b) => (b.z || 0) - (a.z || 0));
+        const currentIndex = visualLayers.findIndex((layer) => layer.id === layerId);
+        if (currentIndex < 0) return normalized;
+        const boundedTargetIndex = Math.max(0, Math.min(visualLayers.length - 1, targetIndex));
+        if (boundedTargetIndex === currentIndex) return normalized;
+        const [moved] = visualLayers.splice(currentIndex, 1);
+        visualLayers.splice(boundedTargetIndex, 0, moved);
+        return normalizeCompositeDocument({
+            ...normalized,
+            layers: [...visualLayers].reverse().map((layer, index) => ({
+                ...layer,
+                z: index
+            }))
+        });
+    }
+
+    function scheduleCompositeAutosave(reason = 'Composite project updated.') {
+        clearCompositeAutosaveTimer();
+        if (!getActiveLibraryOrigin('composite')?.id) return;
+        compositeAutosaveTimer = setTimeout(() => {
+            compositeAutosaveTimer = null;
+            flushCompositeAutosave({ reason }).catch((error) => {
+                console.error(error);
+            });
+        }, 2500);
+        logProcess('active', 'composite.autosave', reason, {
+            dedupeKey: `composite-autosave-scheduled:${getActiveLibraryOrigin('composite')?.id || 'none'}`,
+            dedupeWindowMs: 300
+        });
+    }
+
+    async function flushCompositeAutosave(options = {}) {
+        clearCompositeAutosaveTimer();
+        const activeOrigin = getActiveLibraryOrigin('composite');
+        const normalized = normalizeCompositeDocument(store.getState().compositeDocument);
+        if (!activeOrigin?.id || !normalized.layers.length || compositeAutosaveInFlight) {
+            return null;
+        }
+
+        compositeAutosaveInFlight = true;
+        try {
+            logProcess('active', 'composite.autosave', options.reason || `Autosaving "${activeOrigin.name || 'Composite Project'}" to the Library...`);
+            const saved = await actions.saveProjectToLibrary(
+                activeOrigin.name || getSuggestedCompositeProjectName(normalized),
+                {
+                    projectType: 'composite',
+                    preferExisting: true,
+                    promptless: true,
+                    suppressWorkspaceOverlay: true,
+                    suppressNotice: true
+                }
+            );
+            if (saved) {
+                logProcess('success', 'composite.autosave', `Autosaved "${saved.name || activeOrigin.name || 'Composite Project'}" to the Library.`);
+            }
+            return saved;
+        } catch (error) {
+            logProcess('warning', 'composite.autosave', error?.message || 'Could not autosave the Composite project.');
+            return null;
+        } finally {
+            compositeAutosaveInFlight = false;
+        }
+    }
+
+    async function syncBridgeEditorDocumentBackToComposite() {
+        const bridge = getCompositeBridgeState();
+        if (!bridge.active || !bridge.layerId) {
+            return false;
+        }
+        const state = store.getState();
+        const currentLayer = normalizeCompositeDocument(state.compositeDocument).layers.find((layer) => layer.id === bridge.layerId) || null;
+        if (!currentLayer || currentLayer.kind !== 'editor-project') {
+            clearCompositeBridgeState();
+            return false;
+        }
+        if (!state.document.source?.imageData) {
+            clearCompositeBridgeState();
+            return false;
+        }
+        if (!engine.hasImage()) {
+            const image = await loadImageFromDataUrl(state.document.source.imageData);
+            await engine.loadImage(image, state.document.source);
+        }
+        const capture = await captureStudioDocumentSnapshot(engine, state.document);
+        updateCompositeDocument((documentState) => ({
+            ...normalizeCompositeDocument(documentState),
+            layers: normalizeCompositeDocument(documentState).layers.map((layer) => layer.id === bridge.layerId
+                ? {
+                    ...layer,
+                    embeddedEditorDocument: capture.payload
+                }
+                : layer)
+        }), { renderComposite: true });
+        logProcess('success', 'composite.link', `Updated the linked Composite layer "${currentLayer.name || 'Layer'}" from Editor.`);
+        clearCompositeBridgeState();
+        return true;
+    }
+
+    async function queueCompositeLayerRerenders(layerIds = []) {
+        const uniqueIds = [...new Set((layerIds || []).filter(Boolean))];
+        for (let index = 0; index < uniqueIds.length; index += 1) {
+            const layerId = uniqueIds[index];
+            const layer = normalizeCompositeDocument(store.getState().compositeDocument).layers.find((entry) => entry.id === layerId) || null;
+            if (!layer || layer.kind !== 'editor-project' || !layer.embeddedEditorDocument) continue;
+            try {
+                const capture = await captureCompositeEditorLayerDocument(layer.embeddedEditorDocument);
+                updateCompositeDocument((documentState) => ({
+                    ...normalizeCompositeDocument(documentState),
+                    layers: normalizeCompositeDocument(documentState).layers.map((entry) => entry.id === layerId
+                        ? {
+                            ...entry,
+                            embeddedEditorDocument: capture.payload
+                        }
+                        : entry)
+                }), { renderComposite: true });
+                logProgressProcess('composite.render', `Refreshed embedded Editor layer ${index + 1}/${uniqueIds.length}.`, (index + 1) / Math.max(1, uniqueIds.length), {
+                    dedupeKey: `composite-rerender:${layerId}:${index}`
+                });
+            } catch (error) {
+                logProcess('warning', 'composite.render', error?.message || `Could not refresh the embedded Editor render for "${layer.name || 'Layer'}".`);
+            }
+            await maybeYieldToUi(index, 1);
+        }
     }
 
     function isLikelyImageFile(file) {
@@ -3662,8 +4057,573 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return { status: 'failed', message };
             }
         },
-        setActiveSection(section) {
-            commitActiveSection(section);
+        async setActiveSection(section) {
+            const currentState = store.getState();
+            const currentSection = currentState.ui.activeSection;
+            const nextSection = section === 'composite'
+                ? 'composite'
+                : section === 'library'
+                    ? 'library'
+                    : section === 'stitch'
+                        ? 'stitch'
+                        : section === '3d'
+                            ? '3d'
+                            : section === 'settings'
+                                ? 'settings'
+                                : section === 'logs'
+                                    ? 'logs'
+                                    : 'editor';
+            if (nextSection === currentSection) return;
+
+            if (currentSection === 'composite' && nextSection !== 'composite') {
+                await flushCompositeAutosave({
+                    reason: 'Flushing pending Composite autosave before switching sections.'
+                });
+            }
+
+            if (currentSection === 'composite' && nextSection === 'editor') {
+                const compositeState = normalizeCompositeDocument(store.getState().compositeDocument);
+                const selectedLayer = getSelectedCompositeLayer(compositeState);
+                if (selectedLayer?.kind === 'editor-project' && selectedLayer.embeddedEditorDocument) {
+                    if (!await ensureProjectCanBeReplaced('studio', 'opening the linked Composite layer in Editor')) return;
+                    try {
+                        const editorDocument = buildEditorDocumentFromPayload(selectedLayer.embeddedEditorDocument);
+                        if (!editorDocument.source?.imageData) {
+                            throw new Error('The selected Composite layer is missing its embedded Editor source image.');
+                        }
+                        const image = await loadImageFromDataUrl(editorDocument.source.imageData);
+                        await engine.loadImage(image, editorDocument.source);
+                        stopPlayback();
+                        paletteExtractionImage = null;
+                        paletteExtractionOwner = null;
+                        updateDocument(() => editorDocument, { render: false });
+                        clearActiveLibraryOrigin('studio');
+                        setCompositeBridgeState({
+                            active: true,
+                            layerId: selectedLayer.id,
+                            originalLibraryId: selectedLayer.source?.originalLibraryId || null,
+                            originalLibraryName: selectedLayer.source?.originalLibraryName || null
+                        });
+                        commitActiveSection('editor');
+                        engine.requestRender(store.getState().document);
+                        logProcess('success', 'composite.link', `Opened "${selectedLayer.name || 'Layer'}" in Editor from Composite.`);
+                        return;
+                    } catch (error) {
+                        logProcess('error', 'composite.link', error?.message || 'Could not open the selected Composite layer in Editor.');
+                        setNotice(error?.message || 'Could not open the selected Composite layer in Editor.', 'error', 7000);
+                        return;
+                    }
+                }
+            }
+
+            if (getCompositeBridgeState().active && nextSection !== 'editor') {
+                try {
+                    await syncBridgeEditorDocumentBackToComposite();
+                } catch (error) {
+                    logProcess('warning', 'composite.link', error?.message || 'Could not sync the linked Editor changes back into Composite.');
+                    setNotice(error?.message || 'Could not sync the linked Editor changes back into Composite.', 'warning', 7000);
+                }
+            }
+
+            commitActiveSection(nextSection);
+        },
+        async newCompositeProject() {
+            if (!await ensureProjectCanBeReplaced('composite', 'starting a new Composite project')) return false;
+            clearCompositeAutosaveTimer();
+            clearCompositeBridgeState();
+            updateCompositeDocument(() => createEmptyCompositeDocument(), {
+                renderComposite: true,
+                skipCompositeAutosave: true
+            });
+            clearActiveLibraryOrigin('composite');
+            commitActiveSection('composite');
+            logProcess('success', 'composite.workspace', 'Started a new Composite project.');
+            setNotice('Started a new Composite project.', 'success', 4200);
+            return true;
+        },
+        openCompositeImagePicker() {
+            view?.openCompositeImagePicker?.();
+        },
+        openCompositeStatePicker() {
+            view?.openCompositeStatePicker?.();
+        },
+        openCompositeProjectPicker() {
+            return view?.openCompositeProjectPicker?.();
+        },
+        setCompositeSidebarView(sidebarView) {
+            updateCompositeDocument((documentState) => ({
+                ...documentState,
+                workspace: {
+                    ...documentState.workspace,
+                    sidebarView: sidebarView === 'transform' || sidebarView === 'blend' ? sidebarView : 'layers'
+                }
+            }));
+        },
+        selectCompositeLayer(layerId) {
+            updateCompositeDocument((documentState) => ({
+                ...documentState,
+                selection: {
+                    layerId: layerId || null
+                }
+            }), { renderComposite: true, skipCompositeAutosave: true });
+        },
+        updateCompositeLayerFields(layerId, patch = {}) {
+            if (!layerId || !patch || typeof patch !== 'object') return;
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    layers: normalized.layers.map((layer) => layer.id === layerId
+                        ? {
+                            ...layer,
+                            ...patch
+                        }
+                        : layer)
+                };
+            });
+        },
+        toggleCompositeLayerVisible(layerId) {
+            if (!layerId) return;
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    layers: normalized.layers.map((layer) => layer.id === layerId
+                        ? {
+                            ...layer,
+                            visible: layer.visible === false
+                        }
+                        : layer)
+                };
+            });
+        },
+        toggleCompositeLayerLocked(layerId) {
+            if (!layerId) return;
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    layers: normalized.layers.map((layer) => layer.id === layerId
+                        ? {
+                            ...layer,
+                            locked: !layer.locked
+                        }
+                        : layer)
+                };
+            });
+        },
+        moveCompositeLayer(layerId, direction = 0) {
+            if (!layerId || !direction) return;
+            const normalized = normalizeCompositeDocument(store.getState().compositeDocument);
+            const visualLayers = [...normalized.layers].sort((a, b) => (b.z || 0) - (a.z || 0));
+            const currentIndex = visualLayers.findIndex((layer) => layer.id === layerId);
+            if (currentIndex < 0) return;
+            const targetIndex = currentIndex - Math.sign(Number(direction) || 0);
+            updateCompositeDocument((documentState) => moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex));
+        },
+        reorderCompositeLayer(layerId, targetLayerId) {
+            if (!layerId || !targetLayerId || layerId === targetLayerId) return;
+            const normalized = normalizeCompositeDocument(store.getState().compositeDocument);
+            const visualLayers = [...normalized.layers].sort((a, b) => (b.z || 0) - (a.z || 0));
+            const targetIndex = visualLayers.findIndex((layer) => layer.id === targetLayerId);
+            if (targetIndex < 0) return;
+            updateCompositeDocument((documentState) => moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex));
+        },
+        removeCompositeLayer(layerId) {
+            if (!layerId) return;
+            updateCompositeDocument((documentState) => ({
+                ...normalizeCompositeDocument(documentState),
+                layers: normalizeCompositeDocument(documentState).layers.filter((layer) => layer.id !== layerId)
+            }));
+        },
+        patchCompositeView(patch = {}) {
+            if (!patch || typeof patch !== 'object') return;
+            updateCompositeDocument((documentState) => ({
+                ...documentState,
+                view: {
+                    ...documentState.view,
+                    ...patch
+                }
+            }), { renderComposite: true });
+        },
+        patchCompositeExport(patch = {}) {
+            if (!patch || typeof patch !== 'object') return;
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    export: {
+                        ...normalized.export,
+                        ...patch
+                    }
+                };
+            }, { renderComposite: true });
+        },
+        frameCompositeView() {
+            updateCompositeDocument((documentState) => ({
+                ...documentState,
+                view: {
+                    ...documentState.view,
+                    zoom: 1,
+                    panX: 0,
+                    panY: 0
+                }
+            }), { renderComposite: true });
+        },
+        async listCompositeSourceProjects() {
+            await ensureStudioProjectPayloadPreviewsBackfilled();
+            const projects = (await getAllLibraryProjectRecords())
+                .filter((entry) => getLibraryProjectType(entry) === 'studio')
+                .sort((a, b) => Number(b.timestamp || 0) - Number(a.timestamp || 0));
+            return Promise.all(projects.map(async (entry) => {
+                let previewDataUrl = String(entry?.payload?.preview?.imageData || '');
+                if (!previewDataUrl && entry?.blob instanceof Blob) {
+                    try {
+                        previewDataUrl = await blobToDataUrl(entry.blob);
+                    } catch (_error) {
+                        previewDataUrl = '';
+                    }
+                }
+                if (!previewDataUrl) {
+                    previewDataUrl = String(entry?.payload?.source?.imageData || '');
+                }
+                return {
+                    id: entry.id,
+                    name: entry.name || 'Editor Project',
+                    previewDataUrl,
+                    dimensionsText: `${Number(entry.renderWidth || entry.sourceWidth || entry.payload?.preview?.width || entry.payload?.source?.width || 0) || 0} x ${Number(entry.renderHeight || entry.sourceHeight || entry.payload?.preview?.height || entry.payload?.source?.height || 0) || 0}`,
+                    savedAtText: entry.timestamp ? new Date(entry.timestamp).toLocaleString() : 'Unknown save time'
+                };
+            }));
+        },
+        async addCompositeEditorProjects(ids = []) {
+            const targetIds = [...new Set((ids || []).filter(Boolean))];
+            if (!targetIds.length) return [];
+            await showWorkspaceProgress('composite', {
+                title: 'Adding Editor Projects',
+                message: 'Loading the selected Editor projects from the Library...',
+                progress: 0.12
+            });
+            try {
+                const records = await Promise.all(targetIds.map((id) => getFromLibraryDB(id).catch(() => null)));
+                let workingDocument = normalizeCompositeDocument(store.getState().compositeDocument);
+                const appendedLayers = [];
+
+                for (let index = 0; index < records.length; index += 1) {
+                    const record = records[index];
+                    if (!record || getLibraryProjectType(record) !== 'studio') continue;
+                    const initialPayload = cloneSerializable(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(record.payload)));
+                    if (!initialPayload?.preview?.imageData && record?.blob instanceof Blob) {
+                        try {
+                            initialPayload.preview = {
+                                imageData: await blobToDataUrl(record.blob),
+                                width: Number(record.renderWidth || initialPayload.source?.width || 0),
+                                height: Number(record.renderHeight || initialPayload.source?.height || 0),
+                                updatedAt: Number(record.timestamp || Date.now())
+                            };
+                        } catch (_error) {
+                            initialPayload.preview = initialPayload.preview || null;
+                        }
+                    }
+                    if (!initialPayload?.preview?.imageData && initialPayload?.source?.imageData) {
+                        initialPayload.preview = {
+                            imageData: String(initialPayload.source.imageData),
+                            width: Number(initialPayload.source.width || 0),
+                            height: Number(initialPayload.source.height || 0),
+                            updatedAt: Number(record.timestamp || Date.now())
+                        };
+                    }
+                    const position = getCompositeLayerInsertPosition(workingDocument);
+                    const nextLayer = {
+                        id: createCompositeLayerId('editor'),
+                        kind: 'editor-project',
+                        name: stripProjectExtension(record.name || initialPayload.source?.name || 'Editor Project') || 'Editor Project',
+                        visible: true,
+                        locked: false,
+                        z: workingDocument.layers.length,
+                        x: position.x,
+                        y: position.y,
+                        scale: 1,
+                        rotation: 0,
+                        opacity: 1,
+                        blendMode: 'normal',
+                        source: {
+                            originalLibraryId: record.id || null,
+                            originalLibraryName: record.name || null,
+                            originalProjectType: 'studio'
+                        },
+                        embeddedEditorDocument: initialPayload
+                    };
+                    appendedLayers.push(nextLayer);
+                    workingDocument = normalizeCompositeDocument({
+                        ...workingDocument,
+                        layers: [...workingDocument.layers, nextLayer],
+                        selection: { layerId: nextLayer.id }
+                    });
+                    logProgressProcess('composite.layers', `Prepared Editor layer ${index + 1}/${records.length}.`, (index + 1) / Math.max(1, records.length), {
+                        dedupeKey: `composite-add-editor:${record.id || index}`
+                    });
+                    await maybeYieldToUi(index, 1);
+                }
+
+                if (appendedLayers.length) {
+                    updateCompositeDocument((documentState) => ({
+                        ...normalizeCompositeDocument(documentState),
+                        layers: [...normalizeCompositeDocument(documentState).layers, ...appendedLayers],
+                        selection: { layerId: appendedLayers[appendedLayers.length - 1]?.id || documentState.selection.layerId }
+                    }));
+                    queueCompositeLayerRerenders(appendedLayers.map((layer) => layer.id));
+                    logProcess('success', 'composite.layers', `Added ${appendedLayers.length} Editor project layer${appendedLayers.length === 1 ? '' : 's'} to Composite.`);
+                    setNotice(`Added ${appendedLayers.length} Editor project layer${appendedLayers.length === 1 ? '' : 's'} to Composite.`, 'success', 4200);
+                }
+                clearWorkspaceProgress('composite');
+                return appendedLayers;
+            } catch (error) {
+                clearWorkspaceProgress('composite');
+                logProcess('error', 'composite.layers', error?.message || 'Could not add the selected Editor projects to Composite.');
+                setNotice(error?.message || 'Could not add the selected Editor projects to Composite.', 'error', 7000);
+                return [];
+            }
+        },
+        async addCompositeImageFiles(files = []) {
+            const sourceFiles = (files || []).filter((file) => isLikelyImageFile(file));
+            if (!sourceFiles.length) {
+                setNotice('Choose one or more image files to add to Composite.', 'warning', 5000);
+                return [];
+            }
+            await showWorkspaceProgress('composite', {
+                title: 'Adding Images',
+                message: 'Embedding the selected images into Composite...',
+                progress: 0.12
+            });
+            try {
+                let workingDocument = normalizeCompositeDocument(store.getState().compositeDocument);
+                const nextLayers = [];
+                for (let index = 0; index < sourceFiles.length; index += 1) {
+                    const file = sourceFiles[index];
+                    const layer = await createCompositeImageLayerFromFile(file, workingDocument);
+                    nextLayers.push(layer);
+                    workingDocument = normalizeCompositeDocument({
+                        ...workingDocument,
+                        layers: [...workingDocument.layers, layer],
+                        selection: { layerId: layer.id }
+                    });
+                    logProgressProcess('composite.layers', `Embedded image ${index + 1}/${sourceFiles.length}.`, (index + 1) / Math.max(1, sourceFiles.length), {
+                        dedupeKey: `composite-add-image:${file.name}:${index}`
+                    });
+                    await maybeYieldToUi(index, 1);
+                }
+                updateCompositeDocument((documentState) => ({
+                    ...normalizeCompositeDocument(documentState),
+                    layers: [...normalizeCompositeDocument(documentState).layers, ...nextLayers],
+                    selection: { layerId: nextLayers[nextLayers.length - 1]?.id || documentState.selection.layerId }
+                }));
+                clearWorkspaceProgress('composite');
+                logProcess('success', 'composite.layers', `Added ${nextLayers.length} image layer${nextLayers.length === 1 ? '' : 's'} to Composite.`);
+                setNotice(`Added ${nextLayers.length} image layer${nextLayers.length === 1 ? '' : 's'} to Composite.`, 'success', 4200);
+                return nextLayers;
+            } catch (error) {
+                clearWorkspaceProgress('composite');
+                logProcess('error', 'composite.layers', error?.message || 'Could not add the selected images to Composite.');
+                setNotice(error?.message || 'Could not add the selected images to Composite.', 'error', 7000);
+                return [];
+            }
+        },
+        async openCompositeStateFile(file) {
+            if (!file) return false;
+            if (!await ensureProjectCanBeReplaced('composite', 'loading a Composite state file')) return false;
+            try {
+                await showWorkspaceProgress('composite', {
+                    title: 'Loading Composite',
+                    message: `Reading "${file.name}"...`,
+                    progress: 0.12
+                });
+                const parsed = normalizeLegacyDocumentPayload(await readJsonFile(file));
+                const validated = normalizeCompositeDocument(validateImportPayload(stripLibraryEnvelopeMetadata(parsed), 'composite-document'));
+                clearCompositeAutosaveTimer();
+                clearCompositeBridgeState();
+                updateCompositeDocument(() => validated, {
+                    renderComposite: true,
+                    skipCompositeAutosave: true
+                });
+                clearActiveLibraryOrigin('composite');
+                commitActiveSection('composite');
+                clearWorkspaceProgress('composite');
+                logProcess('success', 'composite.workspace', `Loaded Composite state file "${file.name}".`);
+                setNotice(`Loaded Composite state file "${file.name}".`, 'success', 4200);
+                return true;
+            } catch (error) {
+                clearWorkspaceProgress('composite');
+                logProcess('error', 'composite.workspace', error?.message || `Could not load "${file?.name || 'that Composite file'}".`);
+                setNotice(error?.message || 'Could not load that Composite file.', 'error', 7000);
+                return false;
+            }
+        },
+        async saveCompositeState() {
+            const compositeDocument = normalizeCompositeDocument(store.getState().compositeDocument);
+            if (!compositeDocument.layers.length) {
+                setNotice('Add one or more layers before saving a Composite JSON file.', 'warning', 6000);
+                return null;
+            }
+            await showWorkspaceProgress('composite', {
+                title: 'Saving Composite',
+                message: 'Capturing the Composite preview and JSON payload...',
+                progress: 0.12
+            });
+            try {
+                const capture = await captureCompositeDocumentSnapshot(compositeDocument);
+                setWorkspaceProgress('composite', {
+                    active: true,
+                    title: 'Saving Composite',
+                    message: 'Writing the self-contained Composite JSON...',
+                    progress: 0.82
+                });
+                const baseName = getSuggestedCompositeProjectName(compositeDocument) || 'Composite Project';
+                const saveResult = await saveJsonLocally(capture.payload, `${baseName}.mns.json`, {
+                    title: 'Save Composite JSON',
+                    buttonLabel: 'Save JSON',
+                    filters: [{ name: 'Composite JSON', extensions: ['json'] }]
+                });
+                if (wasSaveCancelled(saveResult)) {
+                    clearWorkspaceProgress('composite');
+                    logProcess('info', 'composite.workspace', 'Cancelled the Composite JSON save dialog.');
+                    setNotice('Composite save cancelled.', 'info', 4200);
+                    return null;
+                }
+                if (!didSaveFile(saveResult)) {
+                    throw new Error(saveResult?.error || 'Could not save the Composite JSON.');
+                }
+                let syncedRecord = null;
+                if (getActiveLibraryOrigin('composite')?.id) {
+                    syncedRecord = await flushCompositeAutosave({
+                        reason: 'Updating the linked Composite Library project after a local JSON save.'
+                    });
+                }
+                clearWorkspaceProgress('composite');
+                logProcess('success', 'composite.workspace', 'Saved the Composite JSON locally.');
+                setNotice(
+                    getActiveLibraryOrigin('composite')?.id && !syncedRecord
+                        ? 'Composite JSON saved locally, but the linked Library project could not be updated.'
+                        : 'Composite JSON saved locally.',
+                    getActiveLibraryOrigin('composite')?.id && !syncedRecord ? 'warning' : 'success',
+                    5200
+                );
+                return saveResult;
+            } catch (error) {
+                clearWorkspaceProgress('composite');
+                logProcess('error', 'composite.workspace', error?.message || 'Could not save the Composite JSON.');
+                setNotice(error?.message || 'Could not save the Composite JSON.', 'error', 7000);
+                return null;
+            }
+        },
+        async exportCompositePng() {
+            const compositeDocument = normalizeCompositeDocument(store.getState().compositeDocument);
+            if (!compositeDocument.layers.length) {
+                setNotice('Add one or more layers before exporting a Composite PNG.', 'warning', 6000);
+                return null;
+            }
+            await showWorkspaceProgress('composite', {
+                title: 'Exporting Composite PNG',
+                message: 'Rendering the Composite viewport to PNG...',
+                progress: 0.16
+            });
+            try {
+                const blob = await view.exportCompositePng(compositeDocument);
+                const baseName = getSuggestedCompositeProjectName(compositeDocument) || 'composite-export';
+                setWorkspaceProgress('composite', {
+                    active: true,
+                    title: 'Exporting Composite PNG',
+                    message: `Writing "${baseName}.png"...`,
+                    progress: 0.88
+                });
+                const saveResult = await saveBlobLocally(blob, `${baseName}.png`, {
+                    title: 'Save Composite PNG',
+                    buttonLabel: 'Save PNG',
+                    filters: [{ name: 'PNG Image', extensions: ['png'] }]
+                });
+                clearWorkspaceProgress('composite');
+                if (wasSaveCancelled(saveResult)) {
+                    logProcess('info', 'composite.export', 'Cancelled the Composite PNG save dialog.');
+                    setNotice('Composite PNG save cancelled.', 'info', 4200);
+                    return null;
+                }
+                if (!didSaveFile(saveResult)) {
+                    throw new Error(saveResult?.error || 'Could not save the Composite PNG.');
+                }
+                logProcess('success', 'composite.export', `Exported "${baseName}.png" from Composite.`);
+                setNotice('Composite PNG export complete.', 'success', 4200);
+                return saveResult;
+            } catch (error) {
+                clearWorkspaceProgress('composite');
+                logProcess('error', 'composite.export', error?.message || 'Could not export the Composite PNG.');
+                setNotice(error?.message || 'Could not export the Composite PNG.', 'error', 7000);
+                return null;
+            }
+        },
+        async updateOriginalEditorProjectFromComposite() {
+            const bridge = getCompositeBridgeState();
+            if (!bridge.active || !bridge.originalLibraryId) {
+                setNotice('Select a linked Composite Editor layer before updating its original Library project.', 'warning', 6000);
+                return false;
+            }
+            const confirmed = await requestAppConfirmDialog(view, {
+                title: 'Update Original Editor Project',
+                text: `Overwrite "${bridge.originalLibraryName || 'the original Editor project'}" in the Library with the current linked Editor document?`,
+                confirmLabel: 'Update Original',
+                cancelLabel: 'Cancel',
+                isDanger: true
+            });
+            if (!confirmed) return false;
+            try {
+                const state = store.getState();
+                if (!state.document.source?.imageData) {
+                    throw new Error('The current Editor document does not include an embedded source image.');
+                }
+                if (!engine.hasImage()) {
+                    const image = await loadImageFromDataUrl(state.document.source.imageData);
+                    await engine.loadImage(image, state.document.source);
+                }
+                const existingRecord = await getFromLibraryDB(bridge.originalLibraryId);
+                if (!existingRecord || getLibraryProjectType(existingRecord) !== 'studio') {
+                    throw new Error('The original Editor Library project could not be found.');
+                }
+                const capture = await captureStudioDocumentSnapshot(engine, state.document);
+                const projectData = buildLibraryProjectRecord({
+                    id: existingRecord.id,
+                    timestamp: Date.now(),
+                    name: existingRecord.name || bridge.originalLibraryName || getSuggestedProjectName(state.document),
+                    blob: capture.blob,
+                    payload: capture.payload,
+                    tags: normalizeLibraryTags(existingRecord.tags || []),
+                    projectType: 'studio',
+                    hoverSource: capture.payload.source,
+                    sourceWidth: Number(capture.payload.source?.width || 0),
+                    sourceHeight: Number(capture.payload.source?.height || 0),
+                    sourceArea: Number(capture.payload.source?.width || 0) * Number(capture.payload.source?.height || 0),
+                    sourceCount: capture.payload.source?.imageData ? 1 : 0,
+                    renderWidth: Number(capture.preview?.width || capture.payload.source?.width || 0),
+                    renderHeight: Number(capture.preview?.height || capture.payload.source?.height || 0)
+                });
+                await saveToLibraryDB(projectData);
+                await upsertDerivedStudioAsset(projectData);
+                updateCompositeDocument((documentState) => ({
+                    ...normalizeCompositeDocument(documentState),
+                    layers: normalizeCompositeDocument(documentState).layers.map((layer) => layer.id === bridge.layerId
+                        ? {
+                            ...layer,
+                            embeddedEditorDocument: capture.payload
+                        }
+                        : layer)
+                }));
+                notifyLibraryChanged();
+                logProcess('success', 'composite.link', `Updated the original Editor Library project "${projectData.name}" from the linked Composite layer.`);
+                setNotice(`Updated "${projectData.name}" in the Library.`, 'success', 5200);
+                return true;
+            } catch (error) {
+                logProcess('error', 'composite.link', error?.message || 'Could not update the original Editor Library project.');
+                setNotice(error?.message || 'Could not update the original Editor Library project.', 'error', 7000);
+                return false;
+            }
         },
         setMode(mode) {
             updateDocument((document) => ({
@@ -4778,7 +5738,16 @@ window.addEventListener('DOMContentLoaded', async () => {
                         sourceWidth: Number(entry.sourceWidth || entry.hoverSource?.width || extractLibraryProjectMeta(entry.payload).hoverSource?.width || entry.payload?.source?.width || 0),
                         sourceHeight: Number(entry.sourceHeight || entry.hoverSource?.height || extractLibraryProjectMeta(entry.payload).hoverSource?.height || entry.payload?.source?.height || 0),
                         sourceAreaOverride: Number(entry.sourceAreaOverride || extractLibraryProjectMeta(entry.payload).sourceArea || 0),
-                        sourceCount: Number(entry.sourceCount || extractLibraryProjectMeta(entry.payload).sourceCount || (entry.payload?.kind === 'stitch-document' ? entry.payload?.inputs?.length || 0 : (entry.payload?.source?.imageData ? 1 : 0)) || 0)
+                        sourceCount: Number(
+                            entry.sourceCount
+                            || extractLibraryProjectMeta(entry.payload).sourceCount
+                            || (entry.payload?.kind === 'composite-document' || entry.payload?.mode === 'composite'
+                                ? entry.payload?.layers?.length || 0
+                                : entry.payload?.kind === 'stitch-document'
+                                    ? entry.payload?.inputs?.length || 0
+                                    : (entry.payload?.source?.imageData ? 1 : 0))
+                            || 0
+                        )
                     }));
             } catch (_error) {
                 return [];
@@ -7327,6 +8296,74 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         },
         {
+            type: 'composite',
+            label: 'Composite',
+            getCurrentDocument(state) {
+                return state.compositeDocument;
+            },
+            isEmpty(document) {
+                return !normalizeCompositeDocument(document).layers.length;
+            },
+            canSave(document) {
+                return normalizeCompositeDocument(document).layers.length > 0;
+            },
+            emptyNotice: 'Add one or more layers in Composite before saving to the Library.',
+            suggestName(document, nameOverride = null) {
+                return getSuggestedCompositeProjectName(document, nameOverride);
+            },
+            serializeDocument(document) {
+                return buildCompositeLibraryPayload(document);
+            },
+            validatePayload(rawPayload) {
+                const normalized = stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload));
+                return normalizeCompositeDocument(validateImportPayload(normalized, 'composite-document'));
+            },
+            async captureDocument(document) {
+                const normalized = normalizeCompositeDocument(document);
+                const capture = await captureCompositeDocumentSnapshot(normalized);
+                return {
+                    payload: capture.payload || buildCompositeLibraryPayload(normalized),
+                    blob: capture.blob || null,
+                    summary: {
+                        ...summarizeCompositeDocument(capture.payload || normalized),
+                        hoverSource: null
+                    }
+                };
+            },
+            async prepareImportedProject(rawPayload) {
+                const validated = this.validatePayload(rawPayload);
+                let capture = null;
+                try {
+                    capture = await captureCompositeDocumentSnapshot(validated);
+                } catch (_error) {
+                    capture = null;
+                }
+                const payload = capture?.payload || buildCompositeLibraryPayload(validated);
+                return {
+                    payload,
+                    blob: capture?.blob || (payload.preview?.imageData ? await dataUrlToBlob(payload.preview.imageData) : null),
+                    summary: {
+                        ...summarizeCompositeDocument(payload),
+                        hoverSource: null
+                    }
+                };
+            },
+            async restorePayload(rawPayload, libraryId = null, libraryName = null) {
+                const validated = this.validatePayload(rawPayload);
+                clearCompositeAutosaveTimer();
+                clearCompositeBridgeState();
+                updateCompositeDocument(() => validated, {
+                    renderComposite: true,
+                    skipCompositeAutosave: true
+                });
+                setActiveLibraryOrigin('composite', libraryId, libraryName);
+                commitActiveSection('composite');
+                logProcess('success', 'library.projects', `Loaded "${libraryName || 'project'}" from the Library into Composite.`);
+                setNotice(`Loaded "${libraryName || 'project'}" from Library.`, 'success');
+                return true;
+            }
+        },
+        {
             type: 'stitch',
             label: 'Stitch',
             getCurrentDocument(state) {
@@ -7547,6 +8584,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     setBootStage('editor engine init', 'Initializing the Editor render engine.');
     await engine.init(view.getRenderRefs().canvas);
     engine.attachRefs(view.getRenderRefs());
+    ensureCompositeEditorRenderEngineReady().catch((error) => {
+        console.warn('Could not prewarm the hidden Composite Editor render engine.', error);
+        compositeEditorRenderEngine = null;
+        compositeEditorRenderCanvas = null;
+        compositeEditorRenderReady = false;
+        logProcess('warning', 'composite.render', error?.message || 'Could not prewarm the hidden Composite Editor render engine.');
+    });
     bootMetrics.mark('editor-engine-ready', 'The Editor render engine finished booting.');
     setBootStage('background warmup', 'Scheduling background warmup jobs.');
     scheduleLibraryImageAssetPreviewWarmup();
@@ -7554,6 +8598,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     let lastSubscribedSection = store.getState().ui.activeSection;
     let pendingEditorRender = false;
+    let pendingCompositeRender = false;
     let pendingStitchRender = false;
 
     store.subscribe((state, meta) => {
@@ -7571,6 +8616,13 @@ window.addEventListener('DOMContentLoaded', async () => {
                 pendingEditorRender = true;
             }
         }
+        if (meta.renderComposite) {
+            if (activeSection === 'composite') {
+                pendingCompositeRender = false;
+            } else {
+                pendingCompositeRender = true;
+            }
+        }
         if (meta.renderStitch) {
             if (activeSection === 'stitch') {
                 pendingStitchRender = false;
@@ -7583,6 +8635,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (activeSection === 'editor' && engine.hasImage()) {
                 pendingEditorRender = false;
                 engine.requestRender(state.document);
+            }
+            if (activeSection === 'composite' && pendingCompositeRender) {
+                pendingCompositeRender = false;
             }
             if (activeSection === 'stitch' && pendingStitchRender) {
                 pendingStitchRender = false;
@@ -7599,6 +8654,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     setNotice(
         store.getState().ui.activeSection === 'library'
             ? 'Browse saved projects in the Library, or switch to Editor to start a new one.'
+            : store.getState().ui.activeSection === 'composite'
+                ? 'Add saved Editor projects or local images in Composite to start layering.'
             : store.getState().ui.activeSection === 'stitch'
                 ? 'Add two or more images in Stitch to start building a composite.'
                 : store.getState().ui.activeSection === '3d'

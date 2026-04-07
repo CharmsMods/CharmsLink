@@ -30,9 +30,10 @@ Modular Studio V2 is now a single-page app with five top-level sections:
 2. `Library`
 3. `Stitch`
 4. `3D`
-5. `Logs`
+5. `Composite`
+6. `Logs`
 
-All four sections live inside the same page and same JS runtime.
+All five sections live inside the same page and same JS runtime.
 
 Important historical note:
 
@@ -64,6 +65,11 @@ Current section responsibilities:
 - Supports embedded `.glb` / self-contained `.gltf` models, image planes, primitive meshes, flat/extruded text, 2D shapes, editable point / spot / directional lights, world light / HDRI lighting, and path tracing.
   - Saves full 3D scenes into the same Library as Editor and Stitch, including embedded asset data, materials, textures, camera state, render settings, and preview image.
   - Also has a bottom content drawer that mirrors the Library `Assets` page and can drag saved assets directly into the current scene.
+
+- `Composite`
+  - A separate rendering tab (`src/composite/`) allowing users to lay out multiple saved Editor projects or imported images into one scene.
+  - Features its own rendering engine with a dynamic performance rendering mode (drops resolution during active transforms), and robust draggable UI bounds-based exporter built on an infinite canvas model.
+  - Integrated with the Library and has a "Pixel Match" logic allowing exports to render perfectly at the explicit resolution of bounded items.
 
 - `Logs`
   - Process-monitor section that shows live card-based logs for app bootstrap, workspace navigation, Library sync/import/export/save activity, Editor file/export flows, Stitch work, and 3D work.

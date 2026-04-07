@@ -101,21 +101,25 @@ function isThreeDPayload(payload) {
 }
 
 function inferProjectTypeFromPayload(payload, fallbackType = null) {
+    if (fallbackType === 'composite' || payload?.kind === 'composite-document' || payload?.mode === 'composite') return 'composite';
     if (fallbackType === '3d' || isThreeDPayload(payload)) return '3d';
     if (fallbackType === 'stitch' || payload?.kind === 'stitch-document' || payload?.mode === 'stitch') return 'stitch';
     return 'studio';
 }
 
 function getProjectTypeLabel(projectType) {
+    if (projectType === 'composite') return 'Composite';
     if (projectType === '3d') return '3D';
     return projectType === 'stitch' ? 'Stitch' : 'Editor';
 }
 
 function getProjectSourceLabel(projectType) {
+    if (projectType === 'composite') return 'Canvas Size';
     return projectType === '3d' ? 'Preview Size' : 'Source Size';
 }
 
 function getProjectSourceCountLabel(projectType) {
+    if (projectType === 'composite') return 'Layer Count';
     return projectType === '3d' ? 'Asset Count' : 'Source Count';
 }
 
@@ -185,7 +189,8 @@ function normalizeLibraryDocumentPayload(payload) {
 
 function buildLibraryProjectExportPayload(project) {
     const payload = normalizeLibraryDocumentPayload(project.payload);
-    if (payload?.preview && typeof payload.preview === 'object') {
+    const inferredType = inferProjectTypeFromPayload(payload, project.projectType || null);
+    if (payload?.preview && typeof payload.preview === 'object' && inferredType !== 'composite') {
         delete payload.preview.imageData;
         delete payload.preview.width;
         delete payload.preview.height;
@@ -201,7 +206,7 @@ function buildLibraryProjectExportPayload(project) {
     return {
         _libraryName: project.name,
         _libraryTags: normalizeTagList(project.tags),
-        _libraryProjectType: project.projectType || inferProjectTypeFromPayload(project.payload),
+        _libraryProjectType: project.projectType || inferredType,
         _libraryHoverSource: project.hoverSource || null,
         _librarySourceArea: Number(project.sourceAreaOverride || project.sourceArea || 0) || 0,
         _librarySourceCount: Number(project.sourceCount || 0) || 0,
@@ -781,7 +786,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 </div>
                 <div class="library-empty-state">
                     <strong data-library-role="empty-title">Library is empty</strong>
-                    <span data-library-role="empty-text">Save projects from Editor, Stitch, or 3D, or import JSON files to build your gallery.</span>
+                    <span data-library-role="empty-text">Save projects from Editor, Composite, Stitch, or 3D, or import JSON files to build your gallery.</span>
                 </div>
                 <div class="library-fullscreen-view">
                     <div class="library-fullscreen-label">Library Preview</div>
@@ -1498,6 +1503,60 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             `;
         }
 
+        if (payload?.kind === 'composite-document' || payload?.mode === 'composite') {
+            const layers = Array.isArray(payload.layers) ? payload.layers : [];
+            const editorLayers = layers.filter((layer) => layer?.kind === 'editor-project');
+            const imageLayers = layers.filter((layer) => layer?.kind === 'image');
+            return `
+                <section class="library-layer-card">
+                    <div class="library-layer-card-header">
+                        <strong>Composite Layers</strong>
+                        <span>${layers.length} total</span>
+                    </div>
+                    <div class="library-layer-card-body">
+                        ${layers.length ? layers
+                            .slice()
+                            .sort((a, b) => Number(b?.z || 0) - Number(a?.z || 0))
+                            .map((layer) => `
+                                <div class="library-param-row">
+                                    <span class="library-param-key">${escapeHtml(layer?.name || 'Layer')}</span>
+                                    <span class="library-param-val">${escapeHtml([
+                                        layer?.kind === 'editor-project' ? 'Editor' : 'Image',
+                                        layer?.blendMode || 'normal',
+                                        `${Math.round((Number(layer?.opacity || 1) || 1) * 100)}%`
+                                    ].join(' | '))}</span>
+                                </div>
+                            `).join('')
+                            : '<div class="library-detail-empty">This Composite project did not include any saved layers.</div>'}
+                    </div>
+                </section>
+                <section class="library-layer-card">
+                    <div class="library-layer-card-header">
+                        <strong>Composite Summary</strong>
+                        <span>${editorLayers.length} Editor / ${imageLayers.length} Image</span>
+                    </div>
+                    <div class="library-layer-card-body">
+                        <div class="library-param-row">
+                            <span class="library-param-key">Sidebar View</span>
+                            <span class="library-param-val">${escapeHtml(payload.workspace?.sidebarView || 'layers')}</span>
+                        </div>
+                        <div class="library-param-row">
+                            <span class="library-param-key">Selected Layer</span>
+                            <span class="library-param-val">${escapeHtml(payload.selection?.layerId || 'None')}</span>
+                        </div>
+                        <div class="library-param-row">
+                            <span class="library-param-key">Checker Background</span>
+                            <span class="library-param-val">${escapeHtml(payload.view?.showChecker === false ? 'Off' : 'On')}</span>
+                        </div>
+                        <div class="library-param-row">
+                            <span class="library-param-key">Zoom</span>
+                            <span class="library-param-val">${escapeHtml(formatParamValue(payload.view?.zoom || 1))}</span>
+                        </div>
+                    </div>
+                </section>
+            `;
+        }
+
         if (isThreeDPayload(payload)) {
             const items = Array.isArray(payload.scene?.items) ? payload.scene.items : [];
             const models = items.filter((item) => item.kind === 'model');
@@ -1612,9 +1671,13 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
     function renderProjectSummaryCard(data) {
         const sourceLabel = getProjectSourceLabel(data.projectType);
         const countLabel = getProjectSourceCountLabel(data.projectType);
+        const compositeLayers = Array.isArray(data.payload?.layers) ? data.payload.layers : [];
+        const compositeEditorLayers = compositeLayers.filter((layer) => layer?.kind === 'editor-project').length;
         const sourceCount = data.projectType === '3d'
             ? Number(data.sourceCount || data.payload?.scene?.items?.filter?.((item) => item.kind !== 'light').length || 0)
-            : Number(data.sourceCount || (data.projectType === 'stitch' ? 0 : 1));
+            : data.projectType === 'composite'
+                ? Number(data.sourceCount || compositeLayers.length || 0)
+                : Number(data.sourceCount || (data.projectType === 'stitch' ? 0 : 1));
         const sceneItemCount = Number(data.payload?.scene?.items?.length || 0);
         return `
             <section class="library-source-info">
@@ -1643,6 +1706,11 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                         <div class="library-param-row">
                             <span class="library-param-key">Scene Items</span>
                             <span class="library-param-val">${escapeHtml(String(sceneItemCount))}</span>
+                        </div>
+                    ` : data.projectType === 'composite' ? `
+                        <div class="library-param-row">
+                            <span class="library-param-key">Editor-Linked Layers</span>
+                            <span class="library-param-val">${escapeHtml(String(compositeEditorLayers))}</span>
                         </div>
                     ` : `
                         <div class="library-param-row">
@@ -1738,7 +1806,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             refs.emptyTitle.textContent = isAssetsPage() ? 'Assets page is empty' : 'Library is empty';
             refs.emptyText.textContent = isAssetsPage()
                 ? '3D imports and saved Editor renders appear here as assets, or you can import asset bundles and asset folders.'
-                : 'Save projects from Editor, Stitch, or 3D, or import JSON files to build your gallery.';
+                : 'Save projects from Editor, Composite, Stitch, or 3D, or import JSON files to build your gallery.';
             return;
         }
 
@@ -3604,7 +3672,9 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
 
     async function loadProjectIntoEditor(project) {
         if (!project) return;
-        const targetLabel = project.projectType === 'stitch'
+        const targetLabel = project.projectType === 'composite'
+            ? 'Composite'
+            : project.projectType === 'stitch'
             ? 'Stitch'
             : project.projectType === '3d'
                 ? '3D'

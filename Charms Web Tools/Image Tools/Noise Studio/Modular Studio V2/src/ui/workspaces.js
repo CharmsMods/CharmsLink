@@ -2,6 +2,7 @@ import { getLayerInstancesByGroup } from '../registry/index.js';
 import { hasRenderableLayers, MAX_PREVIEW_ZOOM } from '../state/documentHelpers.js';
 import { createLibraryPanel } from './libraryPanel.js';
 import { clientToImageUv, computePreviewTransform, getPointerRatio } from './previewViewport.js';
+import { createCompositeWorkspace } from '../composite/ui.js';
 import { createStitchWorkspace } from '../stitch/ui.js';
 import { createThreeDWorkspace } from '../3d/ui.js';
 import { createLogsPanel } from './logsPanel.js';
@@ -759,6 +760,8 @@ function renderJsonCompareDialog(state) {
 }
 
 function renderStudioToolbar(state) {
+    const bridge = state.ui?.compositeEditorBridge || null;
+    const showUpdateOriginal = !!bridge?.active && !!bridge?.originalLibraryId;
     return `
         <header class="toolbar">
             <div class="toolbar-cluster">
@@ -775,6 +778,7 @@ function renderStudioToolbar(state) {
                 </label>
                 <button type="button" class="toolbar-button" data-action="save-state">Save</button>
                 <button type="button" class="toolbar-button" data-action="save-to-library">Save to Library</button>
+                ${showUpdateOriginal ? '<button type="button" class="toolbar-button" data-action="composite-update-original-editor">Update Original Editor Project</button>' : ''}
             </div>
         </header>
     `;
@@ -799,8 +803,29 @@ function renderStitchToolbar(state) {
     `;
 }
 
+function renderCompositeToolbar(state) {
+    const layerCount = state.compositeDocument?.layers?.length || 0;
+    return `
+        <header class="toolbar">
+            <div class="toolbar-cluster">
+                <button type="button" class="toolbar-button" data-action="composite-new-project">New Project</button>
+                <button type="button" class="toolbar-button" data-action="composite-add-editor-project">Add Editor Project</button>
+                <button type="button" class="toolbar-button" data-action="composite-add-images">Add Images</button>
+            </div>
+            <div class="toolbar-cluster toolbar-state-actions">
+                <button type="button" class="toolbar-button" data-action="composite-export-png" ${layerCount ? '' : 'disabled'}>Export PNG</button>
+                <button type="button" class="toolbar-button" data-action="composite-open-state">Load</button>
+                <button type="button" class="toolbar-button" data-action="composite-save-state" ${layerCount ? '' : 'disabled'}>Save</button>
+                <button type="button" class="toolbar-button" data-action="composite-save-to-library" ${layerCount ? '' : 'disabled'}>Save to Library</button>
+            </div>
+        </header>
+    `;
+}
+
 function renderSectionTabs(state, headerStatus = null) {
-    const activeSection = state.ui.activeSection === 'library'
+    const activeSection = state.ui.activeSection === 'composite'
+        ? 'composite'
+        : state.ui.activeSection === 'library'
         ? 'library'
         : state.ui.activeSection === 'stitch'
             ? 'stitch'
@@ -817,6 +842,7 @@ function renderSectionTabs(state, headerStatus = null) {
         <nav class="section-switcher">
             <div class="section-switcher-buttons">
                 <button type="button" class="mode-button ${activeSection === 'editor' ? 'is-active' : ''}" data-action="set-app-section" data-section="editor">Editor</button>
+                <button type="button" class="mode-button ${activeSection === 'composite' ? 'is-active' : ''}" data-action="set-app-section" data-section="composite">Composite</button>
                 <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
                 <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
                 <button type="button" class="mode-button ${activeSection === '3d' ? 'is-active' : ''}" data-action="set-app-section" data-section="3d">3D</button>
@@ -969,6 +995,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 </section>
             </div>
             <section class="app-section-panel" id="libraryPanel"></section>
+            <section class="app-section-panel" id="compositePanel"></section>
             <section class="app-section-panel" id="stitchPanel"></section>
             <section class="app-section-panel" id="threedPanel"></section>
             <section class="app-section-panel" id="settingsPanel"></section>
@@ -1010,6 +1037,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         workspaceShell: root.querySelector('#workspaceShell'),
         sidebarPanel: root.querySelector('#sidebarPanel'),
         libraryPanel: root.querySelector('#libraryPanel'),
+        compositePanel: root.querySelector('#compositePanel'),
         stitchPanel: root.querySelector('#stitchPanel'),
         threedPanel: root.querySelector('#threedPanel'),
         settingsPanel: root.querySelector('#settingsPanel'),
@@ -1084,6 +1112,10 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     const libraryPanel = createLibraryPanel(refs.libraryPanel, {
         actions,
         layerDefaults: Object.fromEntries(registry.layers.map((layer) => [layer.layerId, layer.defaults])),
+        logger: extras.logger
+    });
+    const compositePanel = createCompositeWorkspace(refs.compositePanel, {
+        actions,
         logger: extras.logger
     });
     const stitchPanel = createStitchWorkspace(refs.stitchPanel, {
@@ -1728,6 +1760,14 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             'set-wheel-neutral': () => actions.updateControl(node.dataset.instance, node.dataset.key, '#ffffff'),
             'save-state': actions.saveState,
             'save-to-library': () => actions.saveProjectToLibrary(),
+            'composite-new-project': actions.newCompositeProject,
+            'composite-add-editor-project': () => actions.openCompositeProjectPicker?.(),
+            'composite-add-images': () => actions.openCompositeImagePicker?.(),
+            'composite-export-png': actions.exportCompositePng,
+            'composite-open-state': () => actions.openCompositeStatePicker?.(),
+            'composite-save-state': actions.saveCompositeState,
+            'composite-save-to-library': () => actions.saveProjectToLibrary(null, { projectType: 'composite' }),
+            'composite-update-original-editor': actions.updateOriginalEditorProjectFromComposite,
             'stitch-new-project': actions.newStitchProject,
             'stitch-add-images': actions.openStitchPicker,
             'stitch-run-analysis': actions.runStitchAnalysis,
@@ -2021,50 +2061,66 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         logsPanel.setSettings?.(state.settings?.logs || null);
         refs.toolbarSlot.innerHTML = activeSection === 'editor'
             ? renderStudioToolbar(state)
+            : activeSection === 'composite'
+                ? renderCompositeToolbar(state)
             : activeSection === 'stitch'
                 ? renderStitchToolbar(state)
                 : '';
-        refs.toolbarSlot.style.display = (activeSection === 'editor' || activeSection === 'stitch') ? 'block' : 'none';
+        refs.toolbarSlot.style.display = (activeSection === 'editor' || activeSection === 'composite' || activeSection === 'stitch') ? 'block' : 'none';
         refs.workspaceShell.className = `workspace-shell mode-${state.document.mode} tab-${state.document.workspace.studioView}`;
         refs.workspaceShell.style.display = activeSection === 'editor' ? 'grid' : 'none';
+        refs.compositePanel.style.display = activeSection === 'composite' ? 'block' : 'none';
         refs.libraryPanel.style.display = activeSection === 'library' ? 'block' : 'none';
         refs.stitchPanel.style.display = activeSection === 'stitch' ? 'block' : 'none';
         refs.threedPanel.style.display = activeSection === '3d' ? 'block' : 'none';
         refs.settingsPanel.style.display = activeSection === 'settings' ? 'block' : 'none';
         refs.logsPanel.style.display = activeSection === 'logs' ? 'block' : 'none';
         if (activeSection !== lastActiveSection) {
-            if (activeSection === 'library') {
+            if (activeSection === 'composite') {
+                libraryPanel.deactivate();
+                compositePanel.activate();
+                stitchPanel.deactivate();
+                threedPanel.deactivate();
+                settingsPanel.deactivate();
+                logsPanel.deactivate();
+            } else if (activeSection === 'library') {
                 libraryPanel.activate();
+                compositePanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
                 settingsPanel.deactivate();
                 logsPanel.deactivate();
             } else if (activeSection === 'stitch') {
                 libraryPanel.deactivate();
+                compositePanel.deactivate();
                 stitchPanel.activate();
                 threedPanel.deactivate();
                 settingsPanel.deactivate();
                 logsPanel.deactivate();
             } else if (activeSection === '3d') {
                 libraryPanel.deactivate();
+                compositePanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.activate();
                 settingsPanel.deactivate();
                 logsPanel.deactivate();
             } else if (activeSection === 'settings') {
                 libraryPanel.deactivate();
+                compositePanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
                 settingsPanel.activate();
                 logsPanel.deactivate();
             } else if (activeSection === 'logs') {
                 libraryPanel.deactivate();
+                compositePanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
                 settingsPanel.deactivate();
                 logsPanel.activate();
             } else {
                 libraryPanel.deactivate();
+                compositePanel.deactivate();
                 stitchPanel.deactivate();
                 threedPanel.deactivate();
                 settingsPanel.deactivate();
@@ -2144,6 +2200,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             hideLoupe();
         }
 
+        if (activeSection === 'composite') {
+            compositePanel.render(state.compositeDocument).catch((error) => console.error(error));
+        }
         if (activeSection === 'stitch') {
             stitchPanel.render(state.stitchDocument).catch((error) => console.error(error));
         }
@@ -2207,6 +2266,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             }
             editorProgressOverlay.hide();
         },
+        setCompositeProgress(payload = null) {
+            compositePanel.setProgressOverlay?.(payload);
+        },
         setStitchProgress(payload = null) {
             stitchPanel.setProgressOverlay?.(payload);
         },
@@ -2223,6 +2285,21 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         },
         openStitchPicker() {
             stitchPanel.openPicker?.();
+        },
+        openCompositeImagePicker() {
+            compositePanel.openImagePicker?.();
+        },
+        openCompositeStatePicker() {
+            compositePanel.openStatePicker?.();
+        },
+        openCompositeProjectPicker() {
+            return compositePanel.openProjectPicker?.();
+        },
+        captureCompositePreview(document) {
+            return compositePanel.capturePreview?.(document);
+        },
+        exportCompositePng(document) {
+            return compositePanel.exportPngBlob?.(document);
         },
         captureThreeDPreview() {
             return threedPanel.capturePreview?.();

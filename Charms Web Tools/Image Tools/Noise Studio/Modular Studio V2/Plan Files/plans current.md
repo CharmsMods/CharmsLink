@@ -38,32 +38,38 @@
 
 [done] for the logs tab, when something that was processing finishes sucsessfully, if the logs tab is open, wash the entire background of the page in green to help signify that something good happened for the user, and highlight the box it happened in with a light gold color and a nice animation that will fade away.
 
+[done] FIX light mode across the site's tabs, light mode has a bad effect on text boxes where the text and the background of the box, are both white, making it impossible to read in light mode, making the user only use dark mode all the time.
+
+[done] fix 3D tab's assets drawer: when the user trys to drag and drop something from it into the scene, nothing happens or gets loaded, and the logs tab says nothing
+
+[done] fix the 3 place holder sliders A B and C on the noise layer for the editor tab.
+
+[done] add a crop/rotate/flip layer to the editor tab
+
+[done] for the editor tab, the 3 wheel color grading layer, when the mouse clicks on a wheel, divide the movement of the orignal mouse's movement distance, in order to give the user greater precision when moving inside the wheel, since currently the sensitivity is way too high and the wheels are small so that makes it worse, possibly stacking wheels would allow them to be bigger.
+
+[done] look into a solution for making the UI stay responsive during the 3D viewport rendering in path trace mode (not png renders, just with the viewport open and on path trace mode) 
+
+[done] while the library is loading, show the library's logs from the log tab, on the loading overlay since many new users may not understand that they can see this info on the logs tab.
+
+[done] do a quick check to make sure the library will always load when the page loads even if the user doesnt load on the library page, and while they are on other pages.
+
+[done] add UI option to render the current 3D viewport as a png with whatever samples exist currently
+
+[done] give all the sliders on the 3D tab a value, instead of just being valueless sliders, and allow the user to custom set these values in boxes
+
+[done] ensure site can confidently identify the correct number of cores for working with for the user's CPU. and that it will show up in logging
+
 
 ## Not Done
 
-[ DONE ] FIX light mode across the site's tabs, light mode has a bad effect on text boxes where the text and the background of the box, are both white, making it impossible to read in light mode, making the user only use dark mode all the time.
 
-[ DONE ] fix 3D tab's assets drawer: when the user trys to drag and drop something from it into the scene, nothing happens or gets loaded, and the logs tab says nothing
 
-[ DONE ] fix the 3 place holder sliders A B and C on the noise layer for the editor tab.
-
-[ DONE ] add a crop/rotate/flip layer to the editor tab
-
-[ DONE ] for the editor tab, the 3 wheel color grading layer, when the mouse clicks on a wheel, divide the movement of the orignal mouse's movement distance, in order to give the user greater precision when moving inside the wheel, since currently the sensitivity is way too high and the wheels are small so that makes it worse, possibly stacking wheels would allow them to be bigger.
-
-[ DONE ] look into a solution for making the UI stay responsive during the 3D viewport rendering in path trace mode (not png renders, just with the viewport open and on path trace mode) 
-
-[ DONE ] while the library is loading, show the library's logs from the log tab, on the loading overlay since many new users may not understand that they can see this info on the logs tab.
-
-[ DONE ] do a quick check to make sure the library will always load when the page loads even if the user doesnt load on the library page, and while they are on other pages.
+ENSURE that when a 3D site png render is done, that the site first carefully saves it to the library assets tab, and then opens the file explorer window for where to save it locally as well.
 
 explore adding ray tracing as an option for viewport and rendering on the 3D tab since it's different than path tracing that we already have
 
 add an option for rendering to do a render in the selected modes from the same camera setting automatically (not all that important right now)
-
-[ DONE ] add UI option to render the current 3D viewport as a png with whatever samples exist currently
-
-[ DONE ] give all the sliders on the 3D tab a value, instead of just being valueless sliders, and allow the user to custom set these values in boxes
 
 options for the entire site should now be moved to right click where it makes sense for "context menus" allowing parts of the UI to be de-bloated, due to not needing to hide literally every setting and UI option behind a dropdown, tab, or button. (this idea must first rely on a verdict from figuring out if this still works on electron, and how to make it more reliable on browser, before switching to it more heaviliy)
 
@@ -73,7 +79,10 @@ inspect worker for handling the background png render of the 3D tab, and inspect
 
 idea to make the universial tab bar, a native loading bar for processes
 
-ensure site can confidently identify the correct number of cores for working with for the user's CPU. and that it will show up in logging
+in the library, every 3D scene project should be automatically given the tag "3D", every Stitch scene project should be automatically given the tag "Stitch" and every Editor page project in the library should be automatically given the tag "Editor". the library on load already is able to determine the difference between a 3D and a Editor project, so ensure that on site load, the library will scan all projects to make sure they have the correct tag, and give tags to any that dont. so this will just need to be added to the list of things that the library does on load, and ensure that it has it's place in the logs that are sent to the logging tab.
+
+
+
 
 move the dark/light mode toggle from the editor tab, to a new settings tab that will exist in the universial site tab just to the left of the logs tab:
 settings tab:
