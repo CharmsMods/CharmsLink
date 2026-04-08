@@ -27,6 +27,12 @@ export function createDefaultAppSettings() {
             autoExtractPaletteOnLoad: false,
             transparencyCheckerTone: 'light'
         },
+        composite: {
+            preferences: {
+                showChecker: true,
+                zoomLocked: false
+            }
+        },
         stitch: {
             defaults: {
                 sceneMode: 'auto',

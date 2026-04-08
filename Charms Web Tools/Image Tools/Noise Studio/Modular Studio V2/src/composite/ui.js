@@ -1,11 +1,13 @@
 import { CompositeEngine } from './engine.js';
 import {
+    COMPOSITE_MAX_SCALE,
+    COMPOSITE_MAX_ZOOM,
+    COMPOSITE_MIN_SCALE,
+    COMPOSITE_MIN_ZOOM,
+    computeCompositeViewBounds,
     computeCompositeDocumentBounds,
-    computeCompositeLayerBounds,
     getCompositeLayerDimensions,
-    getCompositeLayerRenderedSize,
     getCompositeLayerResizeMode,
-    getSelectedCompositeLayer,
     isCompositeLayerStretchCapable,
     normalizeCompositeDocument,
     getActiveCompositeLayers
@@ -226,6 +228,8 @@ function mapLayerKindLabel(layer) {
     if (layer?.kind === 'editor-project') return 'Editor';
     if (layer?.kind === 'text') return 'Text';
     if (layer?.kind === 'square') return 'Square';
+    if (layer?.kind === 'circle') return 'Circle';
+    if (layer?.kind === 'triangle') return 'Triangle';
     return 'Image';
 }
 
@@ -272,6 +276,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-export-bounds-move{position:absolute;inset:0;cursor:move;pointer-events:auto}
             .composite-selection-box{position:absolute;border:1px solid #f0c26d;pointer-events:none;z-index:18;display:none;box-shadow:0 0 0 1px rgba(240,194,109,.32)}
             .composite-selection-box.is-visible{display:block}
+            .composite-selection-box[data-selection-mode="multi"]{border-style:dashed;box-shadow:0 0 0 1px rgba(240,194,109,.2)}
             .composite-selection-handle{position:absolute;width:12px;height:12px;background:#f0c26d;border:1px solid #fff;pointer-events:auto;z-index:19}
             .composite-selection-handle.nw{top:-6px;left:-6px;cursor:nwse-resize}
             .composite-selection-handle.ne{top:-6px;right:-6px;cursor:nesw-resize}
@@ -281,6 +286,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-selection-handle.s{bottom:-6px;left:50%;margin-left:-6px;cursor:ns-resize}
             .composite-selection-handle.w{top:50%;left:-6px;margin-top:-6px;cursor:ew-resize}
             .composite-selection-handle.e{top:50%;right:-6px;margin-top:-6px;cursor:ew-resize}
+            .composite-marquee{position:absolute;border:1px dashed #79d8ff;background:rgba(44,153,255,.12);pointer-events:none;z-index:17;display:none}
+            .composite-marquee.is-visible{display:block}
             .composite-chip-bar{position:absolute;left:6px;bottom:6px;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;z-index:30}
             .composite-chip{display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0 6px;border:1px solid var(--comp-border-soft);background:rgba(0,0,0,.92);color:#fff;font-size:10px}
             .composite-stack,.composite-setting-stack,.composite-picker-grid{display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -353,6 +360,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         <div class="composite-selection-handle s" data-composite-action="layer-scale" data-dir="s"></div>
                         <div class="composite-selection-handle se" data-composite-action="layer-scale" data-dir="se"></div>
                     </div>
+                    <div class="composite-marquee" data-composite-role="marquee-box"></div>
                     <div class="composite-export-bounds" data-composite-role="export-bounds">
                         <div class="composite-export-bounds-move" data-composite-action="bounds-move"></div>
                         <div class="composite-export-bounds-handle nw" data-composite-action="bounds-resize" data-dir="nw"></div>
@@ -364,7 +372,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         <div class="composite-export-bounds-handle s" data-composite-action="bounds-resize" data-dir="s"></div>
                         <div class="composite-export-bounds-handle se" data-composite-action="bounds-resize" data-dir="se"></div>
                     </div>
-                    <div class="composite-empty is-visible" data-composite-role="empty-state"><strong>Add one or more layers</strong><span>Bring in saved Editor projects or local images to start compositing.</span></div>
+                    <div class="composite-empty is-visible" data-composite-role="empty-state"><strong>Add one or more layers</strong><span>Bring in saved Editor projects, local images, text, or simple shapes to start compositing.</span></div>
                     <div class="composite-chip-bar">
                         <div class="composite-chip" data-composite-role="status">Composite workspace ready.</div>
                     </div>
@@ -407,6 +415,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         blendPanel: root.querySelector('[data-composite-role="blend-panel"]'),
         exportPanel: root.querySelector('[data-composite-role="export-panel"]'),
         selectionUI: root.querySelector('[data-composite-role="selection-box"]'),
+        marqueeUI: root.querySelector('[data-composite-role="marquee-box"]'),
         exportBoundsUI: root.querySelector('[data-composite-role="export-bounds"]'),
         pickerOverlay: root.querySelector('[data-composite-role="picker-overlay"]'),
         pickerGrid: root.querySelector('[data-composite-role="picker-grid"]'),
@@ -435,6 +444,11 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     let pixelMatchMessage = '';
     let stageFrameHandle = 0;
     let wheelCommitTimer = null;
+    let panelInputActive = false;
+    let panelInputRefreshTimer = null;
+    let lastSidebarView = null;
+    let selectedLayerIds = new Set();
+    let selectionResizeMode = 'center-uniform';
     const layerNodes = new Map();
 
     function logWorkspace(level, message, options = {}) {
@@ -468,8 +482,177 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         return normalizeCompositeDocument(document);
     }
 
+    function isPanelEditableTarget(node) {
+        if (!node || !root.contains(node)) return false;
+        const tag = String(node.tagName || '').toLowerCase();
+        if (!['input', 'textarea', 'select'].includes(tag)) return false;
+        return node.type !== 'file' && node.type !== 'hidden';
+    }
+
+    function getStageLayerSourceDimensions(layer) {
+        const runtimeAsset = engine.layerAssets.get(layer?.id);
+        if (runtimeAsset?.width && runtimeAsset?.height) {
+            return {
+                width: Math.max(1, Number(runtimeAsset.width) || 1),
+                height: Math.max(1, Number(runtimeAsset.height) || 1)
+            };
+        }
+        return getCompositeLayerDimensions(layer);
+    }
+
+    function getStageLayerRenderedSize(layer) {
+        const source = getStageLayerSourceDimensions(layer);
+        return {
+            width: Math.max(0.0001, source.width * getLayerScaleValue(layer, 'x')),
+            height: Math.max(0.0001, source.height * getLayerScaleValue(layer, 'y'))
+        };
+    }
+
+    function computeStageLayerBounds(layer) {
+        const source = getStageLayerSourceDimensions(layer);
+        const rendered = {
+            width: source.width * getLayerScaleValue(layer, 'x'),
+            height: source.height * getLayerScaleValue(layer, 'y')
+        };
+        const centerX = Number(layer?.x || 0) + (rendered.width * 0.5);
+        const centerY = Number(layer?.y || 0) + (rendered.height * 0.5);
+        const corners = [
+            rotatePoint(-rendered.width * 0.5, -rendered.height * 0.5, Number(layer?.rotation) || 0),
+            rotatePoint(rendered.width * 0.5, -rendered.height * 0.5, Number(layer?.rotation) || 0),
+            rotatePoint(rendered.width * 0.5, rendered.height * 0.5, Number(layer?.rotation) || 0),
+            rotatePoint(-rendered.width * 0.5, rendered.height * 0.5, Number(layer?.rotation) || 0)
+        ].map((point) => ({
+            x: point.x + centerX,
+            y: point.y + centerY
+        }));
+        const xs = corners.map((point) => point.x);
+        const ys = corners.map((point) => point.y);
+        return {
+            minX: Math.min(...xs),
+            minY: Math.min(...ys),
+            maxX: Math.max(...xs),
+            maxY: Math.max(...ys),
+            width: Math.max(0, Math.max(...xs) - Math.min(...xs)),
+            height: Math.max(0, Math.max(...ys) - Math.min(...ys))
+        };
+    }
+
+    function syncSelectionFromDocument(document = currentDocument) {
+        const normalized = normalizeCompositeDocument(document);
+        const validIds = new Set(normalized.layers.map((layer) => layer.id));
+        selectedLayerIds = new Set([...selectedLayerIds].filter((layerId) => validIds.has(layerId)));
+        const requestedLayerId = validIds.has(normalized.selection.layerId) ? normalized.selection.layerId : null;
+        if (!selectedLayerIds.size && requestedLayerId) {
+            selectedLayerIds = new Set([requestedLayerId]);
+        } else if (selectedLayerIds.size <= 1 && !requestedLayerId) {
+            selectedLayerIds.clear();
+        } else if (selectedLayerIds.size === 1 && requestedLayerId && !selectedLayerIds.has(requestedLayerId)) {
+            selectedLayerIds = new Set([requestedLayerId]);
+        }
+        if (selectedLayerIds.size <= 1) {
+            selectionResizeMode = 'center-uniform';
+        }
+        return normalized;
+    }
+
+    function getSelectedLayerIds(document = currentDocument) {
+        syncSelectionFromDocument(document);
+        return [...selectedLayerIds];
+    }
+
+    function getSelectedLayers(document = currentDocument) {
+        const ids = new Set(getSelectedLayerIds(document));
+        return normalizeCompositeDocument(document).layers.filter((layer) => ids.has(layer.id));
+    }
+
+    function isLayerSelected(layerId, document = currentDocument) {
+        return getSelectedLayerIds(document).includes(String(layerId || ''));
+    }
+
+    function setSelectedLayers(layerIds, options = {}) {
+        const normalized = normalizeCompositeDocument(options.document || currentDocument);
+        const validIds = new Set(normalized.layers.map((layer) => layer.id));
+        selectedLayerIds = new Set((Array.isArray(layerIds) ? layerIds : []).map((layerId) => String(layerId || '')).filter((layerId) => validIds.has(layerId)));
+        if (selectedLayerIds.size <= 1) {
+            selectionResizeMode = 'center-uniform';
+        }
+        const explicitPrimary = String(options.primaryId || '');
+        const nextPrimaryId = explicitPrimary && selectedLayerIds.has(explicitPrimary)
+            ? explicitPrimary
+            : selectedLayerIds.size === 1
+                ? [...selectedLayerIds][0]
+                : selectedLayerIds.has(normalized.selection.layerId)
+                    ? normalized.selection.layerId
+                    : [...selectedLayerIds][0] || null;
+        currentDocument = normalizeCompositeDocument({
+            ...normalized,
+            selection: {
+                layerId: nextPrimaryId || null
+            }
+        });
+        sessionDocument = dragState ? sessionDocument : currentDocument;
+        if (options.syncStore !== false) {
+            actions.selectCompositeLayer?.(nextPrimaryId || null);
+        }
+        if (active && !dragState) {
+            render(currentDocument).catch(() => {});
+        }
+        return currentDocument;
+    }
+
+    function getSelectionBounds(document = currentDocument) {
+        const layers = getSelectedLayers(document);
+        if (!layers.length) return null;
+        const boundsList = layers.map((layer) => computeStageLayerBounds(layer));
+        return {
+            minX: Math.min(...boundsList.map((bounds) => bounds.minX)),
+            minY: Math.min(...boundsList.map((bounds) => bounds.minY)),
+            maxX: Math.max(...boundsList.map((bounds) => bounds.maxX)),
+            maxY: Math.max(...boundsList.map((bounds) => bounds.maxY)),
+            width: Math.max(0, Math.max(...boundsList.map((bounds) => bounds.maxX)) - Math.min(...boundsList.map((bounds) => bounds.minX))),
+            height: Math.max(0, Math.max(...boundsList.map((bounds) => bounds.maxY)) - Math.min(...boundsList.map((bounds) => bounds.minY)))
+        };
+    }
+
+    function getSelectionScreenBounds(document = currentStageDocument()) {
+        const bounds = getSelectionBounds(document);
+        if (!bounds) return null;
+        const metrics = getViewportMetrics();
+        const topLeft = engine.worldToScreen(document, metrics.width, metrics.height, bounds.minX, bounds.minY);
+        const bottomRight = engine.worldToScreen(document, metrics.width, metrics.height, bounds.maxX, bounds.maxY);
+        if (!topLeft || !bottomRight) return null;
+        return {
+            left: Math.min(topLeft.x, bottomRight.x),
+            top: Math.min(topLeft.y, bottomRight.y),
+            width: Math.abs(bottomRight.x - topLeft.x),
+            height: Math.abs(bottomRight.y - topLeft.y)
+        };
+    }
+
+    function getLayerScreenBounds(layer, document = currentStageDocument()) {
+        const worldBounds = computeStageLayerBounds(layer);
+        const metrics = getViewportMetrics();
+        const topLeft = engine.worldToScreen(document, metrics.width, metrics.height, worldBounds.minX, worldBounds.minY);
+        const bottomRight = engine.worldToScreen(document, metrics.width, metrics.height, worldBounds.maxX, worldBounds.maxY);
+        if (!topLeft || !bottomRight) return null;
+        return {
+            left: Math.min(topLeft.x, bottomRight.x),
+            top: Math.min(topLeft.y, bottomRight.y),
+            right: Math.max(topLeft.x, bottomRight.x),
+            bottom: Math.max(topLeft.y, bottomRight.y),
+            width: Math.abs(bottomRight.x - topLeft.x),
+            height: Math.abs(bottomRight.y - topLeft.y)
+        };
+    }
+
+    function getSelectionResizeMode(document = currentDocument) {
+        const layer = selectedLayer(document);
+        return layer ? getCompositeLayerResizeMode(layer) : selectionResizeMode;
+    }
+
     function selectedLayer(document = currentDocument) {
-        return getSelectedCompositeLayer(document);
+        const layers = getSelectedLayers(document);
+        return layers.length === 1 ? layers[0] : null;
     }
 
     function getLayerResizeOptions(layer) {
@@ -477,11 +660,11 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     }
 
     function getLayerScaleValue(layer, axis = 'uniform') {
-        const scaleX = Math.max(0.01, Number(layer?.scaleX) || Number(layer?.scale) || 1);
-        const scaleY = Math.max(0.01, Number(layer?.scaleY) || Number(layer?.scale) || 1);
+        const scaleX = Math.max(COMPOSITE_MIN_SCALE, Number(layer?.scaleX) || Number(layer?.scale) || 1);
+        const scaleY = Math.max(COMPOSITE_MIN_SCALE, Number(layer?.scaleY) || Number(layer?.scale) || 1);
         if (axis === 'x') return scaleX;
         if (axis === 'y') return scaleY;
-        return Math.max(0.01, Number(layer?.scale) || Math.sqrt(scaleX * scaleY));
+        return Math.max(COMPOSITE_MIN_SCALE, Number(layer?.scale) || Math.sqrt(scaleX * scaleY));
     }
 
     function rotatePoint(x, y, radians = 0) {
@@ -501,8 +684,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     }
 
     function buildLayerPatchFromScales(layer, nextScaleX, nextScaleY, nextX = layer.x, nextY = layer.y) {
-        const clampedScaleX = clamp(Number(nextScaleX) || 1, 0.01, 1024);
-        const clampedScaleY = clamp(Number(nextScaleY) || 1, 0.01, 1024);
+        const clampedScaleX = clamp(Number(nextScaleX) || 1, COMPOSITE_MIN_SCALE, COMPOSITE_MAX_SCALE);
+        const clampedScaleY = clamp(Number(nextScaleY) || 1, COMPOSITE_MIN_SCALE, COMPOSITE_MAX_SCALE);
         return {
             x: nextX,
             y: nextY,
@@ -510,6 +693,65 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             scaleX: clampedScaleX,
             scaleY: clampedScaleY
         };
+    }
+
+    function setSettingMeta(setting, text) {
+        const metaNode = setting?.querySelector('.composite-setting-label span:last-child');
+        if (metaNode) metaNode.textContent = String(text ?? '');
+    }
+
+    function syncNumericSettingInputs(target, value) {
+        const setting = target?.closest('.composite-setting');
+        if (!setting) return;
+        const numericValue = Number(value);
+        const nextValue = Number.isFinite(numericValue) ? String(numericValue) : String(value ?? '');
+        setting.querySelectorAll('input.composite-range, input.composite-number').forEach((input) => {
+            if (input !== target) input.value = nextValue;
+        });
+        setSettingMeta(setting, formatNumber(value));
+    }
+
+    function syncColorSettingInputs(target, value) {
+        const setting = target?.closest('.composite-setting');
+        if (!setting) return;
+        const normalized = normalizeHexColor(value, '#ffffff');
+        setting.querySelectorAll('input').forEach((input) => {
+            if (input === target) return;
+            input.value = input.type === 'color' ? normalized : normalized.toUpperCase();
+        });
+        setSettingMeta(setting, normalized.toUpperCase());
+    }
+
+    function syncExportResolutionInputs(resolution = {}) {
+        const width = Math.max(1, Math.round(Number(resolution?.width) || 1));
+        const height = Math.max(1, Math.round(Number(resolution?.height) || 1));
+        root.querySelectorAll('[data-composite-action="update-export-resolution"][data-field="width"]').forEach((input) => {
+            input.value = String(width);
+            setSettingMeta(input.closest('.composite-setting'), formatNumber(width));
+        });
+        root.querySelectorAll('[data-composite-action="update-export-resolution"][data-field="height"]').forEach((input) => {
+            input.value = String(height);
+            setSettingMeta(input.closest('.composite-setting'), formatNumber(height));
+        });
+    }
+
+    function setPanelInputActiveState(nextActive) {
+        const activeState = !!nextActive;
+        if (panelInputActive === activeState) return;
+        panelInputActive = activeState;
+        if (!panelInputActive && active && !dragState) {
+            render(currentDocument).catch(() => {});
+        }
+    }
+
+    function refreshPanelInputState() {
+        if (panelInputRefreshTimer) {
+            clearTimeout(panelInputRefreshTimer);
+        }
+        panelInputRefreshTimer = setTimeout(() => {
+            panelInputRefreshTimer = null;
+            setPanelInputActiveState(isPanelEditableTarget(root.ownerDocument?.activeElement));
+        }, 0);
     }
 
     function patchLayerAsset(layerId, assetKey, field, value) {
@@ -567,7 +809,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             };
         }
         const exportBounds = normalized.export.bounds;
-        const layerBounds = computeCompositeLayerBounds(layer);
+        const layerBounds = computeStageLayerBounds(layer);
         const contained = layerBounds.minX >= (exportBounds.x - 0.5)
             && layerBounds.maxX <= (exportBounds.x + exportBounds.width + 0.5)
             && layerBounds.minY >= (exportBounds.y - 0.5)
@@ -578,7 +820,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 reason: 'That layer is only partially inside the current custom bounds.'
             };
         }
-        const source = getCompositeLayerDimensions(layer);
+        const source = getStageLayerSourceDimensions(layer);
         const transformedWidth = Math.max(0.01, source.width * getLayerScaleValue(layer, 'x'));
         const transformedHeight = Math.max(0.01, source.height * getLayerScaleValue(layer, 'y'));
         return {
@@ -711,6 +953,38 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         return match?.value || '';
     }
 
+    function computePreferredCustomExportBounds(document = currentDocument) {
+        const normalized = normalizeCompositeDocument(document);
+        const liveBounds = computeCompositeDocumentBounds(normalized);
+        if (!(liveBounds.width > 0) || !(liveBounds.height > 0)) {
+            return { ...normalized.export.bounds };
+        }
+        const metrics = getViewportMetrics();
+        const viewBounds = computeCompositeViewBounds(normalized.view, metrics.width, metrics.height);
+        const intersected = {
+            minX: Math.max(liveBounds.minX, viewBounds.minX),
+            minY: Math.max(liveBounds.minY, viewBounds.minY),
+            maxX: Math.min(liveBounds.maxX, viewBounds.maxX),
+            maxY: Math.min(liveBounds.maxY, viewBounds.maxY)
+        };
+        const intersectWidth = intersected.maxX - intersected.minX;
+        const intersectHeight = intersected.maxY - intersected.minY;
+        if (intersectWidth >= 1 && intersectHeight >= 1) {
+            return {
+                x: Math.round(intersected.minX),
+                y: Math.round(intersected.minY),
+                width: Math.max(1, Math.round(intersectWidth)),
+                height: Math.max(1, Math.round(intersectHeight))
+            };
+        }
+        return {
+            x: Math.round(liveBounds.minX),
+            y: Math.round(liveBounds.minY),
+            width: Math.max(1, Math.round(liveBounds.width)),
+            height: Math.max(1, Math.round(liveBounds.height))
+        };
+    }
+
     function rotateToLocal(pointX, pointY, radians = 0) {
         const cos = Math.cos(-radians);
         const sin = Math.sin(-radians);
@@ -720,19 +994,88 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         };
     }
 
+    function updateMarqueeUI(rect = null) {
+        if (!refs.marqueeUI) return;
+        const isVisible = !!rect && rect.width > 0 && rect.height > 0;
+        refs.marqueeUI.classList.toggle('is-visible', isVisible);
+        if (!isVisible) return;
+        refs.marqueeUI.style.left = `${rect.left}px`;
+        refs.marqueeUI.style.top = `${rect.top}px`;
+        refs.marqueeUI.style.width = `${rect.width}px`;
+        refs.marqueeUI.style.height = `${rect.height}px`;
+    }
+
+    function buildLayerPatchMap(previousDocument, nextDocument, layerIds) {
+        const previousById = new Map(normalizeCompositeDocument(previousDocument).layers.map((layer) => [layer.id, layer]));
+        const nextById = new Map(normalizeCompositeDocument(nextDocument).layers.map((layer) => [layer.id, layer]));
+        const patches = {};
+        (Array.isArray(layerIds) ? layerIds : []).forEach((layerId) => {
+            const previousLayer = previousById.get(layerId);
+            const nextLayer = nextById.get(layerId);
+            if (!previousLayer || !nextLayer) return;
+            const patch = {};
+            ['x', 'y', 'scale', 'scaleX', 'scaleY', 'rotation', 'opacity', 'blendMode', 'flipX', 'flipY'].forEach((field) => {
+                if (nextLayer[field] !== previousLayer[field]) {
+                    patch[field] = nextLayer[field];
+                }
+            });
+            if (Object.keys(patch).length) {
+                patches[layerId] = patch;
+            }
+        });
+        return patches;
+    }
+
+    function applySelectionScaleToDocument(document, state, factorX, factorY) {
+        const normalized = normalizeCompositeDocument(document);
+        const nextFactorX = clamp(Number(factorX) || 1, COMPOSITE_MIN_SCALE, COMPOSITE_MAX_SCALE);
+        const nextFactorY = clamp(Number(factorY) || 1, COMPOSITE_MIN_SCALE, COMPOSITE_MAX_SCALE);
+        normalized.layers.forEach((layer) => {
+            const startLayer = (state.startLayers || []).find((entry) => entry.id === layer.id);
+            if (!startLayer) return;
+            const nextWidth = startLayer.width * nextFactorX;
+            const nextHeight = startLayer.height * nextFactorY;
+            const nextCenterX = state.anchorWorldX + ((startLayer.centerX - state.anchorWorldX) * nextFactorX);
+            const nextCenterY = state.anchorWorldY + ((startLayer.centerY - state.anchorWorldY) * nextFactorY);
+            Object.assign(layer, buildLayerPatchFromScales(
+                layer,
+                startLayer.scaleX * nextFactorX,
+                startLayer.scaleY * nextFactorY,
+                nextCenterX - (nextWidth * 0.5),
+                nextCenterY - (nextHeight * 0.5)
+            ));
+        });
+        return normalized;
+    }
+
     function updateSelectedLayerUI(document = currentStageDocument()) {
         if (!refs.selectionUI) return;
         const normalized = normalizeCompositeDocument(document);
-        const layer = selectedLayer(normalized);
-        const isVisible = !!layer && layer.visible !== false && normalized.workspace.sidebarView !== 'export';
+        const selectedLayers = getSelectedLayers(normalized).filter((layer) => layer.visible !== false);
+        const layer = selectedLayers.length === 1 ? selectedLayers[0] : null;
+        const selectionBounds = selectedLayers.length > 1 ? getSelectionBounds(normalized) : null;
+        const isVisible = selectedLayers.length > 0 && normalized.workspace.sidebarView !== 'export';
         refs.selectionUI.classList.toggle('is-visible', isVisible);
+        refs.selectionUI.dataset.selectionMode = selectedLayers.length > 1 ? 'multi' : 'single';
         if (!isVisible) return;
 
         const metrics = getViewportMetrics();
-        const rendered = getCompositeLayerRenderedSize(layer);
+        if (selectionBounds) {
+            const topLeft = engine.worldToScreen(normalized, metrics.width, metrics.height, selectionBounds.minX, selectionBounds.minY);
+            const bottomRight = engine.worldToScreen(normalized, metrics.width, metrics.height, selectionBounds.maxX, selectionBounds.maxY);
+            if (!topLeft || !bottomRight) return;
+            refs.selectionUI.style.left = `${Math.min(topLeft.x, bottomRight.x)}px`;
+            refs.selectionUI.style.top = `${Math.min(topLeft.y, bottomRight.y)}px`;
+            refs.selectionUI.style.width = `${Math.abs(bottomRight.x - topLeft.x)}px`;
+            refs.selectionUI.style.height = `${Math.abs(bottomRight.y - topLeft.y)}px`;
+            refs.selectionUI.style.transform = 'none';
+            refs.selectionUI.dataset.layerId = '';
+            return;
+        }
+        const rendered = getStageLayerRenderedSize(layer);
         const topLeft = engine.worldToScreen(normalized, metrics.width, metrics.height, layer.x, layer.y);
         if (!topLeft) return;
-        const zoom = Math.max(0.0001, Number(normalized.view.zoom) || 1);
+        const zoom = Math.max(COMPOSITE_MIN_ZOOM, Number(normalized.view.zoom) || 1);
         refs.selectionUI.style.left = `${topLeft.x}px`;
         refs.selectionUI.style.top = `${topLeft.y}px`;
         refs.selectionUI.style.width = `${rendered.width * zoom}px`;
@@ -747,7 +1090,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             refs.layersPanel.innerHTML = `
                 <div class="composite-info-card">
                     <strong>No layers yet</strong>
-                    <span class="composite-help">Use the top toolbar to add Editor projects, images, text, or square objects.</span>
+                    <span class="composite-help">Use the top toolbar to add Editor projects, images, text, or square/circle/triangle objects.</span>
                 </div>
             `;
             return;
@@ -755,12 +1098,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         refs.layersPanel.innerHTML = `
             <div class="composite-stack">
                 ${layers.map((layer) => {
-                    const dimensions = getCompositeLayerDimensions(layer);
-                    const rendered = getCompositeLayerRenderedSize(layer);
+                    const dimensions = getStageLayerSourceDimensions(layer);
+                    const rendered = getStageLayerRenderedSize(layer);
                     const scaleLabel = Math.abs(getLayerScaleValue(layer, 'x') - getLayerScaleValue(layer, 'y')) <= 0.001
                         ? formatNumber(getLayerScaleValue(layer))
                         : `${formatNumber(getLayerScaleValue(layer, 'x'))} x ${formatNumber(getLayerScaleValue(layer, 'y'))}`;
-                    const isSelected = layer.id === currentDocument.selection.layerId;
+                    const isSelected = isLayerSelected(layer.id, currentDocument);
                     return `
                         <section class="composite-card ${isSelected ? 'is-selected' : ''}" draggable="true" data-composite-layer-row="${layer.id}">
                             <button type="button" class="composite-card-main" data-composite-action="select-layer" data-layer-id="${layer.id}">
@@ -824,26 +1167,60 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 })}
             `;
         }
-        if (layer.kind === 'square') {
+        if (layer.kind === 'square' || layer.kind === 'circle' || layer.kind === 'triangle') {
             return renderColorRow({
-                label: 'Square Color',
-                value: layer.squareAsset?.color || '#ffffff',
+                label: `${mapLayerKindLabel(layer)} Color`,
+                value: layer.squareAsset?.color || layer.circleAsset?.color || layer.triangleAsset?.color || '#ffffff',
                 action: 'update-layer-color',
                 disabled: layer.locked,
-                dataset: { layerid: layer.id, asset: 'squareAsset', field: 'color' }
+                dataset: {
+                    layerid: layer.id,
+                    asset: layer.kind === 'square' ? 'squareAsset' : layer.kind === 'circle' ? 'circleAsset' : 'triangleAsset',
+                    field: 'color'
+                }
             });
         }
         return '';
     }
 
     function renderTransformPanel() {
-        const layer = selectedLayer();
-        if (!layer) {
-            refs.transformPanel.innerHTML = '<div class="composite-mini-empty">Select a layer to edit its transform.</div>';
+        const selectedLayers = getSelectedLayers();
+        const layer = selectedLayers.length === 1 ? selectedLayers[0] : null;
+        if (!selectedLayers.length) {
+            refs.transformPanel.innerHTML = '<div class="composite-mini-empty">Select one or more layers to edit transforms.</div>';
             return;
         }
-        const dimensions = getCompositeLayerDimensions(layer);
-        const rendered = getCompositeLayerRenderedSize(layer);
+        if (selectedLayers.length > 1) {
+            const bounds = getSelectionBounds(currentDocument);
+            const resizeMode = getSelectionResizeMode(currentDocument);
+            refs.transformPanel.innerHTML = `
+                <div class="composite-setting-stack">
+                    <div class="composite-info-card">
+                        <div class="composite-info-line"><span>Selection</span><strong>${selectedLayers.length} layers</strong></div>
+                        <div class="composite-info-line"><span>Bounds Position</span><strong>${escapeHtml(`${formatNumber(bounds?.minX || 0)}, ${formatNumber(bounds?.minY || 0)}`)}</strong></div>
+                        <div class="composite-info-line"><span>Bounds Size</span><strong>${escapeHtml(formatDimensions(bounds?.width || 0, bounds?.height || 0))}</strong></div>
+                    </div>
+                    ${renderSelectRow({
+                        label: 'Handle Mode',
+                        meta: getLayerResizeOptions({ kind: 'text' }).find((option) => option.value === resizeMode)?.label || '',
+                        action: 'set-layer-resize-mode',
+                        value: resizeMode,
+                        dataset: { selectionscope: 'multi' },
+                        options: RESIZE_MODE_OPTIONS
+                    })}
+                    <div class="composite-info-card">
+                        <span class="composite-help">Drag any selected object to move the group, use the gold handles to scale the group, or press Delete to remove the full selection.</span>
+                    </div>
+                    <div class="composite-card-actions">
+                        <button type="button" class="toolbar-button" data-composite-action="clear-selection">Clear Selection</button>
+                        <button type="button" class="toolbar-button" data-composite-action="remove-selected-layers">Delete Selected</button>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+        const dimensions = getStageLayerSourceDimensions(layer);
+        const rendered = getStageLayerRenderedSize(layer);
         const resizeMode = getCompositeLayerResizeMode(layer);
         const supportsStretch = isCompositeLayerStretchCapable(layer);
         const showStretchScales = supportsStretch && resizeMode === 'anchor-stretch';
@@ -872,9 +1249,9 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 ${renderRangeRow({ id: `layer-x-${layer.id}`, label: 'X Position', value: layer.x, min: -8192, max: 8192, step: 1, disabled: layer.locked, dataset: { layerid: layer.id, field: 'x' } })}
                 ${renderRangeRow({ id: `layer-y-${layer.id}`, label: 'Y Position', value: layer.y, min: -8192, max: 8192, step: 1, disabled: layer.locked, dataset: { layerid: layer.id, field: 'y' } })}
                 ${showStretchScales
-                    ? `${renderRangeRow({ id: `layer-scale-x-${layer.id}`, label: 'Scale X', value: getLayerScaleValue(layer, 'x'), min: 0.05, max: 512, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'scaleX' } })}
-                       ${renderRangeRow({ id: `layer-scale-y-${layer.id}`, label: 'Scale Y', value: getLayerScaleValue(layer, 'y'), min: 0.05, max: 512, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'scaleY' } })}`
-                    : renderRangeRow({ id: `layer-scale-${layer.id}`, label: 'Scale', value: getLayerScaleValue(layer), min: 0.05, max: 512, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'scale' } })}
+                    ? `${renderRangeRow({ id: `layer-scale-x-${layer.id}`, label: 'Scale X', value: getLayerScaleValue(layer, 'x'), min: COMPOSITE_MIN_SCALE, max: COMPOSITE_MAX_SCALE, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'scaleX' } })}
+                       ${renderRangeRow({ id: `layer-scale-y-${layer.id}`, label: 'Scale Y', value: getLayerScaleValue(layer, 'y'), min: COMPOSITE_MIN_SCALE, max: COMPOSITE_MAX_SCALE, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'scaleY' } })}`
+                    : renderRangeRow({ id: `layer-scale-${layer.id}`, label: 'Scale', value: getLayerScaleValue(layer), min: COMPOSITE_MIN_SCALE, max: COMPOSITE_MAX_SCALE, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'scale' } })}
                 ${renderRangeRow({ id: `layer-rotation-${layer.id}`, label: 'Rotation', value: layer.rotation, min: -6.283, max: 6.283, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'rotation' } })}
                 ${renderRangeRow({ id: `layer-opacity-${layer.id}`, label: 'Opacity', value: layer.opacity, min: 0, max: 1, step: 0.01, disabled: layer.locked, dataset: { layerid: layer.id, field: 'opacity' } })}
             </div>
@@ -882,11 +1259,26 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     }
 
     function renderBlendPanel() {
-        const layer = selectedLayer();
+        const selectedLayers = getSelectedLayers();
+        const layer = selectedLayers.length === 1 ? selectedLayers[0] : null;
         const bounds = computeCompositeDocumentBounds(currentDocument);
+        const sharedBlendMode = selectedLayers.length > 1 && selectedLayers.every((entry) => entry.blendMode === selectedLayers[0]?.blendMode)
+            ? selectedLayers[0].blendMode
+            : '';
         refs.blendPanel.innerHTML = `
             <div class="composite-setting-stack">
-                ${layer ? `
+                ${selectedLayers.length > 1 ? `
+                    <label class="composite-select-wrap">
+                        <div class="composite-setting-label">
+                            <span>Blend Mode</span>
+                            <span>Apply to ${selectedLayers.length} layers</span>
+                        </div>
+                        <select class="composite-select" data-composite-action="set-layer-blend" data-selection-scope="multi">
+                            <option value="" ${!sharedBlendMode ? 'selected' : ''}>Mixed / Set All</option>
+                            ${BLEND_MODE_OPTIONS.map(([value, label]) => `<option value="${value}" ${value === sharedBlendMode ? 'selected' : ''}>${label}</option>`).join('')}
+                        </select>
+                    </label>
+                ` : layer ? `
                     <label class="composite-select-wrap">
                         <div class="composite-setting-label">
                             <span>Blend Mode</span>
@@ -957,12 +1349,16 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         <span class="composite-help">${escapeHtml(pixelMatch.status)}</span>
                     </div>
                     <div class="composite-card-actions">
+                        <button type="button" class="toolbar-button" data-composite-action="set-custom-export-from-view">Use View As Export</button>
                         <button type="button" class="toolbar-button ${enablePixelMatch ? 'primary-button' : ''}" data-composite-action="toggle-pixel-match" ${pixelMatch.eligibleCount ? '' : 'disabled'}>
                             ${enablePixelMatch ? 'Click Layer on Canvas...' : 'Match Layer 1:1'}
                         </button>
                     </div>
                 ` : `
                     <div class="composite-mini-empty">Export bounds and resolution will match the full visible area of all layers together automatically.</div>
+                    <div class="composite-card-actions">
+                        <button type="button" class="toolbar-button" data-composite-action="set-custom-export-from-view">Use View As Export</button>
+                    </div>
                 `}
             </div>
         `;
@@ -1114,6 +1510,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
 
     async function render(document) {
         currentDocument = normalizeCompositeDocument(document);
+        syncSelectionFromDocument(currentDocument);
+        const sidebarChanged = currentDocument.workspace.sidebarView !== lastSidebarView;
         if (currentDocument.workspace.sidebarView !== 'export' || currentDocument.export.boundsMode !== 'custom') {
             enablePixelMatch = false;
         }
@@ -1121,11 +1519,14 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             sessionDocument = currentDocument;
             refs.tabs.forEach((tab) => tab.classList.toggle('is-active', tab.dataset.sidebarView === currentDocument.workspace.sidebarView));
             refs.panels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.compositePanel === currentDocument.workspace.sidebarView));
-            renderLayersPanel();
-            renderTransformPanel();
-            renderBlendPanel();
-            renderExportPanel();
             renderStageChrome();
+            if (!panelInputActive || sidebarChanged) {
+                renderLayersPanel();
+                renderTransformPanel();
+                renderBlendPanel();
+                renderExportPanel();
+            }
+            lastSidebarView = currentDocument.workspace.sidebarView;
         }
         if (!active) return;
         await syncStageFromDocument(currentStageDocument());
@@ -1133,29 +1534,146 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
 
     function syncLayerControlInputs(layer) {
         if (!layer) return;
-        const xField = root.querySelector(`#layer-x-${layer.id}`);
-        const yField = root.querySelector(`#layer-y-${layer.id}`);
-        const uniformScaleField = root.querySelector(`#layer-scale-${layer.id}`);
-        const scaleXField = root.querySelector(`#layer-scale-x-${layer.id}`);
-        const scaleYField = root.querySelector(`#layer-scale-y-${layer.id}`);
-        if (xField) xField.value = Math.round(layer.x);
-        if (yField) yField.value = Math.round(layer.y);
-        if (uniformScaleField) uniformScaleField.value = getLayerScaleValue(layer);
-        if (scaleXField) scaleXField.value = getLayerScaleValue(layer, 'x');
-        if (scaleYField) scaleYField.value = getLayerScaleValue(layer, 'y');
+        root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="x"]`).forEach((input) => {
+            input.value = String(Math.round(layer.x));
+            setSettingMeta(input.closest('.composite-setting'), formatNumber(layer.x));
+        });
+        root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="y"]`).forEach((input) => {
+            input.value = String(Math.round(layer.y));
+            setSettingMeta(input.closest('.composite-setting'), formatNumber(layer.y));
+        });
+        root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="scale"]`).forEach((input) => {
+            input.value = String(getLayerScaleValue(layer));
+            setSettingMeta(input.closest('.composite-setting'), formatNumber(getLayerScaleValue(layer)));
+        });
+        root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="scaleX"]`).forEach((input) => {
+            input.value = String(getLayerScaleValue(layer, 'x'));
+            setSettingMeta(input.closest('.composite-setting'), formatNumber(getLayerScaleValue(layer, 'x')));
+        });
+        root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="scaleY"]`).forEach((input) => {
+            input.value = String(getLayerScaleValue(layer, 'y'));
+            setSettingMeta(input.closest('.composite-setting'), formatNumber(getLayerScaleValue(layer, 'y')));
+        });
+    }
+
+    function beginPanDrag(event, document = currentDocument) {
+        sessionDocument = cloneDocument(document);
+        dragState = {
+            mode: 'pan',
+            pointerId: event.pointerId,
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            startPanX: sessionDocument.view.panX || 0,
+            startPanY: sessionDocument.view.panY || 0
+        };
+        refs.stageWrap.classList.add('is-dragging');
+        refs.stageWrap.setPointerCapture?.(event.pointerId);
+        event.preventDefault();
     }
 
     function handleCanvasPointerDown(event) {
-        if (!active || event.button !== 0) return;
+        if (!active) return;
+        const layerNode = event.target.closest('.composite-layer');
+        const layerId = layerNode ? layerNode.dataset.layerId : null;
+        const selectedIds = getSelectedLayerIds(currentDocument);
+        const selectedLayersNow = getSelectedLayers(currentDocument);
+        const hasMultiSelection = selectedLayersNow.length > 1;
+        const isSelectedHit = !!layerId && selectedIds.includes(layerId);
+
+        if (event.button === 1) {
+            beginPanDrag(event);
+            return;
+        }
+        if (event.button === 2) {
+            if (currentDocument.workspace.sidebarView !== 'export' && !layerId && !event.target.closest('[data-composite-action="layer-scale"]')) {
+                const stageRect = refs.stageWrap.getBoundingClientRect();
+                dragState = {
+                    mode: 'marquee-select',
+                    pointerId: event.pointerId,
+                    startClientX: event.clientX,
+                    startClientY: event.clientY,
+                    stageLeft: Number(stageRect.left) || 0,
+                    stageTop: Number(stageRect.top) || 0
+                };
+                refs.stageWrap.classList.add('is-dragging');
+                refs.stageWrap.setPointerCapture?.(event.pointerId);
+                updateMarqueeUI({
+                    left: event.clientX - dragState.stageLeft,
+                    top: event.clientY - dragState.stageTop,
+                    width: 0,
+                    height: 0
+                });
+            }
+            event.preventDefault();
+            return;
+        }
+        if (event.button !== 0) return;
         const metrics = getViewportMetrics();
         const scaleHandle = event.target.closest('[data-composite-action="layer-scale"]');
 
         if (scaleHandle) {
             sessionDocument = cloneDocument(currentDocument);
+            if (hasMultiSelection) {
+                const groupLayers = getSelectedLayers(sessionDocument);
+                if (!groupLayers.length || groupLayers.some((layer) => layer.locked)) {
+                    setStatus('Unlock all selected layers before transforming the grouped selection.', 'warning');
+                    return;
+                }
+                const selectionBounds = getSelectionBounds(sessionDocument);
+                if (!selectionBounds) return;
+                const descriptor = getResizeHandleDescriptor(scaleHandle.dataset.dir || 'se');
+                const centerX = selectionBounds.minX + (selectionBounds.width * 0.5);
+                const centerY = selectionBounds.minY + (selectionBounds.height * 0.5);
+                const anchorLocal = {
+                    x: (-descriptor.activeX) * selectionBounds.width * 0.5,
+                    y: (-descriptor.activeY) * selectionBounds.height * 0.5
+                };
+                dragState = {
+                    mode: 'selection-scale',
+                    dir: scaleHandle.dataset.dir || 'se',
+                    pointerId: event.pointerId,
+                    layerIds: groupLayers.map((layer) => layer.id),
+                    sourceWidth: Math.max(1, selectionBounds.width),
+                    sourceHeight: Math.max(1, selectionBounds.height),
+                    centerX,
+                    centerY,
+                    rotation: 0,
+                    resizeMode: getSelectionResizeMode(sessionDocument),
+                    activeX: descriptor.activeX,
+                    activeY: descriptor.activeY,
+                    anchorNormX: -descriptor.activeX,
+                    anchorNormY: -descriptor.activeY,
+                    startScale: 1,
+                    startScaleX: 1,
+                    startScaleY: 1,
+                    startHalfWidth: selectionBounds.width * 0.5,
+                    startHalfHeight: selectionBounds.height * 0.5,
+                    anchorWorldX: centerX + anchorLocal.x,
+                    anchorWorldY: centerY + anchorLocal.y,
+                    startLayers: groupLayers.map((layer) => {
+                        const rendered = getStageLayerRenderedSize(layer);
+                        return {
+                            id: layer.id,
+                            x: layer.x,
+                            y: layer.y,
+                            scaleX: getLayerScaleValue(layer, 'x'),
+                            scaleY: getLayerScaleValue(layer, 'y'),
+                            width: rendered.width,
+                            height: rendered.height,
+                            centerX: layer.x + (rendered.width * 0.5),
+                            centerY: layer.y + (rendered.height * 0.5)
+                        };
+                    })
+                };
+                refs.stageWrap.classList.add('is-dragging');
+                refs.stageWrap.setPointerCapture?.(event.pointerId);
+                event.preventDefault();
+                return;
+            }
             const layer = selectedLayer(sessionDocument);
             if (!layer || layer.locked) return;
-            const source = getCompositeLayerDimensions(layer);
-            const rendered = getCompositeLayerRenderedSize(layer);
+            const source = getStageLayerSourceDimensions(layer);
+            const rendered = getStageLayerRenderedSize(layer);
             const descriptor = getResizeHandleDescriptor(scaleHandle.dataset.dir || 'se');
             const centerX = layer.x + (rendered.width * 0.5);
             const centerY = layer.y + (rendered.height * 0.5);
@@ -1215,8 +1733,6 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         }
 
         const isExportMode = currentDocument.workspace.sidebarView === 'export';
-        const layerNode = event.target.closest('.composite-layer');
-        const layerId = layerNode ? layerNode.dataset.layerId : null;
 
         if (isExportMode) {
             if (enablePixelMatch && layerId) {
@@ -1242,37 +1758,47 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 event.preventDefault();
                 return;
             }
-            sessionDocument = cloneDocument(currentDocument);
-            dragState = {
-                mode: 'pan',
-                pointerId: event.pointerId,
-                startClientX: event.clientX,
-                startClientY: event.clientY,
-                startPanX: sessionDocument.view.panX || 0,
-                startPanY: sessionDocument.view.panY || 0
-            };
-            refs.stageWrap.classList.add('is-dragging');
-            refs.stageWrap.setPointerCapture?.(event.pointerId);
+            beginPanDrag(event);
+            return;
+        }
+
+        if ((event.ctrlKey || event.metaKey || event.shiftKey) && layerId) {
+            const nextIds = isSelectedHit
+                ? selectedIds.filter((entryId) => entryId !== layerId)
+                : [...selectedIds, layerId];
+            setSelectedLayers(nextIds, { primaryId: layerId });
             event.preventDefault();
             return;
         }
 
-        const shouldSelectLayer = !!layerId && layerId !== currentDocument.selection.layerId;
-        const shouldClearSelection = !layerId && !!currentDocument.selection.layerId;
-        if (shouldSelectLayer) {
-            currentDocument = normalizeCompositeDocument({
-                ...currentDocument,
-                selection: { layerId }
-            });
-        } else if (shouldClearSelection) {
-            currentDocument = normalizeCompositeDocument({
-                ...currentDocument,
-                selection: { layerId: null }
-            });
+        if (layerId && !isSelectedHit) {
+            setSelectedLayers([layerId], { primaryId: layerId });
+        } else if (!layerId && selectedIds.length) {
+            setSelectedLayers([], { primaryId: null });
         }
         sessionDocument = cloneDocument(currentDocument);
+        const sessionSelectedLayers = getSelectedLayers(sessionDocument);
         const sessionLayer = layerId ? sessionDocument.layers.find((entry) => entry.id === layerId) || null : null;
-        if (sessionLayer && !sessionLayer.locked) {
+        if (layerId && isSelectedHit && sessionSelectedLayers.length > 1) {
+            if (sessionSelectedLayers.some((layer) => layer.locked)) {
+                setStatus('Unlock all selected layers before moving the grouped selection.', 'warning');
+                event.preventDefault();
+                return;
+            }
+            const world = engine.screenToWorld(sessionDocument, metrics.width, metrics.height, event.clientX, event.clientY, metrics.left, metrics.top);
+            dragState = {
+                mode: 'selection-move',
+                pointerId: event.pointerId,
+                layerIds: sessionSelectedLayers.map((layer) => layer.id),
+                startWorldX: world.x,
+                startWorldY: world.y,
+                startLayers: sessionSelectedLayers.map((layer) => ({
+                    id: layer.id,
+                    x: layer.x,
+                    y: layer.y
+                }))
+            };
+        } else if (sessionLayer && !sessionLayer.locked) {
             const world = engine.screenToWorld(sessionDocument, metrics.width, metrics.height, event.clientX, event.clientY, metrics.left, metrics.top);
             dragState = {
                 mode: 'layer',
@@ -1284,23 +1810,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 startLayerY: sessionLayer.y
             };
         } else {
-            dragState = {
-                mode: 'pan',
-                pointerId: event.pointerId,
-                startClientX: event.clientX,
-                startClientY: event.clientY,
-                startPanX: sessionDocument.view.panX || 0,
-                startPanY: sessionDocument.view.panY || 0
-            };
+            beginPanDrag(event, sessionDocument);
+            return;
         }
 
         refs.stageWrap.classList.add('is-dragging');
         refs.stageWrap.setPointerCapture?.(event.pointerId);
-        if (shouldSelectLayer) {
-            actions.selectCompositeLayer?.(layerId);
-        } else if (shouldClearSelection) {
-            actions.selectCompositeLayer?.(null);
-        }
         event.preventDefault();
     }
 
@@ -1309,7 +1824,14 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         const metrics = getViewportMetrics();
         const world = engine.screenToWorld(sessionDocument, metrics.width, metrics.height, event.clientX, event.clientY, metrics.left, metrics.top);
 
-        if (dragState.mode === 'bounds-move') {
+        if (dragState.mode === 'marquee-select') {
+            updateMarqueeUI({
+                left: Math.min(dragState.startClientX, event.clientX) - dragState.stageLeft,
+                top: Math.min(dragState.startClientY, event.clientY) - dragState.stageTop,
+                width: Math.abs(event.clientX - dragState.startClientX),
+                height: Math.abs(event.clientY - dragState.startClientY)
+            });
+        } else if (dragState.mode === 'bounds-move') {
             sessionDocument.export.bounds.x = dragState.startBounds.x + (world.x - dragState.startWorldX);
             sessionDocument.export.bounds.y = dragState.startBounds.y + (world.y - dragState.startWorldY);
             pixelMatchMessage = '';
@@ -1336,6 +1858,53 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 referenceBounds: dragState.startBounds
             });
             pixelMatchMessage = '';
+        } else if (dragState.mode === 'selection-scale') {
+            const local = rotateToLocal(
+                world.x - dragState.centerX,
+                world.y - dragState.centerY,
+                dragState.rotation
+            );
+            if (dragState.resizeMode === 'center-uniform') {
+                const factorCandidates = [];
+                if (dragState.activeX !== 0) {
+                    factorCandidates.push((Math.abs(local.x) * 2) / Math.max(1, dragState.sourceWidth));
+                }
+                if (dragState.activeY !== 0) {
+                    factorCandidates.push((Math.abs(local.y) * 2) / Math.max(1, dragState.sourceHeight));
+                }
+                const uniformFactor = clamp(
+                    factorCandidates.length ? Math.max(...factorCandidates) : 1,
+                    COMPOSITE_MIN_SCALE,
+                    COMPOSITE_MAX_SCALE
+                );
+                applySelectionScaleToDocument(sessionDocument, dragState, uniformFactor, uniformFactor);
+            } else {
+                const startAnchorX = dragState.anchorNormX * dragState.startHalfWidth;
+                const startAnchorY = dragState.anchorNormY * dragState.startHalfHeight;
+                const startActiveX = dragState.activeX * dragState.startHalfWidth;
+                const startActiveY = dragState.activeY * dragState.startHalfHeight;
+                const ratioX = dragState.activeX !== 0
+                    ? Math.abs(local.x - startAnchorX) / Math.max(0.0001, Math.abs(startActiveX - startAnchorX))
+                    : 1;
+                const ratioY = dragState.activeY !== 0
+                    ? Math.abs(local.y - startAnchorY) / Math.max(0.0001, Math.abs(startActiveY - startAnchorY))
+                    : 1;
+                if (dragState.resizeMode === 'anchor-stretch') {
+                    applySelectionScaleToDocument(
+                        sessionDocument,
+                        dragState,
+                        dragState.activeX !== 0 ? ratioX : 1,
+                        dragState.activeY !== 0 ? ratioY : 1
+                    );
+                } else {
+                    const uniformFactor = clamp(
+                        [dragState.activeX !== 0 ? ratioX : null, dragState.activeY !== 0 ? ratioY : null].filter((value) => value != null).reduce((maxValue, value) => Math.max(maxValue, value), 1),
+                        COMPOSITE_MIN_SCALE,
+                        COMPOSITE_MAX_SCALE
+                    );
+                    applySelectionScaleToDocument(sessionDocument, dragState, uniformFactor, uniformFactor);
+                }
+            }
         } else if (dragState.mode === 'layer-scale') {
             const layer = sessionDocument.layers.find((entry) => entry.id === dragState.layerId) || null;
             if (layer) {
@@ -1352,7 +1921,11 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     if (dragState.activeY !== 0) {
                         scaleCandidates.push((Math.abs(local.y) * 2) / Math.max(1, dragState.sourceHeight));
                     }
-                    const nextScale = clamp(scaleCandidates.length ? Math.max(...scaleCandidates) : dragState.startScale, 0.05, 1024);
+                    const nextScale = clamp(
+                        scaleCandidates.length ? Math.max(...scaleCandidates) : dragState.startScale,
+                        COMPOSITE_MIN_SCALE,
+                        COMPOSITE_MAX_SCALE
+                    );
                     Object.assign(layer, buildLayerPatchFromScales(
                         layer,
                         nextScale,
@@ -1376,13 +1949,17 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     let nextScaleY = dragState.startScaleY;
 
                     if (dragState.resizeMode === 'anchor-stretch') {
-                        nextScaleX = dragState.activeX !== 0 ? dragState.startScaleX * clamp(ratioX, 0.01, 1024) : dragState.startScaleX;
-                        nextScaleY = dragState.activeY !== 0 ? dragState.startScaleY * clamp(ratioY, 0.01, 1024) : dragState.startScaleY;
+                        nextScaleX = dragState.activeX !== 0 ? dragState.startScaleX * clamp(ratioX, COMPOSITE_MIN_SCALE, COMPOSITE_MAX_SCALE) : dragState.startScaleX;
+                        nextScaleY = dragState.activeY !== 0 ? dragState.startScaleY * clamp(ratioY, COMPOSITE_MIN_SCALE, COMPOSITE_MAX_SCALE) : dragState.startScaleY;
                     } else {
                         const factorCandidates = [];
                         if (dragState.activeX !== 0) factorCandidates.push(ratioX);
                         if (dragState.activeY !== 0) factorCandidates.push(ratioY);
-                        const uniformFactor = clamp(factorCandidates.length ? Math.max(...factorCandidates) : 1, 0.01, 1024);
+                        const uniformFactor = clamp(
+                            factorCandidates.length ? Math.max(...factorCandidates) : 1,
+                            COMPOSITE_MIN_SCALE,
+                            COMPOSITE_MAX_SCALE
+                        );
                         nextScaleX = dragState.startScaleX * uniformFactor;
                         nextScaleY = dragState.startScaleY * uniformFactor;
                     }
@@ -1406,6 +1983,15 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 }
                 syncLayerControlInputs(layer);
             }
+        } else if (dragState.mode === 'selection-move') {
+            const deltaX = world.x - dragState.startWorldX;
+            const deltaY = world.y - dragState.startWorldY;
+            dragState.startLayers.forEach((startLayer) => {
+                const layer = sessionDocument.layers.find((entry) => entry.id === startLayer.id) || null;
+                if (!layer) return;
+                layer.x = startLayer.x + deltaX;
+                layer.y = startLayer.y + deltaY;
+            });
         } else if (dragState.mode === 'layer') {
             const layer = sessionDocument.layers.find((entry) => entry.id === dragState.layerId) || null;
             if (layer) {
@@ -1428,6 +2014,30 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         dragState = null;
         refs.stageWrap.classList.remove('is-dragging');
         refs.stageWrap.releasePointerCapture?.(event.pointerId);
+        updateMarqueeUI(null);
+
+        if (completedDrag.mode === 'marquee-select') {
+            const selectionRect = {
+                left: Math.min(completedDrag.startClientX, event.clientX) - completedDrag.stageLeft,
+                top: Math.min(completedDrag.startClientY, event.clientY) - completedDrag.stageTop,
+                right: Math.max(completedDrag.startClientX, event.clientX) - completedDrag.stageLeft,
+                bottom: Math.max(completedDrag.startClientY, event.clientY) - completedDrag.stageTop
+            };
+            const hits = normalizeCompositeDocument(currentDocument).layers
+                .filter((layer) => layer.visible !== false)
+                .sort((a, b) => (b.z || 0) - (a.z || 0))
+                .filter((layer) => {
+                    const screenBounds = getLayerScreenBounds(layer, currentDocument);
+                    if (!screenBounds) return false;
+                    return screenBounds.left <= selectionRect.right
+                        && screenBounds.right >= selectionRect.left
+                        && screenBounds.top <= selectionRect.bottom
+                        && screenBounds.bottom >= selectionRect.top;
+                })
+                .map((layer) => layer.id);
+            setSelectedLayers(hits, { primaryId: hits[0] || null });
+            return;
+        }
 
         const nextDocument = cloneDocument(sessionDocument);
         const previousDocument = currentDocument;
@@ -1465,6 +2075,11 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     scaleY: nextLayer.scaleY
                 });
             }
+        } else if (completedDrag.mode === 'selection-move' || completedDrag.mode === 'selection-scale') {
+            const patches = buildLayerPatchMap(previousDocument, nextDocument, completedDrag.layerIds || []);
+            if (Object.keys(patches).length) {
+                actions.updateCompositeLayerBatch?.(patches);
+            }
         } else if (completedDrag.mode === 'pan') {
             const nextView = nextDocument.view;
             const previousView = previousDocument.view;
@@ -1498,9 +2113,10 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     function handleCanvasWheel(event) {
         if (!active || dragState || currentDocument.view.zoomLocked) return;
         const metrics = getViewportMetrics();
-        const delta = event.deltaY > 0 ? -0.1 : 0.1;
         sessionDocument = cloneDocument(currentDocument);
-        const nextZoom = clamp((Number(sessionDocument.view.zoom) || 1) + delta, 0.1, 32);
+        const currentZoom = Math.max(COMPOSITE_MIN_ZOOM, Number(sessionDocument.view.zoom) || 1);
+        const zoomFactor = Math.exp(-Number(event.deltaY || 0) * 0.0015);
+        const nextZoom = clamp(currentZoom * zoomFactor, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM);
         if (nextZoom === Number(sessionDocument.view.zoom || 1)) {
             event.preventDefault();
             return;
@@ -1521,11 +2137,32 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         if (!node) return;
         const action = node.dataset.compositeAction;
         if (action === 'workspace-tab') {
+            setPanelInputActiveState(false);
             actions.setCompositeSidebarView?.(node.dataset.sidebarView);
             return;
         }
         if (action === 'select-layer') {
-            actions.selectCompositeLayer?.(node.dataset.layerId || null);
+            const layerId = node.dataset.layerId || null;
+            if (!layerId) return;
+            if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                const nextIds = isLayerSelected(layerId)
+                    ? getSelectedLayerIds().filter((entryId) => entryId !== layerId)
+                    : [...getSelectedLayerIds(), layerId];
+                setSelectedLayers(nextIds, { primaryId: layerId });
+                return;
+            }
+            setSelectedLayers([layerId], { primaryId: layerId });
+            return;
+        }
+        if (action === 'clear-selection') {
+            setSelectedLayers([], { primaryId: null });
+            return;
+        }
+        if (action === 'remove-selected-layers') {
+            const ids = getSelectedLayerIds();
+            if (!ids.length) return;
+            actions.removeCompositeLayers?.(ids);
+            selectedLayerIds.clear();
             return;
         }
         if (action === 'toggle-layer-flip') {
@@ -1559,9 +2196,14 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             return;
         }
         if (action === 'toggle-checker') {
-            actions.patchCompositeView?.({
-                showChecker: event.target.checked
-            });
+            const input = node.matches('input') ? node : node.querySelector('input');
+            if (actions.updateAppSetting) {
+                actions.updateAppSetting('composite.preferences.showChecker', !!input?.checked);
+            } else {
+                actions.patchCompositeView?.({
+                    showChecker: !!input?.checked
+                });
+            }
             return;
         }
         if (action === 'frame-view') {
@@ -1573,11 +2215,23 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             return;
         }
         if (action === 'zoom-in') {
-            actions.patchCompositeView?.({ zoom: Math.min(32, (Number(currentDocument.view.zoom) || 1) + 0.1) });
+            actions.patchCompositeView?.({ zoom: clamp((Number(currentDocument.view.zoom) || 1) * 1.25, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM) });
             return;
         }
         if (action === 'zoom-out') {
-            actions.patchCompositeView?.({ zoom: Math.max(0.1, (Number(currentDocument.view.zoom) || 1) - 0.1) });
+            actions.patchCompositeView?.({ zoom: clamp((Number(currentDocument.view.zoom) || 1) / 1.25, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM) });
+            return;
+        }
+        if (action === 'set-custom-export-from-view') {
+            const nextBounds = computePreferredCustomExportBounds(currentDocument);
+            actions.setCompositeSidebarView?.('export');
+            actions.patchCompositeExport?.({
+                boundsMode: 'custom',
+                bounds: nextBounds,
+                customResolution: buildAspectLockedResolution(nextBounds, currentDocument.export.customResolution, {
+                    referenceBounds: currentDocument.export.bounds
+                })
+            });
             return;
         }
         if (action === 'close-picker') {
@@ -1628,6 +2282,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             if (!layer) return;
             const numericValue = Number(target.value);
             if (!Number.isFinite(numericValue)) return;
+            syncNumericSettingInputs(target, numericValue);
             if (field === 'scale') {
                 actions.updateCompositeLayerFields?.(layerId, {
                     scale: numericValue,
@@ -1669,6 +2324,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             const field = target.dataset.field;
             const numericValue = Number(target.value);
             if (!layerId || !assetKey || !field || !Number.isFinite(numericValue)) return;
+            syncNumericSettingInputs(target, numericValue);
             patchLayerAsset(layerId, assetKey, field, numericValue);
             return;
         }
@@ -1678,10 +2334,23 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             const field = target.dataset.field;
             const rawValue = String(target.value || '').trim();
             if (!layerId || !assetKey || !field || !/^#?[0-9a-fA-F]{6}$/.test(rawValue)) return;
-            patchLayerAsset(layerId, assetKey, field, normalizeHexColor(rawValue));
+            const normalizedValue = normalizeHexColor(rawValue);
+            syncColorSettingInputs(target, normalizedValue);
+            patchLayerAsset(layerId, assetKey, field, normalizedValue);
             return;
         }
         if (action === 'set-layer-blend') {
+            if (target.dataset.selectionScope === 'multi') {
+                if (!target.value) return;
+                const patches = {};
+                getSelectedLayerIds().forEach((layerId) => {
+                    patches[layerId] = { blendMode: target.value };
+                });
+                if (Object.keys(patches).length) {
+                    actions.updateCompositeLayerBatch?.(patches);
+                }
+                return;
+            }
             const layerId = target.dataset.layerId;
             if (!layerId) return;
             actions.updateCompositeLayerFields?.(layerId, {
@@ -1690,6 +2359,11 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             return;
         }
         if (action === 'set-layer-resize-mode') {
+            if (target.dataset.selectionscope === 'multi') {
+                selectionResizeMode = String(target.value || 'center-uniform');
+                renderTransformPanel();
+                return;
+            }
             const layerId = target.dataset.layerid;
             const layer = currentDocument.layers.find((entry) => entry.id === layerId) || null;
             if (!layer) return;
@@ -1715,6 +2389,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 editedField: field,
                 editedValue: Number(target.value)
             });
+            syncExportResolutionInputs(nextResolution);
             actions.patchCompositeExport?.({
                 customResolution: nextResolution
             });
@@ -1724,15 +2399,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             enablePixelMatch = false;
             pixelMatchMessage = '';
             if (target.value === 'custom') {
-                const liveBounds = computeCompositeDocumentBounds(currentDocument);
-                const nextBounds = liveBounds.width > 0 && liveBounds.height > 0
-                    ? {
-                        x: Math.round(liveBounds.minX),
-                        y: Math.round(liveBounds.minY),
-                        width: Math.max(1, Math.round(liveBounds.width)),
-                        height: Math.max(1, Math.round(liveBounds.height))
-                    }
-                    : { ...currentDocument.export.bounds };
+                const nextBounds = computePreferredCustomExportBounds(currentDocument);
                 actions.patchCompositeExport?.({
                     boundsMode: 'custom',
                     bounds: nextBounds,
@@ -1774,11 +2441,54 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         }
     });
 
+    root.addEventListener('focusin', (event) => {
+        if (panelInputRefreshTimer) {
+            clearTimeout(panelInputRefreshTimer);
+            panelInputRefreshTimer = null;
+        }
+        if (isPanelEditableTarget(event.target)) {
+            setPanelInputActiveState(true);
+        }
+    });
+
+    root.addEventListener('focusout', () => {
+        refreshPanelInputState();
+    });
+
     refs.stageWrap.addEventListener('pointerdown', handleCanvasPointerDown);
     refs.stageWrap.addEventListener('pointermove', handleCanvasPointerMove);
     refs.stageWrap.addEventListener('pointerup', handleCanvasPointerUp);
     refs.stageWrap.addEventListener('pointercancel', handleCanvasPointerUp);
     refs.stageWrap.addEventListener('wheel', handleCanvasWheel, { passive: false });
+    refs.stageWrap.addEventListener('mousedown', (event) => {
+        if (event.button === 1) {
+            event.preventDefault();
+        }
+    });
+    refs.stageWrap.addEventListener('auxclick', (event) => {
+        if (event.button === 1) {
+            event.preventDefault();
+        }
+    });
+    refs.stageWrap.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+    });
+
+    window.addEventListener('keydown', (event) => {
+        if (!active) return;
+        if (event.key !== 'Delete') return;
+        if (refs.pickerOverlay.classList.contains('is-open')) return;
+        if (isPanelEditableTarget(root.ownerDocument?.activeElement)) return;
+        const ids = getSelectedLayerIds();
+        if (!ids.length) return;
+        event.preventDefault();
+        if (ids.length === 1) {
+            actions.removeCompositeLayer?.(ids[0]);
+            return;
+        }
+        actions.removeCompositeLayers?.(ids);
+        selectedLayerIds.clear();
+    });
 
     root.addEventListener('dragstart', (event) => {
         const row = event.target.closest('[data-composite-layer-row]');
@@ -1842,6 +2552,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         deactivate() {
             active = false;
             dragState = null;
+            panelInputActive = false;
+            if (panelInputRefreshTimer) {
+                clearTimeout(panelInputRefreshTimer);
+                panelInputRefreshTimer = null;
+            }
+            updateMarqueeUI(null);
             clearWheelCommitTimer();
             if (stageFrameHandle) {
                 cancelAnimationFrame(stageFrameHandle);

@@ -1,3 +1,5 @@
+all fixes have been implimented, this file is old
+
 here are some fixes for the compositor tab:
 
 the canvas doesnt update in real time because something is making it really slow, it takes about 5 seconds to have anything at all on the UI update, perhaps it is because we are rendering everything in full quality all the time, maybe instead we should render the canvas in a lower quality while the user is moving or doing any kind of editing that involves transforming an object, and then switch to full quality when there is no kind of changes happeneing for more than 1 second, if changes start to happen within the window, immediately dump the high quality rendering and respond to the edits again.

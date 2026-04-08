@@ -10,9 +10,14 @@ const COMPOSITE_BLEND_MODES = new Set([
     'hue',
     'color'
 ]);
-const COMPOSITE_LAYER_KINDS = new Set(['image', 'editor-project', 'text', 'square']);
+export const COMPOSITE_MIN_SCALE = 0.0001;
+export const COMPOSITE_MAX_SCALE = 4096;
+export const COMPOSITE_MIN_ZOOM = 0.001;
+export const COMPOSITE_MAX_ZOOM = 4096;
+
+const COMPOSITE_LAYER_KINDS = new Set(['image', 'editor-project', 'text', 'square', 'circle', 'triangle']);
 const COMPOSITE_RESIZE_MODES = new Set(['center-uniform', 'anchor-uniform', 'anchor-stretch']);
-const COMPOSITE_STRETCH_LAYER_KINDS = new Set(['text', 'square']);
+const COMPOSITE_STRETCH_LAYER_KINDS = new Set(['text', 'square', 'circle', 'triangle']);
 
 const textMetricsCache = new Map();
 const generatedSourceCache = new Map();
@@ -118,6 +123,22 @@ function normalizeSquareAsset(asset = {}) {
     };
 }
 
+function normalizeCircleAsset(asset = {}) {
+    return {
+        color: normalizeHexColor(asset?.color, '#ffffff'),
+        width: 2,
+        height: 2
+    };
+}
+
+function normalizeTriangleAsset(asset = {}) {
+    return {
+        color: normalizeHexColor(asset?.color, '#ffffff'),
+        width: 2,
+        height: 2
+    };
+}
+
 function supportsCompositeStretching(kindOrLayer) {
     const kind = typeof kindOrLayer === 'string'
         ? String(kindOrLayer || '').toLowerCase()
@@ -141,6 +162,8 @@ function resolveCompositeLayerKind(layer = {}) {
     if (COMPOSITE_LAYER_KINDS.has(requested)) return requested;
     if (layer?.textAsset || typeof layer?.text === 'string') return 'text';
     if (layer?.squareAsset) return 'square';
+    if (layer?.circleAsset) return 'circle';
+    if (layer?.triangleAsset) return 'triangle';
     if (normalizeImageAsset(layer?.imageAsset)) return 'image';
     return 'editor-project';
 }
@@ -250,6 +273,44 @@ function createSquareLayerSource(asset = {}) {
     return next;
 }
 
+function createCircleLayerSource(asset = {}) {
+    const normalized = normalizeCircleAsset(asset);
+    const cacheKey = `circle|${normalized.color}`;
+    const cached = generatedSourceCache.get(cacheKey);
+    if (cached) return cached;
+
+    const svgMarkup = `
+<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2" viewBox="0 0 2 2">
+    <circle cx="1" cy="1" r="1" fill="${escapeXml(normalized.color)}" />
+</svg>`.trim();
+    const next = {
+        imageData: svgToDataUrl(svgMarkup),
+        width: 2,
+        height: 2
+    };
+    generatedSourceCache.set(cacheKey, next);
+    return next;
+}
+
+function createTriangleLayerSource(asset = {}) {
+    const normalized = normalizeTriangleAsset(asset);
+    const cacheKey = `triangle|${normalized.color}`;
+    const cached = generatedSourceCache.get(cacheKey);
+    if (cached) return cached;
+
+    const svgMarkup = `
+<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2" viewBox="0 0 2 2">
+    <polygon points="1,0 2,2 0,2" fill="${escapeXml(normalized.color)}" />
+</svg>`.trim();
+    const next = {
+        imageData: svgToDataUrl(svgMarkup),
+        width: 2,
+        height: 2
+    };
+    generatedSourceCache.set(cacheKey, next);
+    return next;
+}
+
 export function createCompositeLayerId(prefix = 'layer') {
     return createId(prefix);
 }
@@ -261,6 +322,12 @@ export function getCompositeLayerSourceImage(layer = {}) {
     }
     if (kind === 'square') {
         return createSquareLayerSource(layer?.squareAsset);
+    }
+    if (kind === 'circle') {
+        return createCircleLayerSource(layer?.circleAsset);
+    }
+    if (kind === 'triangle') {
+        return createTriangleLayerSource(layer?.triangleAsset);
     }
     const imageAsset = normalizeImageAsset(layer.imageAsset);
     if (imageAsset) {
@@ -295,10 +362,10 @@ export function getCompositeLayerSourceImage(layer = {}) {
 
 export function normalizeCompositeLayer(layer = {}, index = 0) {
     let kind = resolveCompositeLayerKind(layer);
-    const fallbackScale = Math.max(0.01, Number(layer?.scale) || 1);
-    const scaleX = roundValue(Math.max(0.01, Number.isFinite(Number(layer?.scaleX)) ? Number(layer.scaleX) : fallbackScale));
-    const scaleY = roundValue(Math.max(0.01, Number.isFinite(Number(layer?.scaleY)) ? Number(layer.scaleY) : fallbackScale));
-    const uniformScale = roundValue(Math.max(0.01, Number.isFinite(Number(layer?.scale)) ? Number(layer.scale) : Math.sqrt(scaleX * scaleY)));
+    const fallbackScale = Math.max(COMPOSITE_MIN_SCALE, Number(layer?.scale) || 1);
+    const scaleX = roundValue(Math.max(COMPOSITE_MIN_SCALE, Number.isFinite(Number(layer?.scaleX)) ? Number(layer.scaleX) : fallbackScale));
+    const scaleY = roundValue(Math.max(COMPOSITE_MIN_SCALE, Number.isFinite(Number(layer?.scaleY)) ? Number(layer.scaleY) : fallbackScale));
+    const uniformScale = roundValue(Math.max(COMPOSITE_MIN_SCALE, Number.isFinite(Number(layer?.scale)) ? Number(layer.scale) : Math.sqrt(scaleX * scaleY)));
 
     const normalized = {
         id: String(layer?.id || createCompositeLayerId()),
@@ -311,7 +378,11 @@ export function normalizeCompositeLayer(layer = {}, index = 0) {
                     ? `Editor Layer ${index + 1}`
                     : kind === 'text'
                         ? `Text ${index + 1}`
-                        : `Square ${index + 1}`)
+                        : kind === 'square'
+                            ? `Square ${index + 1}`
+                            : kind === 'circle'
+                                ? `Circle ${index + 1}`
+                                : `Triangle ${index + 1}`)
         ),
         visible: layer?.visible !== false,
         locked: !!layer?.locked,
@@ -333,7 +404,9 @@ export function normalizeCompositeLayer(layer = {}, index = 0) {
         embeddedEditorDocument: kind === 'editor-project' ? normalizeEmbeddedEditorDocument(layer?.embeddedEditorDocument) : null,
         imageAsset: kind === 'image' ? normalizeImageAsset(layer?.imageAsset) : null,
         textAsset: kind === 'text' ? normalizeTextAsset(layer?.textAsset || layer?.text) : null,
-        squareAsset: kind === 'square' ? normalizeSquareAsset(layer?.squareAsset) : null
+        squareAsset: kind === 'square' ? normalizeSquareAsset(layer?.squareAsset) : null,
+        circleAsset: kind === 'circle' ? normalizeCircleAsset(layer?.circleAsset) : null,
+        triangleAsset: kind === 'triangle' ? normalizeTriangleAsset(layer?.triangleAsset) : null
     };
 
     if (normalized.kind === 'editor-project' && !normalized.embeddedEditorDocument && normalized.imageAsset) {
@@ -411,7 +484,7 @@ export function normalizeCompositeDocument(document = {}) {
             layerId: selectionId
         },
         view: {
-            zoom: clamp(Number(document?.view?.zoom) || 1, 0.1, 32),
+            zoom: clamp(Number(document?.view?.zoom) || 1, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM),
             panX: roundValue(Number(document?.view?.panX) || 0),
             panY: roundValue(Number(document?.view?.panY) || 0),
             zoomLocked: !!document?.view?.zoomLocked,
@@ -467,9 +540,9 @@ export function getCompositeLayerDimensions(layer) {
 export function getCompositeLayerScale(layer) {
     const normalized = normalizeCompositeLayer(layer);
     return {
-        x: Math.max(0.01, Number(normalized.scaleX) || Number(normalized.scale) || 1),
-        y: Math.max(0.01, Number(normalized.scaleY) || Number(normalized.scale) || 1),
-        uniform: Math.max(0.01, Number(normalized.scale) || 1)
+        x: Math.max(COMPOSITE_MIN_SCALE, Number(normalized.scaleX) || Number(normalized.scale) || 1),
+        y: Math.max(COMPOSITE_MIN_SCALE, Number(normalized.scaleY) || Number(normalized.scale) || 1),
+        uniform: Math.max(COMPOSITE_MIN_SCALE, Number(normalized.scale) || 1)
     };
 }
 
@@ -491,7 +564,7 @@ export function isCompositeLayerStretchCapable(layer) {
 }
 
 export function getCompositeViewCenterWorld(view = {}) {
-    const zoom = clamp(Number(view?.zoom) || 1, 0.1, 32);
+    const zoom = clamp(Number(view?.zoom) || 1, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM);
     return {
         x: roundValue(-(Number(view?.panX) || 0) / zoom),
         y: roundValue(-(Number(view?.panY) || 0) / zoom)
@@ -501,7 +574,7 @@ export function getCompositeViewCenterWorld(view = {}) {
 export function computeCompositeViewBounds(view = {}, viewportWidth = 1, viewportHeight = 1) {
     const safeWidth = Math.max(1, Number(viewportWidth) || 1);
     const safeHeight = Math.max(1, Number(viewportHeight) || 1);
-    const zoom = clamp(Number(view?.zoom) || 1, 0.1, 32);
+    const zoom = clamp(Number(view?.zoom) || 1, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM);
     const center = getCompositeViewCenterWorld(view);
     const halfWidth = safeWidth * 0.5 / zoom;
     const halfHeight = safeHeight * 0.5 / zoom;
@@ -592,8 +665,8 @@ export function computeCompositeFramedView(bounds, viewportWidth = 1, viewportHe
     const safeWidth = Math.max(1, Number(viewportWidth) || 1);
     const safeHeight = Math.max(1, Number(viewportHeight) || 1);
     const paddingPx = Math.max(0, Number(options.paddingPx) || 48);
-    const minZoom = clamp(Number(options.minZoom) || 0.1, 0.01, 32);
-    const maxZoom = clamp(Number(options.maxZoom) || 32, minZoom, 32);
+    const minZoom = clamp(Number(options.minZoom) || COMPOSITE_MIN_ZOOM, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM);
+    const maxZoom = clamp(Number(options.maxZoom) || COMPOSITE_MAX_ZOOM, minZoom, COMPOSITE_MAX_ZOOM);
     const width = Math.max(0, Number(bounds?.width) || 0);
     const height = Math.max(0, Number(bounds?.height) || 0);
 
@@ -638,12 +711,12 @@ export function computeCompositeFittedLayerPlacement({
     const safeSourceWidth = Math.max(1, Number(sourceWidth) || 1);
     const safeSourceHeight = Math.max(1, Number(sourceHeight) || 1);
     const fitRatio = clamp(Number(fit) || 0.82, 0.1, 1);
-    const maximumScale = Math.max(0.01, Number(maxScale) || 1);
+    const maximumScale = Math.max(COMPOSITE_MIN_SCALE, Number(maxScale) || 1);
     const nextScale = clamp(Math.min(
         maximumScale,
         (viewBounds.width * fitRatio) / safeSourceWidth,
         (viewBounds.height * fitRatio) / safeSourceHeight
-    ), 0.01, maximumScale);
+    ), COMPOSITE_MIN_SCALE, maximumScale);
     const scaledWidth = safeSourceWidth * nextScale;
     const scaledHeight = safeSourceHeight * nextScale;
     const zoom = viewBounds.zoom || 1;
@@ -664,6 +737,8 @@ export function summarizeCompositeDocument(document) {
     const imageLayerCount = normalized.layers.filter((layer) => layer.kind === 'image').length;
     const textLayerCount = normalized.layers.filter((layer) => layer.kind === 'text').length;
     const squareLayerCount = normalized.layers.filter((layer) => layer.kind === 'square').length;
+    const circleLayerCount = normalized.layers.filter((layer) => layer.kind === 'circle').length;
+    const triangleLayerCount = normalized.layers.filter((layer) => layer.kind === 'triangle').length;
     return {
         primarySource: null,
         sourceWidth: Math.max(0, Math.round(bounds.width)),
@@ -676,6 +751,8 @@ export function summarizeCompositeDocument(document) {
         editorLayerCount,
         imageLayerCount,
         textLayerCount,
-        squareLayerCount
+        squareLayerCount,
+        circleLayerCount,
+        triangleLayerCount
     };
 }

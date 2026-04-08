@@ -47,7 +47,7 @@ function normalizeDiagnostics(source = {}, defaults) {
 
 export function normalizeSettingsCategory(category) {
     const normalized = String(category || '').trim().toLowerCase();
-    if (normalized === 'general' || normalized === 'library' || normalized === 'editor' || normalized === 'stitch' || normalized === '3d' || normalized === 'logs') {
+    if (normalized === 'general' || normalized === 'library' || normalized === 'editor' || normalized === 'composite' || normalized === 'stitch' || normalized === '3d' || normalized === 'logs') {
         return normalized;
     }
     return 'general';
@@ -58,6 +58,8 @@ export function normalizeAppSettings(candidate = {}, options = {}) {
     const general = candidate.general && typeof candidate.general === 'object' ? candidate.general : {};
     const library = candidate.library && typeof candidate.library === 'object' ? candidate.library : {};
     const editor = candidate.editor && typeof candidate.editor === 'object' ? candidate.editor : {};
+    const composite = candidate.composite && typeof candidate.composite === 'object' ? candidate.composite : {};
+    const compositePreferences = composite.preferences && typeof composite.preferences === 'object' ? composite.preferences : {};
     const stitch = candidate.stitch && typeof candidate.stitch === 'object' ? candidate.stitch : {};
     const stitchDefaults = stitch.defaults && typeof stitch.defaults === 'object' ? stitch.defaults : {};
     const stitchDiagnostics = options.stitchDiagnostics
@@ -96,6 +98,16 @@ export function normalizeAppSettings(candidate = {}, options = {}) {
             layerPreviewsOpen: !!editor.layerPreviewsOpen,
             autoExtractPaletteOnLoad: !!editor.autoExtractPaletteOnLoad,
             transparencyCheckerTone: normalizeChoice(String(editor.transparencyCheckerTone || '').toLowerCase(), defaults.editor.transparencyCheckerTone, new Set(['light', 'dark']))
+        },
+        composite: {
+            preferences: {
+                showChecker: typeof compositePreferences.showChecker === 'boolean'
+                    ? compositePreferences.showChecker
+                    : defaults.composite.preferences.showChecker,
+                zoomLocked: typeof compositePreferences.zoomLocked === 'boolean'
+                    ? compositePreferences.zoomLocked
+                    : defaults.composite.preferences.zoomLocked
+            }
         },
         stitch: {
             defaults: {
@@ -187,6 +199,7 @@ export function stripDiagnosticsFromSettings(settings = {}) {
         general: normalized.general,
         library: normalized.library,
         editor: normalized.editor,
+        composite: normalized.composite,
         stitch: {
             defaults: normalized.stitch.defaults
         },

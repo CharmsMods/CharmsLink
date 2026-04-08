@@ -28,13 +28,14 @@ function formatPercent(value = 0) {
 
 function normalizeCategory(category) {
     const normalized = String(category || '').trim().toLowerCase();
-    return ['general', 'library', 'editor', 'stitch', '3d', 'logs'].includes(normalized) ? normalized : 'general';
+    return ['general', 'library', 'editor', 'composite', 'stitch', '3d', 'logs'].includes(normalized) ? normalized : 'general';
 }
 
 const CATEGORIES = [
     ['general', 'General', 'Theme, save behavior, workers, settings import/export'],
     ['library', 'Library', 'Storage, auto-load, defaults, maintenance'],
     ['editor', 'Editor', 'Viewport defaults, palette automation, checker tone'],
+    ['composite', 'Composite', 'Checker, zoom-lock, and live canvas viewport defaults'],
     ['stitch', 'Stitch', 'Analysis defaults, photo runtime diagnostics, workspace-first behavior'],
     ['3d', '3D', 'Navigation, helpers, snapping, render defaults'],
     ['logs', 'Logs', 'Retention, cards, flash effects, filters']
@@ -44,6 +45,7 @@ const SETTING_ICONS = {
     'general': `<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.91,7.62,6.29L5.23,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.72,8.87 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.84,11.36,4.81,11.68,4.81,12c0,0.32,0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.11-0.2,0.06-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>`,
     'library': `<svg viewBox="0 0 24 24"><path d="M20,8.18v8.64c0,0.44-0.24,0.86-0.61,1.08l-7,4.04c-0.25,0.14-0.54,0.14-0.79,0l-7-4.04 c-0.38-0.22-0.61-0.63-0.61-1.08V8.18c0-0.44,0.24-0.86,0.61-1.08l7-4.04c0.25-0.14,0.54-0.14,0.79,0l7,4.04 C19.76,7.31,20,7.73,20,8.18z M12,4.02L5,8.06l7,4.04l7-4.04L12,4.02z M19,9.81l-6,3.46v6.91l6-3.46V9.81z M5,9.81v6.91l6,3.46v-6.91 L5,9.81z"/></svg>`,
     'editor': `<svg viewBox="0 0 24 24"><path d="M4,10.5c-0.83,0-1.5,0.67-1.5,1.5s0.67,1.5,1.5,1.5s1.5-0.67,1.5-1.5S4.83,10.5,4,10.5z M4,4.5C3.17,4.5,2.5,5.17,2.5,6s0.67,1.5,1.5,1.5S5.5,6.83,5.5,6S4.83,4.5,4,4.5z M4,16.5c-0.83,0-1.5,0.67-1.5,1.5s0.67,1.5,1.5,1.5s1.5-0.67,1.5-1.5S4.83,16.5,4,16.5z M7,19h14v-2H7V19z M7,13h14v-2H7V13z M7,7h14V5H7V7z"/></svg>`,
+    'composite': `<svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/></svg>`,
     'stitch': `<svg viewBox="0 0 24 24"><path d="M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5c0-1.38-1.12-2.5-2.5-2.5S8 2.12 8 3.5V5H4c-1.1 0-2 .9-2 2v4h1.5c1.38 0 2.5 1.12 2.5 2.5S4.88 16 3.5 16H2v4c0 1.1.9 2 2 2h4v-1.5c0-1.38 1.12-2.5 2.5-2.5S13 19.12 13 20.5V22h4c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z"/></svg>`,
     '3d': `<svg viewBox="0 0 24 24"><path d="M12,2L3,7v10l9,5l9-5V7L12,2z M12,12l-7-3.9L12,4.2l7,3.9L12,12z M12,21l-7-3.9v-7l7,3.9V21z M19,17.1l-7,3.9v-7l7-3.9V17.1z"/></svg>`,
     'logs': `<svg viewBox="0 0 24 24"><path d="M19,3h-4.18C14.4,1.84,13.3,1,12,1S9.6,1.84,9.18,3H5C3.9,3,3,3.9,3,5v14c0,1.1,0.9,2,2,2h14c1.1,0,2-0.9,2-2V5 C21,3.9,20.1,3,19,3z M12,3c0.55,0,1,0.45,1,1s-0.45,1-1,1s-1-0.45-1-1S11.45,3,12,3z M7,7h10v2H7V7z M7,11h10v2H7V11z M7,15h10v2H7V15z"/></svg>`
@@ -193,6 +195,19 @@ function renderCategoryContent(category, settings) {
                     ${renderField({ path: 'editor.layerPreviewsOpen', label: 'Sub-layer previews drawer open by default', value: settings.editor.layerPreviewsOpen })}
                     ${renderField({ path: 'editor.autoExtractPaletteOnLoad', label: 'Auto-extract palette on image load', value: settings.editor.autoExtractPaletteOnLoad })}
                     ${renderField({ type: 'select', path: 'editor.transparencyCheckerTone', label: 'Transparency checker tone', value: settings.editor.transparencyCheckerTone, options: [['light', 'Light'], ['dark', 'Dark']] })}
+                </div>
+            </section>
+        `;
+    }
+    if (category === 'composite') {
+        const preferences = settings?.composite?.preferences || {};
+        return `
+            <section class="settings-card">
+                <div class="settings-card-header"><div><div class="settings-eyebrow">Composite</div><h3>Viewport Preferences</h3></div></div>
+                <div class="settings-banner">These preferences apply to the current Composite workspace and seed new Composite projects. Quick export actions still stay inside the Composite Export panel.</div>
+                <div class="settings-field-grid">
+                    ${renderField({ path: 'composite.preferences.showChecker', label: 'Show checker background', value: preferences.showChecker })}
+                    ${renderField({ path: 'composite.preferences.zoomLocked', label: 'Lock wheel zoom by default', value: preferences.zoomLocked })}
                 </div>
             </section>
         `;

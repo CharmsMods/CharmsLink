@@ -1,4 +1,5 @@
 import { createDefaultViewState, normalizeViewState } from '../state/documentHelpers.js';
+import { createEmptyCompositeDocument, normalizeCompositeDocument } from '../composite/document.js';
 import { createEmptyThreeDDocument, normalizeThreeDDocument } from '../3d/document.js';
 import { createEmptyStitchDocument, normalizeStitchDocument } from '../stitch/document.js';
 
@@ -36,6 +37,27 @@ export function applyEditorSettingsToLayerInstance(instance = {}, settings = nul
             bgPatcherCheckerTone: settings?.editor?.transparencyCheckerTone === 'dark' ? 'black' : 'white'
         }
     };
+}
+
+export function applyCompositeSettingsToDocument(document = {}, settings = null) {
+    const base = normalizeCompositeDocument(document);
+    const preferences = settings?.composite?.preferences || {};
+    return normalizeCompositeDocument({
+        ...base,
+        view: {
+            ...base.view,
+            zoomLocked: typeof preferences.zoomLocked === 'boolean'
+                ? preferences.zoomLocked
+                : base.view.zoomLocked,
+            showChecker: typeof preferences.showChecker === 'boolean'
+                ? preferences.showChecker
+                : base.view.showChecker
+        }
+    });
+}
+
+export function createSettingsDrivenCompositeDocument(settings = null) {
+    return applyCompositeSettingsToDocument(createEmptyCompositeDocument(), settings);
 }
 
 export function applyThemeToStitchDocument(document = {}, settings = null) {

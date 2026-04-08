@@ -104,3 +104,6 @@ potentially huge job in terms of making sure nothing is missed, but reorganizing
 add animations to the entire site, and a toggle in settings to disable animations for the site
 
 add the option to include the currrent entire settings state in the library json file when exporting a copy of the library out. this would need the added logic for loading it with the library as well.
+
+
+add a text layer to the editor tab

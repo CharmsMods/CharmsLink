@@ -14,7 +14,7 @@ If the code and this file disagree, the code is authoritative and this file shou
 
 ## Reading Guide
 
-Last audited against the workspace code on 2026-04-07.
+Last audited against the workspace code on 2026-04-08.
 
 If you only need the current runtime model first, read these sections in order:
 
@@ -99,13 +99,14 @@ Current section responsibilities:
   - Also has a bottom content drawer that mirrors the Library `Assets` page and can drag saved assets directly into the current scene.
 
 - `Composite`
-  - A separate rendering tab (`src/composite/`) allowing users to lay out multiple saved Editor projects or imported images into one scene.
-  - Features its own 2D rendering engine, world-space/infinite-canvas style stage, and robust draggable UI bounds-based exporter.
+  - A separate rendering tab (`src/composite/`) allowing users to lay out multiple saved Editor projects, imported images, text objects, and simple shape objects into one scene.
+  - Features its own 2D rendering engine, world-space/infinite-canvas style stage, local interaction session for drag/pan/zoom work, and robust draggable UI bounds-based exporter.
+  - The current Composite sidebar has `Layers`, `Transform`, `Blend`, and `Export` views.
   - Supports self-contained Composite JSON save/load, Library save/load, and a bridge flow for updating the original Editor Library project when Composite was opened from that project.
   - Integrated with the Library and has a "Pixel Match" logic allowing exports to render perfectly at the explicit resolution of bounded items.
 
 - `Settings`
-  - Top-level app settings surface for theme, worker limits, Library defaults/maintenance, Editor defaults, Stitch defaults/diagnostics, 3D preferences/defaults, and Logs behavior.
+  - Top-level app settings surface for theme, worker limits, Library defaults/maintenance, Editor defaults, Composite viewport preferences, Stitch defaults/diagnostics, 3D preferences/defaults, and Logs behavior.
   - Owns app-level settings export/import plus maintenance actions that are intentionally separate from normal project payloads.
 
 - `Logs`
@@ -269,20 +270,24 @@ Current section responsibilities:
 
 - `document.js`
   - Composite document shape, normalization, layer-source handling, bounds math, and Library summary helpers.
-  - Supports both saved Editor-project layers and imported-image layers inside the same document.
+  - Supports saved Editor-project layers, imported-image layers, text layers, and simple generated shape layers (`square`, `circle`, `triangle`) inside the same document.
+  - Normalizes per-axis scale plus current handle-resize modes for layers that can stretch.
 
 - `engine.js`
   - 2D compositor used for viewport rendering, preview capture, and PNG export.
   - Supports auto-bounds export plus explicit draggable export bounds with custom output resolution.
+  - Runtime layer assets are authoritative for live Composite sizing, so loaded image dimensions drive viewport handles and export math.
 
 - `ui.js`
   - Composite workspace UI.
   - Owns layer ingest from saved Editor projects or local images, transform/blend controls, export-bounds editing, project-picker overlay behavior, and Composite progress overlay wiring.
+  - Uses a local interaction session so live drag/pan/zoom/bounds editing do not commit to the global store on every pointer move.
+  - Current direct-canvas editing supports move, grouped selection handles, right-drag marquee selection on empty stage, middle-click pan, deselect-on-empty-click, and `Delete` removal of the current selection.
 
 ### `src/settings/`
 
 - `defaults.js`
-  - Canonical app-setting defaults for General, Library, Editor, Stitch, 3D, Logs, and diagnostics fields.
+  - Canonical app-setting defaults for General, Library, Editor, Composite, Stitch, 3D, Logs, and diagnostics fields.
 
 - `schema.js`
   - Settings normalization and category validation helpers.
@@ -423,10 +428,28 @@ Current Composite layer kinds:
   - stores an embedded Editor payload plus optional original Library-link metadata
 - `image`
   - stores an embedded image asset payload directly in the Composite document
+- `text`
+  - stores text content plus font family / font size / color
+- `square`
+  - stores a generated 2x2 square source plus color
+- `circle`
+  - stores a generated 2x2 circle source plus color
+- `triangle`
+  - stores a generated 2x2 triangle source plus color
 
 Important current Composite behavior:
 
 - Composite can export by automatic document bounds or by explicit draggable custom bounds.
+- Switching Export to `custom` now seeds the bounds from the visible viewport/document intersection when possible instead of always jumping to the full document bounds.
+- Custom export resolution stays aspect-locked to the current custom bounds, and pixel-match is only valid for visible layers fully contained inside those bounds.
+- Composite uses runtime-loaded layer dimensions for selection handles and pixel-match/export calculations so Editor-backed preview layers do not rely on stale embedded size metadata.
+- Current single-selection transform modes are `center-uniform`, `anchor-uniform`, and `anchor-stretch` where the selected layer type allows stretching.
+- Composite also has a local multi-selection path: right-drag on empty stage builds a marquee selection, grouped bounds appear around the selected items, and dragging a selected item or the grouped handles moves/scales the selection together.
+- Multi-selection and grouped handle mode are current UI-only state; the persisted payload still stores only `selection.layerId`.
+- Composite supports local text and simple shape objects directly on the canvas in addition to Editor/image layers.
+- Composite checker-background and wheel-zoom preferences now live in the top-level `Settings` section under the `Composite` category instead of a Composite-local settings panel.
+- The quick `Use View As Export` action lives in the Composite `Export` panel because it is an export workflow action, not an app-level setting.
+- Composite pan/zoom view changes do not trigger Library autosave by themselves.
 - Composite save/load uses the `composite-document` payload shape.
 - `preview` is optional durable metadata used by Library/local save flows.
 
@@ -1153,7 +1176,7 @@ Used for Composite projects:
 
 Important Composite payload rules:
 
-- Layers can be either embedded Editor-project layers or embedded image layers.
+- Layers can be embedded Editor-project layers, embedded image layers, text layers, or generated shape layers.
 - Composite save/load stays self-contained by embedding the layer source data it needs.
 - `preview` is optional on import/load and is mainly used for Library cards plus local-save convenience.
 
@@ -1258,6 +1281,7 @@ These fields are for Library round-tripping. They are stripped before normal eng
 - Composite `Save` now writes a self-contained `composite-document` JSON file.
 - The save flow captures a fresh Composite preview before writing the JSON.
 - If the current Composite draft came from a Library record, the local save flow also attempts to sync that active Composite Library record through the current overwrite/autosave path.
+- Composite autosave for Library-linked drafts is delayed and commit-based; viewport-only pan/zoom changes are not supposed to trigger it.
 
 ### Save to Library
 

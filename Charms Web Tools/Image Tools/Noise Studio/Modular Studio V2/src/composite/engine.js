@@ -1,4 +1,6 @@
 import {
+    COMPOSITE_MAX_ZOOM,
+    COMPOSITE_MIN_ZOOM,
     computeCompositeDocumentBounds,
     getActiveCompositeLayers,
     getCompositeLayerSourceImage,
@@ -55,6 +57,10 @@ export class CompositeEngine {
             sourceKey = `text|${layer.id}|${layer.textAsset?.text || ''}|${layer.textAsset?.fontFamily || ''}|${layer.textAsset?.fontSize || 0}|${layer.textAsset?.color || ''}`;
         } else if (layer.kind === 'square') {
             sourceKey = `square|${layer.id}|${layer.squareAsset?.color || ''}`;
+        } else if (layer.kind === 'circle') {
+            sourceKey = `circle|${layer.id}|${layer.circleAsset?.color || ''}`;
+        } else if (layer.kind === 'triangle') {
+            sourceKey = `triangle|${layer.id}|${layer.triangleAsset?.color || ''}`;
         } else if (layer.imageAsset) {
             sourceKey = `image|${layer.id}|${String(layer.imageAsset?.imageData || '').length}`;
         }
@@ -127,7 +133,7 @@ export class CompositeEngine {
             },
             panX: Number(normalized.view.panX) || 0,
             panY: Number(normalized.view.panY) || 0,
-            scale: clamp(Number(normalized.view.zoom) || 1, 0.1, 32)
+            scale: clamp(Number(normalized.view.zoom) || 1, COMPOSITE_MIN_ZOOM, COMPOSITE_MAX_ZOOM)
         };
     }
 

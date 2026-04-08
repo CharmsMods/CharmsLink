@@ -21,11 +21,12 @@ import {
     updatePlacement as updateStitchPlacementHelper
 } from './stitch/document.js';
 import {
+    COMPOSITE_MAX_ZOOM,
+    COMPOSITE_MIN_ZOOM,
     computeCompositeFittedLayerPlacement,
     computeCompositeFramedView,
     computeCompositeDocumentBounds,
     createCompositeLayerId,
-    createEmptyCompositeDocument,
     getCompositeLayerDimensions,
     getSelectedCompositeLayer,
     isCompositeDocumentPayload,
@@ -63,7 +64,7 @@ import { computeAnalysisVisualsJs, computeDiffPreviewJs, extractPaletteFromFileJ
 import { extractPaletteFromImageSource } from './editor/palette.js';
 import { APP_ASSET_VERSION, withAssetVersion } from './appAssetVersion.js';
 import { createDefaultAppSettings } from './settings/defaults.js';
-import { applyEditorSettingsToDocument, applyEditorSettingsToLayerInstance, applyStitchSettingsToDocument, applyThemeToStitchDocument, applyThreeDSettingsToDocument, createSettingsDrivenStitchDocument, createSettingsDrivenThreeDDocument } from './settings/apply.js';
+import { applyCompositeSettingsToDocument, applyEditorSettingsToDocument, applyEditorSettingsToLayerInstance, applyStitchSettingsToDocument, applyThemeToStitchDocument, applyThreeDSettingsToDocument, createSettingsDrivenCompositeDocument, createSettingsDrivenStitchDocument, createSettingsDrivenThreeDDocument } from './settings/apply.js';
 import { loadPersistedAppSettings, persistAppSettings, buildSettingsExportPayload, parseImportedSettingsPayload } from './settings/persistence.js';
 import { normalizeAppSettings, normalizeSettingsCategory } from './settings/schema.js';
 import {
@@ -1374,7 +1375,7 @@ function createInitialState(settings = createDefaultAppSettings()) {
             export: { keepFolderStructure: false, playFps: 10 },
             batch: createEmptyBatchState()
         }, normalizedSettings),
-        compositeDocument: createEmptyCompositeDocument(),
+        compositeDocument: createSettingsDrivenCompositeDocument(normalizedSettings),
         stitchDocument: createSettingsDrivenStitchDocument(normalizedSettings),
         threeDDocument: createSettingsDrivenThreeDDocument(normalizedSettings),
             ui: {
@@ -1754,6 +1755,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 ...state.document,
                 layerStack: nextLayerStack
             }, nextSettings),
+            compositeDocument: applyCompositeSettingsToDocument(state.compositeDocument, nextSettings),
             stitchDocument: applyStitchSettingsToDocument(state.stitchDocument, nextSettings, 'current'),
             threeDDocument: applyThreeDSettingsToDocument(state.threeDDocument, nextSettings, 'current')
         };
@@ -1789,6 +1791,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (store) {
             store.setState((state) => applySettingsToLiveState(state, normalized), {
                 render: meta.render ?? false,
+                renderComposite: meta.renderComposite ?? false,
                 renderStitch: meta.renderStitch ?? false,
                 skipViewRender: meta.skipViewRender ?? false
             });
@@ -3146,6 +3149,88 @@ window.addEventListener('DOMContentLoaded', async () => {
         };
     }
 
+    function createCompositeCircleLayer(documentState, viewportMetrics = null) {
+        const baseLayer = {
+            id: createCompositeLayerId('circle'),
+            kind: 'circle',
+            name: 'Circle',
+            visible: true,
+            locked: false,
+            z: normalizeCompositeDocument(documentState).layers.length,
+            x: 0,
+            y: 0,
+            scale: 1,
+            scaleX: 1,
+            scaleY: 1,
+            resizeMode: 'center-uniform',
+            rotation: 0,
+            opacity: 1,
+            blendMode: 'normal',
+            source: {
+                originalLibraryId: null,
+                originalLibraryName: null,
+                originalProjectType: null
+            },
+            circleAsset: {
+                color: '#ffffff'
+            }
+        };
+        const dimensions = getCompositeLayerDimensions(baseLayer);
+        const position = getCompositeLayerPlacement(documentState, dimensions.width, dimensions.height, viewportMetrics, {
+            maxScale: 256,
+            fit: 0.42
+        });
+        return {
+            ...baseLayer,
+            x: position.x,
+            y: position.y,
+            scale: position.scale,
+            scaleX: position.scale,
+            scaleY: position.scale
+        };
+    }
+
+    function createCompositeTriangleLayer(documentState, viewportMetrics = null) {
+        const baseLayer = {
+            id: createCompositeLayerId('triangle'),
+            kind: 'triangle',
+            name: 'Triangle',
+            visible: true,
+            locked: false,
+            z: normalizeCompositeDocument(documentState).layers.length,
+            x: 0,
+            y: 0,
+            scale: 1,
+            scaleX: 1,
+            scaleY: 1,
+            resizeMode: 'center-uniform',
+            rotation: 0,
+            opacity: 1,
+            blendMode: 'normal',
+            source: {
+                originalLibraryId: null,
+                originalLibraryName: null,
+                originalProjectType: null
+            },
+            triangleAsset: {
+                color: '#ffffff'
+            }
+        };
+        const dimensions = getCompositeLayerDimensions(baseLayer);
+        const position = getCompositeLayerPlacement(documentState, dimensions.width, dimensions.height, viewportMetrics, {
+            maxScale: 256,
+            fit: 0.42
+        });
+        return {
+            ...baseLayer,
+            x: position.x,
+            y: position.y,
+            scale: position.scale,
+            scaleX: position.scale,
+            scaleY: position.scale
+        };
+    }
+
     function moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex) {
         const normalized = normalizeCompositeDocument(documentState);
         const visualLayers = [...normalized.layers].sort((a, b) => (b.z || 0) - (a.z || 0));
@@ -3172,10 +3257,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             flushCompositeAutosave({ reason }).catch((error) => {
                 console.error(error);
             });
-        }, 2500);
+        }, 10000);
         logProcess('active', 'composite.autosave', reason, {
             dedupeKey: `composite-autosave-scheduled:${getActiveLibraryOrigin('composite')?.id || 'none'}`,
-            dedupeWindowMs: 300
+            dedupeWindowMs: 1200
         });
     }
 
@@ -3829,6 +3914,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const normalized = String(path || '');
         if (normalized.startsWith('library.')) return 'settings.library';
         if (normalized.startsWith('editor.')) return 'settings.editor';
+        if (normalized.startsWith('composite.')) return 'settings.composite';
         if (normalized.startsWith('stitch.')) return 'settings.stitch';
         if (normalized.startsWith('threeD.')) return 'settings.3d';
         if (normalized.startsWith('logs.')) return 'settings.logs';
@@ -3844,6 +3930,10 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function shouldRenderStitchForSettingsPath(path = '') {
         return String(path || '') === 'general.theme';
+    }
+
+    function shouldRenderCompositeForSettingsPath(path = '') {
+        return String(path || '').startsWith('composite.');
     }
 
     function describeSettingValue(value) {
@@ -3979,6 +4069,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             const processId = getSettingsProcessIdForPath(path);
             const normalized = updateSettingsState((current) => updateSettingsPathValue(current, path, value), {
                 render: shouldRenderForSettingsPath(path),
+                renderComposite: shouldRenderCompositeForSettingsPath(path),
                 renderStitch: shouldRenderStitchForSettingsPath(path)
             });
             logProcess('success', processId, `Set ${path} to ${describeSettingValue(value)}.`, {
@@ -4006,6 +4097,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 [normalizedCategory === '3d' ? 'threeD' : normalizedCategory]: cloneSettingsValue(defaults[normalizedCategory === '3d' ? 'threeD' : normalizedCategory])
             }), {
                 render: normalizedCategory === 'editor',
+                renderComposite: normalizedCategory === 'composite',
                 renderStitch: normalizedCategory === 'general'
             });
             logProcess('success', getSettingsProcessIdForPath(normalizedCategory === '3d' ? 'threeD' : normalizedCategory), `Reset the ${normalizedCategory === '3d' ? '3D' : normalizedCategory} settings category to defaults.`);
@@ -4025,6 +4117,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!confirmed) return false;
             updateSettingsState(createDefaultAppSettings(), {
                 render: true,
+                renderComposite: true,
                 renderStitch: true
             });
             logProcess('success', 'settings.general', 'Reset all app settings to defaults.');
@@ -4053,6 +4146,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const parsed = parseImportedSettingsPayload(await file.text(), { diagnostics: buildSettingsDiagnostics() });
                 updateSettingsState(parsed, {
                     render: true,
+                    renderComposite: true,
                     renderStitch: true
                 });
                 logProcess('success', 'settings.general', `Imported settings from "${file.name}".`);
@@ -4380,7 +4474,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!await ensureProjectCanBeReplaced('composite', 'starting a new Composite project')) return false;
             clearCompositeAutosaveTimer();
             clearCompositeBridgeState();
-            updateCompositeDocument(() => createEmptyCompositeDocument(), {
+            updateCompositeDocument(() => createSettingsDrivenCompositeDocument(store.getState().settings), {
                 renderComposite: true,
                 skipCompositeAutosave: true
             });
@@ -4443,6 +4537,50 @@ window.addEventListener('DOMContentLoaded', async () => {
             logProcess('success', 'composite.layers', 'Added a square layer to Composite.');
             setNotice('Added a square layer to Composite.', 'success', 4200);
         },
+        addCompositeCircleLayer() {
+            const viewportMetrics = getCompositeViewportMetrics();
+            const nextLayer = createCompositeCircleLayer(store.getState().compositeDocument, viewportMetrics);
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    workspace: {
+                        ...normalized.workspace,
+                        sidebarView: 'transform'
+                    },
+                    layers: [...normalized.layers, nextLayer],
+                    selection: { layerId: nextLayer.id }
+                };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after adding a circle layer.'
+            });
+            logProcess('success', 'composite.layers', 'Added a circle layer to Composite.');
+            setNotice('Added a circle layer to Composite.', 'success', 4200);
+        },
+        addCompositeTriangleLayer() {
+            const viewportMetrics = getCompositeViewportMetrics();
+            const nextLayer = createCompositeTriangleLayer(store.getState().compositeDocument, viewportMetrics);
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    workspace: {
+                        ...normalized.workspace,
+                        sidebarView: 'transform'
+                    },
+                    layers: [...normalized.layers, nextLayer],
+                    selection: { layerId: nextLayer.id }
+                };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after adding a triangle layer.'
+            });
+            logProcess('success', 'composite.layers', 'Added a triangle layer to Composite.');
+            setNotice('Added a triangle layer to Composite.', 'success', 4200);
+        },
         setCompositeSidebarView(sidebarView) {
             const nextSidebarView = ['layers', 'transform', 'blend', 'export'].includes(String(sidebarView || '').toLowerCase())
                 ? String(sidebarView).toLowerCase()
@@ -4480,6 +4618,27 @@ window.addEventListener('DOMContentLoaded', async () => {
                 renderComposite: true,
                 compositeAutosave: true,
                 compositeAutosaveReason: 'Queued Composite autosave after updating layer settings.'
+            });
+        },
+        updateCompositeLayerBatch(patchesById = {}) {
+            const entries = Object.entries(patchesById || {}).filter(([layerId, patch]) => layerId && patch && typeof patch === 'object');
+            if (!entries.length) return;
+            const patchMap = new Map(entries);
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    layers: normalized.layers.map((layer) => patchMap.has(layer.id)
+                        ? {
+                            ...layer,
+                            ...patchMap.get(layer.id)
+                        }
+                        : layer)
+                };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after updating multiple layer settings.'
             });
         },
         toggleCompositeLayerVisible(layerId) {
@@ -4556,6 +4715,28 @@ window.addEventListener('DOMContentLoaded', async () => {
                 compositeAutosaveReason: 'Queued Composite autosave after removing a layer.'
             });
         },
+        removeCompositeLayers(layerIds = []) {
+            const ids = [...new Set((Array.isArray(layerIds) ? layerIds : []).map((value) => String(value || '')).filter(Boolean))];
+            if (!ids.length) return;
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                const nextLayers = normalized.layers.filter((layer) => !ids.includes(layer.id));
+                const nextSelectedId = nextLayers.some((layer) => layer.id === normalized.selection.layerId)
+                    ? normalized.selection.layerId
+                    : null;
+                return {
+                    ...normalized,
+                    layers: nextLayers,
+                    selection: {
+                        layerId: nextSelectedId
+                    }
+                };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after removing multiple layers.'
+            });
+        },
         patchCompositeView(patch = {}) {
             if (!patch || typeof patch !== 'object') return;
             updateCompositeDocument((documentState) => ({
@@ -4566,8 +4747,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
             }), {
                 renderComposite: true,
-                compositeAutosave: true,
-                compositeAutosaveReason: 'Queued Composite autosave after updating the viewport.'
+                skipCompositeAutosave: true
             });
         },
         patchCompositeExport(patch = {}) {
@@ -4594,8 +4774,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const metrics = normalizeCompositeViewportMetrics(viewportMetrics);
                 const framedView = computeCompositeFramedView(bounds, metrics.width, metrics.height, {
                     paddingPx: 48,
-                    minZoom: 0.1,
-                    maxZoom: 32
+                    minZoom: COMPOSITE_MIN_ZOOM,
+                    maxZoom: COMPOSITE_MAX_ZOOM
                 });
                 return {
                     ...normalized,
@@ -4608,8 +4788,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 };
             }, {
                 renderComposite: true,
-                compositeAutosave: true,
-                compositeAutosaveReason: 'Queued Composite autosave after framing the viewport.'
+                skipCompositeAutosave: true
             });
         },
         async listCompositeSourceProjects() {
@@ -4861,7 +5040,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const validated = normalizeCompositeDocument(validateImportPayload(stripLibraryEnvelopeMetadata(parsed), 'composite-document'));
                 clearCompositeAutosaveTimer();
                 clearCompositeBridgeState();
-                updateCompositeDocument(() => validated, {
+                updateCompositeDocument(() => applyCompositeSettingsToDocument(validated, store.getState().settings), {
                     renderComposite: true,
                     skipCompositeAutosave: true
                 });
@@ -6095,6 +6274,14 @@ window.addEventListener('DOMContentLoaded', async () => {
                 });
                 const existingRecord = saveId ? await getFromLibraryDB(saveId).catch(() => null) : null;
                 const capture = await adapter.captureDocument(currentDocument, payloadParams);
+                let captureBlob = capture?.blob || null;
+                if (!captureBlob && String(capture?.payload?.preview?.imageData || '').startsWith('data:')) {
+                    try {
+                        captureBlob = await dataUrlToBlob(capture.payload.preview.imageData);
+                    } catch (_error) {
+                        captureBlob = null;
+                    }
+                }
                 if (!suppressWorkspaceOverlay) {
                     setWorkspaceProgress(projectType, {
                         active: true,
@@ -6107,7 +6294,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     id: saveId,
                     timestamp: Date.now(),
                     name,
-                    blob: capture.blob,
+                    blob: captureBlob,
                     payload: capture.payload || payloadParams,
                     tags: normalizeLibraryTags(existingRecord?.tags || []),
                     projectType,
@@ -8779,7 +8966,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const validated = this.validatePayload(rawPayload);
                 clearCompositeAutosaveTimer();
                 clearCompositeBridgeState();
-                updateCompositeDocument(() => validated, {
+                updateCompositeDocument(() => applyCompositeSettingsToDocument(validated, store.getState().settings), {
                     renderComposite: true,
                     skipCompositeAutosave: true
                 });
