@@ -811,6 +811,8 @@ function renderCompositeToolbar(state) {
                 <button type="button" class="toolbar-button" data-action="composite-new-project">New Project</button>
                 <button type="button" class="toolbar-button" data-action="composite-add-editor-project">Add Editor Project</button>
                 <button type="button" class="toolbar-button" data-action="composite-add-images">Add Images</button>
+                <button type="button" class="toolbar-button" data-action="composite-add-text">Add Text</button>
+                <button type="button" class="toolbar-button" data-action="composite-add-square">Add Square</button>
             </div>
             <div class="toolbar-cluster toolbar-state-actions">
                 <button type="button" class="toolbar-button" data-action="composite-export-png" ${layerCount ? '' : 'disabled'}>Export PNG</button>
@@ -1763,6 +1765,8 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             'composite-new-project': actions.newCompositeProject,
             'composite-add-editor-project': () => actions.openCompositeProjectPicker?.(),
             'composite-add-images': () => actions.openCompositeImagePicker?.(),
+            'composite-add-text': actions.addCompositeTextLayer,
+            'composite-add-square': actions.addCompositeSquareLayer,
             'composite-export-png': actions.exportCompositePng,
             'composite-open-state': () => actions.openCompositeStatePicker?.(),
             'composite-save-state': actions.saveCompositeState,
@@ -2294,6 +2298,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         },
         openCompositeProjectPicker() {
             return compositePanel.openProjectPicker?.();
+        },
+        getCompositeViewportMetrics() {
+            return compositePanel.getViewportMetrics?.();
         },
         captureCompositePreview(document) {
             return compositePanel.capturePreview?.(document);

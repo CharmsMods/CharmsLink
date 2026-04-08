@@ -12,11 +12,42 @@ It is meant to be handed to a future AI together with the site files so the AI c
 
 If the code and this file disagree, the code is authoritative and this file should be updated.
 
+## Reading Guide
+
+Last audited against the workspace code on 2026-04-07.
+
+If you only need the current runtime model first, read these sections in order:
+
+- `## 1. Product Model`
+- `## 2. Entry Points`
+- `## 3. Current Directory Responsibilities`
+- `## 4. Shell and Section Routing`
+- `## 5. State Model`
+- `## 8. Project Adapter System`
+- `## 9. Library Storage Model`
+- `## 10. Current Project Payloads`
+- `## 11. Save / Load Behavior`
+
+If you are working by app section:
+
+- `Editor`: `## 6`, `## 15`, and the Editor-related notes inside later dated implementation sections
+- `Composite`: `## 1`, `## 3`, `## 5`, `## 10`, and the Composite-related save/load notes in `## 11`
+- `Library`: `## 8`, `## 9`, `## 11`, `## 13`, and `## 14`
+- `Stitch`: `## 7` plus the later Stitch rehabilitation sections
+- `3D`: `## 3`, `## 5`, `## 10`, and the later 3D/persistence/settings sections
+- `Settings` / `Logs`: `## 3`, `## 4`, `## 5`, and the later settings/persistence/logging sections
+
+If you are validating an old plan or idea against the live build:
+
+- Prefer this file plus the codebase first.
+- Treat `Important Sources/Ideas and Fixes for ENTIRE site.md` as a mixed backlog / bug / idea capture file, not the authoritative current-state model.
+- Treat `Plan Files/` as preserved planning history unless a file has been deliberately moved into a clearly current/active folder.
+
 ## Critical Development Rule
 
 Logging is now a first-class system in this app.
 
-- Modular Studio V2 now includes a top-level `Logs` section that surfaces site-wide process cards for startup, navigation, Library loading, import/export, save flows, sync work, Stitch activity, and 3D activity.
+- Modular Studio V2 now includes a top-level `Logs` section that surfaces site-wide process cards for startup, navigation, Library loading, import/export, save flows, sync work, Composite activity, Stitch activity, 3D activity, and Settings/maintenance work.
 - Future updates must explicitly consider where new work should emit logs for the Logs tab.
 - Do not add major background processing, save paths, import/export flows, synchronization checks, render stages, or recovery/error paths without wiring them into the logging system.
 - The logging engine and UI are part of the app architecture now, not optional debug-only extras.
@@ -24,16 +55,17 @@ Logging is now a first-class system in this app.
 
 ## 1. Product Model
 
-Modular Studio V2 is now a single-page app with five top-level sections:
+Modular Studio V2 is now a single-page app with seven top-level sections, in current UI order:
 
 1. `Editor`
-2. `Library`
-3. `Stitch`
-4. `3D`
-5. `Composite`
-6. `Logs`
+2. `Composite`
+3. `Library`
+4. `Stitch`
+5. `3D`
+6. `Settings`
+7. `Logs`
 
-All five sections live inside the same page and same JS runtime.
+All seven sections live inside the same page and same JS runtime.
 
 Important historical note:
 
@@ -50,7 +82,7 @@ Current section responsibilities:
 
 - `Library`
   - Integrated project browser backed by IndexedDB.
-  - Can hold mixed project types from `Editor`, `Stitch`, and `3D`, plus a separate asset catalog for images and reusable 3D models.
+  - Can hold mixed project types from `Editor`, `Composite`, `Stitch`, and `3D`, plus a separate asset catalog for images and reusable 3D models.
   - The Library page now has its own local `Library` and `Assets` page tabs.
   - Owns Library/Asset import-export, tag catalog, selection workflows, secure bundle save/load, asset-folder exchange, preview gallery, and detail inspection.
   - Quietly backfills older saved Editor Library records that are missing embedded `preview` data by re-rendering them with the Editor engine and logging that repair work in `Logs`.
@@ -58,21 +90,26 @@ Current section responsibilities:
 - `Stitch`
   - A second engine with its own document model and UI.
   - Handles overlap-first multi-image stitching with candidate generation and manual correction.
-  - Saves into the same Library as Editor projects.
+  - Saves into the same Library as Editor, Composite, and 3D projects.
 
 - `3D`
   - Browser-based 3D scene workspace built on three.js.
-- Supports embedded `.glb` / self-contained `.gltf` models, image planes, primitive meshes, flat/extruded text, 2D shapes, editable point / spot / directional lights, world light / HDRI lighting, and path tracing.
-  - Saves full 3D scenes into the same Library as Editor and Stitch, including embedded asset data, materials, textures, camera state, render settings, and preview image.
+  - Supports embedded `.glb` / self-contained `.gltf` models, image planes, primitive meshes, flat/extruded text, 2D shapes, editable point / spot / directional lights, world light / HDRI lighting, and path tracing.
+  - Saves full 3D scenes into the same Library as Editor, Composite, and Stitch, including embedded asset data, materials, textures, camera state, render settings, and preview image.
   - Also has a bottom content drawer that mirrors the Library `Assets` page and can drag saved assets directly into the current scene.
 
 - `Composite`
   - A separate rendering tab (`src/composite/`) allowing users to lay out multiple saved Editor projects or imported images into one scene.
-  - Features its own rendering engine with a dynamic performance rendering mode (drops resolution during active transforms), and robust draggable UI bounds-based exporter built on an infinite canvas model.
+  - Features its own 2D rendering engine, world-space/infinite-canvas style stage, and robust draggable UI bounds-based exporter.
+  - Supports self-contained Composite JSON save/load, Library save/load, and a bridge flow for updating the original Editor Library project when Composite was opened from that project.
   - Integrated with the Library and has a "Pixel Match" logic allowing exports to render perfectly at the explicit resolution of bounded items.
 
+- `Settings`
+  - Top-level app settings surface for theme, worker limits, Library defaults/maintenance, Editor defaults, Stitch defaults/diagnostics, 3D preferences/defaults, and Logs behavior.
+  - Owns app-level settings export/import plus maintenance actions that are intentionally separate from normal project payloads.
+
 - `Logs`
-  - Process-monitor section that shows live card-based logs for app bootstrap, workspace navigation, Library sync/import/export/save activity, Editor file/export flows, Stitch work, and 3D work.
+  - Process-monitor section that shows live card-based logs for app bootstrap, workspace navigation, Library sync/import/export/save activity, Editor file/export flows, Composite work, Stitch work, 3D work, and Settings/maintenance work.
   - Each process card can be cleared independently and downloaded as a text log.
   - Intended as both user-facing transparency and a developer/debugging surface.
 
@@ -96,20 +133,22 @@ Current section responsibilities:
 - `index.html`
 - `library.html`
 - `style.css`
-- `ai_context.txt`
+- `electron-main.js`
+- `preload.js`
 - `style_context.txt`
 
 ### `src/main.js`
 
 - Main bootstrap.
 - Creates the store.
-- Creates the Studio engine and the Stitch engine.
+- Creates the Studio engine and coordinates the app-wide runtime.
 - Creates the shared logging engine used by the `Logs` section.
-- Owns the normalized 3D document actions and adapter-backed 3D Library persistence.
+- Owns the normalized Composite and 3D document actions plus adapter-backed Library persistence for mixed project types.
 - Owns IndexedDB helpers.
 - Owns both Library project records and Library asset records in the same IndexedDB store.
 - Quietly derives Editor render assets for the Asset Library, deduplicates imported 3D assets by fingerprint, auto-generates low-res previews for image assets, and syncs Library asset updates back into the 3D content drawer.
 - Missing image-asset previews are backfilled once per page reload in the background, and Library change notifications are coalesced before refreshing the Library page plus the 3D content drawer.
+- Loads, normalizes, persists, imports, and exports app-level settings.
 - Owns app-level actions.
 - Owns the project adapter registry that lets the Library save/load mixed engine types.
 
@@ -119,11 +158,14 @@ Current section responsibilities:
 - Renders:
   - top section switcher
   - Editor toolbar
+  - Composite toolbar
   - Stitch toolbar
   - notice strip
   - Editor workspace
+  - integrated Composite workspace
   - integrated Library panel
   - integrated Stitch workspace
+  - integrated Settings panel
   - integrated Logs panel
   - integrated 3D workspace
 
@@ -223,6 +265,34 @@ Current section responsibilities:
   - Lightweight three.js viewer used only by the Library asset-detail overlay.
   - Loads saved `.glb` / self-contained `.gltf` assets into a simple lit gradient viewport with orbit/pan/zoom controls.
 
+### `src/composite/`
+
+- `document.js`
+  - Composite document shape, normalization, layer-source handling, bounds math, and Library summary helpers.
+  - Supports both saved Editor-project layers and imported-image layers inside the same document.
+
+- `engine.js`
+  - 2D compositor used for viewport rendering, preview capture, and PNG export.
+  - Supports auto-bounds export plus explicit draggable export bounds with custom output resolution.
+
+- `ui.js`
+  - Composite workspace UI.
+  - Owns layer ingest from saved Editor projects or local images, transform/blend controls, export-bounds editing, project-picker overlay behavior, and Composite progress overlay wiring.
+
+### `src/settings/`
+
+- `defaults.js`
+  - Canonical app-setting defaults for General, Library, Editor, Stitch, 3D, Logs, and diagnostics fields.
+
+- `schema.js`
+  - Settings normalization and category validation helpers.
+
+- `persistence.js`
+  - Settings save/load/export/import helpers for the app-level settings domain.
+
+- `apply.js`
+  - Applies app settings into Editor, Stitch, and 3D runtime/document state.
+
 ### `src/io/projectAdapters.js`
 
 - Tiny registry for engine-aware project adapters.
@@ -250,15 +320,20 @@ Top-level section switching is controlled by `state.ui.activeSection`.
 Allowed values:
 
 - `'editor'`
+- `'composite'`
 - `'library'`
 - `'stitch'`
 - `'3d'`
+- `'settings'`
+- `'logs'`
 
 `src/main.js` reads `?section=` on startup:
 
+- `?section=composite` -> Composite
 - `?section=library` -> Library
 - `?section=stitch` -> Stitch
 - `?section=3d` -> 3D
+- `?section=settings` -> Settings
 - `?section=logs` -> Logs
 - anything else -> Editor
 
@@ -288,9 +363,11 @@ Cleanup on non-Editor section switches:
 ### Top-level store fields
 
 - `state.document`
+- `state.compositeDocument`
 - `state.stitchDocument`
 - `state.threeDDocument`
 - `state.ui`
+- `state.settings`
 - `state.notice`
 - `state.eyedropperTarget`
 
@@ -316,6 +393,42 @@ Studio document mode:
 
 - `kind: 'document'`
 - `mode: 'studio'`
+
+### `state.compositeDocument`
+
+This is the Composite document.
+
+Important fields:
+
+- `version: 'mns/v2'`
+- `kind: 'composite-document'`
+- `mode: 'composite'`
+- `workspace.sidebarView`
+- `layers[]`
+- `selection.layerId`
+- `view.zoom`
+- `view.panX`
+- `view.panY`
+- `view.zoomLocked`
+- `view.showChecker`
+- `export.background`
+- `export.boundsMode`
+- `export.bounds`
+- `export.customResolution`
+- `preview`
+
+Current Composite layer kinds:
+
+- `editor-project`
+  - stores an embedded Editor payload plus optional original Library-link metadata
+- `image`
+  - stores an embedded image asset payload directly in the Composite document
+
+Important current Composite behavior:
+
+- Composite can export by automatic document bounds or by explicit draggable custom bounds.
+- Composite save/load uses the `composite-document` payload shape.
+- `preview` is optional durable metadata used by Library/local save flows.
 
 ### `state.stitchDocument`
 
@@ -542,9 +655,26 @@ Important fields:
 - `jsonCompareView`
 - `jsonCompareIndex`
 - `loadImageOnOpen`
-- `saveImageOnSave`
+- `settingsCategory`
+- `compositeEditorBridge`
 
 This is ephemeral UI state. It is not part of saved project payloads.
+
+### `state.settings`
+
+This is the app-level settings domain.
+
+Important categories:
+
+- `general`
+- `library`
+- `editor`
+- `stitch`
+- `threeD`
+- `logs`
+- `diagnostics`
+
+These settings are persisted separately from project payloads and are not the same thing as saved Editor / Composite / Stitch / 3D document state.
 
 ## 6. Studio Engine Architecture
 
@@ -676,7 +806,7 @@ Current higher-level Stitch settings:
 - `settings.blendMode`
   - `'auto' | 'alpha' | 'feather' | 'seam'`
 - `settings.featureDetector`
-  - `'auto' | 'orb' | 'akaze'`
+  - `'auto' | 'orb' | 'akaze' | 'sift'`
 - `settings.photoBackend`
   - currently `'opencv-wasm'`
 
@@ -792,7 +922,7 @@ Current Stitch help system:
 
 ### Important Stitch save/load behavior
 
-- Stitch projects save to the same Library as Studio projects.
+- Stitch projects save to the same Library as Editor, Composite, and 3D projects.
 - Loading a Stitch project from the Library restores `state.stitchDocument`.
 - The app automatically switches to the `Stitch` section after load.
 
@@ -805,6 +935,7 @@ This is handled in `src/main.js` via `createProjectAdapterRegistry(...)`.
 Current adapters:
 
 - `studio`
+- `composite`
 - `stitch`
 - `3d`
 
@@ -849,10 +980,10 @@ A saved project record now effectively contains:
 - `blob`
   - rendered preview PNG blob
 - `payload`
-  - Studio, Stitch, or 3D project payload
+  - Studio, Composite, Stitch, or 3D project payload
 - `tags`
 - `projectType`
-  - `'studio'`, `'stitch'`, or `'3d'`
+  - `'studio'`, `'composite'`, `'stitch'`, or `'3d'`
 - `hoverSource`
   - source image metadata used by Library compare hover
 - `sourceWidth`
@@ -907,6 +1038,13 @@ For Stitch Library projects:
 - `hoverSource` is the first uploaded input image.
 
 This is intentional. It makes hover-compare still work in a multi-image project without inventing a composite "source".
+
+### Compare Source rule for Composite
+
+For Composite Library projects:
+
+- `hoverSource` is intentionally `null`
+- the Library card uses the saved Composite preview image instead of pretending one layer is the original source
 
 ### Source size sorting rule for Stitch
 
@@ -979,6 +1117,45 @@ Used for Stitch projects:
 Important rule:
 
 - Stitch serialization strips `analysis.previews` because those are runtime object URLs/data URLs, not durable project state.
+
+### Composite project payload
+
+Used for Composite projects:
+
+```json
+{
+  "version": "mns/v2",
+  "kind": "composite-document",
+  "mode": "composite",
+  "workspace": {
+    "sidebarView": "layers"
+  },
+  "layers": [],
+  "selection": {
+    "layerId": null
+  },
+  "view": {
+    "zoom": 1,
+    "panX": 0,
+    "panY": 0,
+    "zoomLocked": false,
+    "showChecker": true
+  },
+  "export": {
+    "background": "transparent",
+    "boundsMode": "auto",
+    "bounds": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
+    "customResolution": { "width": 1920, "height": 1080 }
+  },
+  "preview": null
+}
+```
+
+Important Composite payload rules:
+
+- Layers can be either embedded Editor-project layers or embedded image layers.
+- Composite save/load stays self-contained by embedding the layer source data it needs.
+- `preview` is optional on import/load and is mainly used for Library cards plus local-save convenience.
 
 ### 3D project payload
 
@@ -1076,6 +1253,12 @@ These fields are for Library round-tripping. They are stripped before normal eng
 - The old Editor `Save Image` toggle was removed; Editor JSON saves are now intended to be self-contained by default.
 - If there is no embeddable source image, the app still saves JSON but warns that source/render embedding was unavailable.
 
+### Save Composite state JSON
+
+- Composite `Save` now writes a self-contained `composite-document` JSON file.
+- The save flow captures a fresh Composite preview before writing the JSON.
+- If the current Composite draft came from a Library record, the local save flow also attempts to sync that active Composite Library record through the current overwrite/autosave path.
+
 ### Save to Library
 
 `actions.saveProjectToLibrary(...)` is now adapter-based.
@@ -1134,12 +1317,14 @@ The app no longer tracks only one active Library project.
 It now tracks separate origins for:
 
 - `studio`
+- `composite`
 - `stitch`
 - `3d`
 
 That means:
 
 - Editor can know which Library record it came from
+- Composite can know which Library record it came from
 - Stitch can know which Library record it came from
 - switching sections does not destroy overwrite context
 
@@ -1280,7 +1465,7 @@ For each payload it:
 5. renders a preview blob with the correct engine
 6. stores a mixed-engine record in IndexedDB
 
-This means Editor and Stitch projects can coexist in:
+This means Editor, Composite, Stitch, and 3D projects can coexist in:
 
 - single Library records
 - bundle exports
@@ -1306,6 +1491,14 @@ Library detail view now behaves differently for different project types.
 - tags
 - layer cards with filtered parameter display
 - expandable structured values for long arrays/objects
+
+### Composite detail view
+
+- project summary
+- canvas/export dimensions
+- layer count
+- embedded Editor-layer vs image-layer counts
+- saved layer list with kind-aware summary data
 
 ### Stitch detail view
 

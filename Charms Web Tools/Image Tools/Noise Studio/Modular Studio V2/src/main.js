@@ -21,9 +21,12 @@ import {
     updatePlacement as updateStitchPlacementHelper
 } from './stitch/document.js';
 import {
+    computeCompositeFittedLayerPlacement,
+    computeCompositeFramedView,
     computeCompositeDocumentBounds,
     createCompositeLayerId,
     createEmptyCompositeDocument,
+    getCompositeLayerDimensions,
     getSelectedCompositeLayer,
     isCompositeDocumentPayload,
     normalizeCompositeDocument,
@@ -75,6 +78,7 @@ const STORE_NAME = 'LibraryProjects';
 const LIBRARY_META_ID = '__library_meta__';
 let backgroundTasks = null;
 let workerCapabilities = null;
+let view = null;
 
 function initDB() {
     return new Promise((resolve, reject) => {
@@ -735,13 +739,13 @@ async function captureCompositeDocumentSnapshot(documentState) {
     let preview = normalized.preview || null;
 
     try {
-        blob = await view.exportCompositePng(normalized);
+        blob = await renderCompositePngBlob(normalized);
     } catch (_error) {
         blob = null;
     }
 
     try {
-        preview = await view.captureCompositePreview(normalized) || preview;
+        preview = await renderCompositePreview(normalized) || preview;
     } catch (_error) {
         preview = preview || null;
     }
@@ -762,6 +766,74 @@ async function captureCompositeDocumentSnapshot(documentState) {
             preview
         })
     };
+}
+
+function normalizeCompositeViewportMetrics(viewport = null) {
+    const rawWidth = Number(viewport?.width) || 0;
+    const rawHeight = Number(viewport?.height) || 0;
+    return {
+        width: Math.round(rawWidth >= 64 ? rawWidth : 1600),
+        height: Math.round(rawHeight >= 64 ? rawHeight : 900)
+    };
+}
+
+function getCompositeViewportMetrics() {
+    return normalizeCompositeViewportMetrics(view?.getCompositeViewportMetrics?.());
+}
+
+function createCompositePngBlobFromResult(result = null) {
+    if (result instanceof Blob) {
+        return result;
+    }
+    const sourceBuffer = result?.buffer;
+    const buffer = sourceBuffer instanceof ArrayBuffer
+        ? sourceBuffer
+        : ArrayBuffer.isView(sourceBuffer)
+            ? sourceBuffer.buffer.slice(sourceBuffer.byteOffset, sourceBuffer.byteOffset + sourceBuffer.byteLength)
+            : null;
+    if (!buffer) return null;
+    return new Blob([buffer], { type: result?.mimeType || 'image/png' });
+}
+
+async function renderCompositePreview(documentState, options = {}) {
+    const normalized = normalizeCompositeDocument(documentState);
+    if (!backgroundTasks) {
+        if (!view?.captureCompositePreview) {
+            throw new Error('Composite workspace preview is not ready yet.');
+        }
+        return view.captureCompositePreview(normalized);
+    }
+    return backgroundTasks.runTask('composite', 'render-preview', {
+        document: normalized,
+        maxEdge: Math.max(1, Number(options.maxEdge) || 320)
+    }, {
+        priority: options.priority || 'user-visible',
+        processId: options.processId || 'composite.render',
+        scope: options.scope || 'section:composite',
+        replaceKey: options.replaceKey || ''
+    });
+}
+
+async function renderCompositePngBlob(documentState, options = {}) {
+    const normalized = normalizeCompositeDocument(documentState);
+    if (!backgroundTasks) {
+        if (!view?.exportCompositePng) {
+            throw new Error('Composite workspace export is not ready yet.');
+        }
+        return view.exportCompositePng(normalized);
+    }
+    const result = await backgroundTasks.runTask('composite', 'render-export-png', {
+        document: normalized
+    }, {
+        priority: options.priority || 'user-visible',
+        processId: options.processId || 'composite.export',
+        scope: options.scope || 'section:composite'
+    });
+    const blob = createCompositePngBlobFromResult(result);
+    if (!blob) {
+        throw new Error('Could not encode the Composite PNG.');
+    }
+    return blob;
 }
 
 function clearStudioEngineImage(studioEngine) {
@@ -1526,7 +1598,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     let noticeTimer = null;
     let playbackTimer = null;
-    let view = null;
+    view = null;
     let paletteExtractionImage = null;
     let paletteExtractionOwner = null;
     let stitchAnalysisToken = 0;
@@ -1975,6 +2047,44 @@ window.addEventListener('DOMContentLoaded', async () => {
                 throw new Error('Photo analysis requires browser Worker and WebAssembly support for OpenCV.js.');
             }
         });
+        backgroundTasks.registerDomain('composite', {
+            workerUrl: withAssetVersion(new URL('./workers/composite.worker.js', import.meta.url)),
+            supportsTask(task, capabilities) {
+                if (task === 'prepare-image-files') {
+                    return !!capabilities.createImageBitmap;
+                }
+                if (task === 'render-preview' || task === 'render-export-png') {
+                    return !!capabilities.createImageBitmap && !!capabilities.offscreenCanvas2d;
+                }
+                return true;
+            },
+            fallback(task, payload, context) {
+                if (task === 'prepare-image-files') {
+                    return prepareCompositeImageFilesFallback(payload.files, {
+                        onProgress(progress) {
+                            context.progress(progress?.progress, progress?.message, progress);
+                        }
+                    });
+                }
+                if (task === 'render-preview') {
+                    if (!view?.captureCompositePreview) {
+                        throw new Error('Composite workspace preview is not ready yet.');
+                    }
+                    return view.captureCompositePreview(normalizeCompositeDocument(payload.document));
+                }
+                if (task === 'render-export-png') {
+                    if (!view?.exportCompositePng) {
+                        throw new Error('Composite workspace export is not ready yet.');
+                    }
+                    return view.exportCompositePng(normalizeCompositeDocument(payload.document))
+                        .then(async (blob) => ({
+                            buffer: await blob.arrayBuffer(),
+                            mimeType: blob.type || 'image/png'
+                        }));
+                }
+                throw new Error(`Unknown composite task "${task}".`);
+            }
+        });
         backgroundTasks.registerDomain('three', {
             workerUrl: withAssetVersion(new URL('./workers/three.worker.js', import.meta.url)),
             supportsTask(task, capabilities) {
@@ -2154,8 +2264,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         const previous = store.getState().compositeDocument;
         const next = normalizeCompositeDocument(mutator(previous));
         store.setState((state) => ({ ...state, compositeDocument: next }), meta);
-        if (!meta?.skipCompositeAutosave && stableSerialize(previous) !== stableSerialize(next)) {
-            scheduleCompositeAutosave('Queued Composite autosave after a document change.');
+        if (meta?.compositeAutosave === true) {
+            scheduleCompositeAutosave(meta.compositeAutosaveReason || 'Queued Composite autosave after a committed change.');
         }
     }
 
@@ -2900,33 +3010,39 @@ window.addEventListener('DOMContentLoaded', async () => {
         return captureStudioDocumentSnapshot(hiddenEngine, editorDocument, rawPayload);
     }
 
-    function getCompositeLayerInsertPosition(documentState, width = 0, spacing = 48) {
-        const bounds = computeCompositeDocumentBounds(documentState);
-        if (!(bounds.width > 0) || !(bounds.height > 0)) {
-            return { x: 0, y: 0 };
-        }
-        return {
-            x: Math.round(bounds.maxX + spacing),
-            y: Math.round(bounds.minY)
-        };
+    function getCompositeLayerPlacement(documentState, sourceWidth, sourceHeight, viewportMetrics = null, options = {}) {
+        const normalized = normalizeCompositeDocument(documentState);
+        const metrics = normalizeCompositeViewportMetrics(viewportMetrics);
+        return computeCompositeFittedLayerPlacement({
+            document: normalized,
+            sourceWidth,
+            sourceHeight,
+            viewportWidth: metrics.width,
+            viewportHeight: metrics.height,
+            cascadeIndex: Math.min(normalized.layers.length, 4),
+            cascadePx: Number(options.cascadePx) || 36,
+            fit: Number(options.fit) || 0.82,
+            maxScale: Math.max(0.01, Number(options.maxScale) || 1)
+        });
     }
 
-    async function createCompositeImageLayerFromFile(file, documentState) {
-        const imageData = await fileToDataUrl(file);
-        const image = await loadImageFromDataUrl(imageData);
-        const width = Math.max(1, image.naturalWidth || image.width || 1);
-        const height = Math.max(1, image.naturalHeight || image.height || 1);
-        const position = getCompositeLayerInsertPosition(documentState, width);
+    function createCompositeImageLayerFromPreparedItem(item, documentState, viewportMetrics = null) {
+        const width = Math.max(1, Number(item?.width) || 1);
+        const height = Math.max(1, Number(item?.height) || 1);
+        const position = getCompositeLayerPlacement(documentState, width, height, viewportMetrics);
         return {
             id: createCompositeLayerId('image'),
             kind: 'image',
-            name: stripProjectExtension(file.name || 'Image') || 'Image',
+            name: stripProjectExtension(item?.name || 'Image') || 'Image',
             visible: true,
             locked: false,
             z: normalizeCompositeDocument(documentState).layers.length,
             x: position.x,
             y: position.y,
-            scale: 1,
+            scale: position.scale,
+            scaleX: position.scale,
+            scaleY: position.scale,
+            resizeMode: 'center-uniform',
             rotation: 0,
             opacity: 1,
             blendMode: 'normal',
@@ -2936,12 +3052,97 @@ window.addEventListener('DOMContentLoaded', async () => {
                 originalProjectType: null
             },
             imageAsset: {
-                name: file.name || 'Image',
-                type: file.type || 'image/png',
-                imageData,
+                name: item?.name || 'Image',
+                type: item?.type || 'image/png',
+                imageData: String(item?.imageData || ''),
                 width,
                 height
             }
+        };
+    }
+
+    function createCompositeTextLayer(documentState, viewportMetrics = null) {
+        const baseLayer = {
+            id: createCompositeLayerId('text'),
+            kind: 'text',
+            name: 'Text',
+            visible: true,
+            locked: false,
+            z: normalizeCompositeDocument(documentState).layers.length,
+            x: 0,
+            y: 0,
+            scale: 1,
+            scaleX: 1,
+            scaleY: 1,
+            resizeMode: 'center-uniform',
+            rotation: 0,
+            opacity: 1,
+            blendMode: 'normal',
+            source: {
+                originalLibraryId: null,
+                originalLibraryName: null,
+                originalProjectType: null
+            },
+            textAsset: {
+                text: 'Text',
+                fontFamily: 'Arial',
+                fontSize: 96,
+                color: '#ffffff'
+            }
+        };
+        const dimensions = getCompositeLayerDimensions(baseLayer);
+        const position = getCompositeLayerPlacement(documentState, dimensions.width, dimensions.height, viewportMetrics, {
+            maxScale: 8,
+            fit: 0.62
+        });
+        return {
+            ...baseLayer,
+            x: position.x,
+            y: position.y,
+            scale: position.scale,
+            scaleX: position.scale,
+            scaleY: position.scale
+        };
+    }
+
+    function createCompositeSquareLayer(documentState, viewportMetrics = null) {
+        const baseLayer = {
+            id: createCompositeLayerId('square'),
+            kind: 'square',
+            name: 'Square',
+            visible: true,
+            locked: false,
+            z: normalizeCompositeDocument(documentState).layers.length,
+            x: 0,
+            y: 0,
+            scale: 1,
+            scaleX: 1,
+            scaleY: 1,
+            resizeMode: 'center-uniform',
+            rotation: 0,
+            opacity: 1,
+            blendMode: 'normal',
+            source: {
+                originalLibraryId: null,
+                originalLibraryName: null,
+                originalProjectType: null
+            },
+            squareAsset: {
+                color: '#ffffff'
+            }
+        };
+        const dimensions = getCompositeLayerDimensions(baseLayer);
+        const position = getCompositeLayerPlacement(documentState, dimensions.width, dimensions.height, viewportMetrics, {
+            maxScale: 256,
+            fit: 0.42
+        });
+        return {
+            ...baseLayer,
+            x: position.x,
+            y: position.y,
+            scale: position.scale,
+            scaleX: position.scale,
+            scaleY: position.scale
         };
     }
 
@@ -3039,7 +3240,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                     embeddedEditorDocument: capture.payload
                 }
                 : layer)
-        }), { renderComposite: true });
+        }), {
+            renderComposite: true,
+            compositeAutosave: true,
+            compositeAutosaveReason: 'Queued Composite autosave after syncing linked Editor changes.'
+        });
         logProcess('success', 'composite.link', `Updated the linked Composite layer "${currentLayer.name || 'Layer'}" from Editor.`);
         clearCompositeBridgeState();
         return true;
@@ -3061,7 +3266,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                             embeddedEditorDocument: capture.payload
                         }
                         : entry)
-                }), { renderComposite: true });
+                }), {
+                    renderComposite: true,
+                    compositeAutosave: true,
+                    compositeAutosaveReason: 'Queued Composite autosave after refreshing an embedded Editor layer.'
+                });
                 logProgressProcess('composite.render', `Refreshed embedded Editor layer ${index + 1}/${uniqueIds.length}.`, (index + 1) / Math.max(1, uniqueIds.length), {
                     dedupeKey: `composite-rerender:${layerId}:${index}`
                 });
@@ -3076,6 +3285,46 @@ window.addEventListener('DOMContentLoaded', async () => {
         const mimeType = String(file?.type || '').toLowerCase();
         if (mimeType.startsWith('image/')) return true;
         return /\.(png|apng|jpe?g|webp|gif|bmp|tiff?|avif|ico|svg)$/i.test(String(file?.name || ''));
+    }
+
+    async function prepareCompositeImageFilesFallback(files, options = {}) {
+        const sourceFiles = (files || []).filter((file) => isLikelyImageFile(file));
+        const items = [];
+        const failures = [];
+        for (let index = 0; index < sourceFiles.length; index += 1) {
+            const file = sourceFiles[index];
+            try {
+                options.onProgress?.({
+                    index,
+                    total: sourceFiles.length,
+                    file,
+                    message: `Reading "${file.name}" for Composite.`,
+                    progress: sourceFiles.length ? index / sourceFiles.length : 0
+                });
+                const imageData = await fileToDataUrl(file);
+                const image = await loadImageFromDataUrl(imageData);
+                items.push({
+                    name: file.name || 'Image',
+                    type: file.type || 'image/png',
+                    imageData,
+                    width: Math.max(1, image.naturalWidth || image.width || 1),
+                    height: Math.max(1, image.naturalHeight || image.height || 1)
+                });
+                options.onProgress?.({
+                    index: index + 1,
+                    total: sourceFiles.length,
+                    file,
+                    message: `Prepared "${file.name}" for Composite.`,
+                    progress: sourceFiles.length ? (index + 0.9) / sourceFiles.length : 0.9
+                });
+            } catch (error) {
+                failures.push({
+                    name: String(file?.name || 'Unnamed image'),
+                    reason: error?.message || 'Could not read this image.'
+                });
+            }
+        }
+        return { items, failures };
     }
 
     async function createStitchInputsFromFilesFallback(files, options = {}) {
@@ -4150,14 +4399,61 @@ window.addEventListener('DOMContentLoaded', async () => {
         openCompositeProjectPicker() {
             return view?.openCompositeProjectPicker?.();
         },
+        addCompositeTextLayer() {
+            const viewportMetrics = getCompositeViewportMetrics();
+            const nextLayer = createCompositeTextLayer(store.getState().compositeDocument, viewportMetrics);
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    workspace: {
+                        ...normalized.workspace,
+                        sidebarView: 'transform'
+                    },
+                    layers: [...normalized.layers, nextLayer],
+                    selection: { layerId: nextLayer.id }
+                };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after adding a text layer.'
+            });
+            logProcess('success', 'composite.layers', 'Added a text layer to Composite.');
+            setNotice('Added a text layer to Composite.', 'success', 4200);
+        },
+        addCompositeSquareLayer() {
+            const viewportMetrics = getCompositeViewportMetrics();
+            const nextLayer = createCompositeSquareLayer(store.getState().compositeDocument, viewportMetrics);
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                return {
+                    ...normalized,
+                    workspace: {
+                        ...normalized.workspace,
+                        sidebarView: 'transform'
+                    },
+                    layers: [...normalized.layers, nextLayer],
+                    selection: { layerId: nextLayer.id }
+                };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after adding a square layer.'
+            });
+            logProcess('success', 'composite.layers', 'Added a square layer to Composite.');
+            setNotice('Added a square layer to Composite.', 'success', 4200);
+        },
         setCompositeSidebarView(sidebarView) {
+            const nextSidebarView = ['layers', 'transform', 'blend', 'export'].includes(String(sidebarView || '').toLowerCase())
+                ? String(sidebarView).toLowerCase()
+                : 'layers';
             updateCompositeDocument((documentState) => ({
                 ...documentState,
                 workspace: {
                     ...documentState.workspace,
-                    sidebarView: sidebarView === 'transform' || sidebarView === 'blend' ? sidebarView : 'layers'
+                    sidebarView: nextSidebarView
                 }
-            }));
+            }), { renderComposite: true });
         },
         selectCompositeLayer(layerId) {
             updateCompositeDocument((documentState) => ({
@@ -4180,6 +4476,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                         }
                         : layer)
                 };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after updating layer settings.'
             });
         },
         toggleCompositeLayerVisible(layerId) {
@@ -4195,6 +4495,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                         }
                         : layer)
                 };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after changing layer visibility.'
             });
         },
         toggleCompositeLayerLocked(layerId) {
@@ -4210,6 +4514,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                         }
                         : layer)
                 };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after changing layer lock state.'
             });
         },
         moveCompositeLayer(layerId, direction = 0) {
@@ -4219,7 +4527,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             const currentIndex = visualLayers.findIndex((layer) => layer.id === layerId);
             if (currentIndex < 0) return;
             const targetIndex = currentIndex - Math.sign(Number(direction) || 0);
-            updateCompositeDocument((documentState) => moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex));
+            updateCompositeDocument((documentState) => moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex), {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after reordering layers.'
+            });
         },
         reorderCompositeLayer(layerId, targetLayerId) {
             if (!layerId || !targetLayerId || layerId === targetLayerId) return;
@@ -4227,14 +4539,22 @@ window.addEventListener('DOMContentLoaded', async () => {
             const visualLayers = [...normalized.layers].sort((a, b) => (b.z || 0) - (a.z || 0));
             const targetIndex = visualLayers.findIndex((layer) => layer.id === targetLayerId);
             if (targetIndex < 0) return;
-            updateCompositeDocument((documentState) => moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex));
+            updateCompositeDocument((documentState) => moveCompositeLayerInVisualOrder(documentState, layerId, targetIndex), {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after reordering layers.'
+            });
         },
         removeCompositeLayer(layerId) {
             if (!layerId) return;
             updateCompositeDocument((documentState) => ({
                 ...normalizeCompositeDocument(documentState),
                 layers: normalizeCompositeDocument(documentState).layers.filter((layer) => layer.id !== layerId)
-            }));
+            }), {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after removing a layer.'
+            });
         },
         patchCompositeView(patch = {}) {
             if (!patch || typeof patch !== 'object') return;
@@ -4244,7 +4564,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ...documentState.view,
                     ...patch
                 }
-            }), { renderComposite: true });
+            }), {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after updating the viewport.'
+            });
         },
         patchCompositeExport(patch = {}) {
             if (!patch || typeof patch !== 'object') return;
@@ -4257,18 +4581,36 @@ window.addEventListener('DOMContentLoaded', async () => {
                         ...patch
                     }
                 };
-            }, { renderComposite: true });
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after updating export settings.'
+            });
         },
-        frameCompositeView() {
-            updateCompositeDocument((documentState) => ({
-                ...documentState,
-                view: {
-                    ...documentState.view,
-                    zoom: 1,
-                    panX: 0,
-                    panY: 0
-                }
-            }), { renderComposite: true });
+        frameCompositeView(viewportMetrics = null) {
+            updateCompositeDocument((documentState) => {
+                const normalized = normalizeCompositeDocument(documentState);
+                const bounds = computeCompositeDocumentBounds(normalized);
+                const metrics = normalizeCompositeViewportMetrics(viewportMetrics);
+                const framedView = computeCompositeFramedView(bounds, metrics.width, metrics.height, {
+                    paddingPx: 48,
+                    minZoom: 0.1,
+                    maxZoom: 32
+                });
+                return {
+                    ...normalized,
+                    view: {
+                        ...normalized.view,
+                        zoom: framedView.zoom,
+                        panX: framedView.panX,
+                        panY: framedView.panY
+                    }
+                };
+            }, {
+                renderComposite: true,
+                compositeAutosave: true,
+                compositeAutosaveReason: 'Queued Composite autosave after framing the viewport.'
+            });
         },
         async listCompositeSourceProjects() {
             await ensureStudioProjectPayloadPreviewsBackfilled();
@@ -4306,12 +4648,20 @@ window.addEventListener('DOMContentLoaded', async () => {
             });
             try {
                 const records = await Promise.all(targetIds.map((id) => getFromLibraryDB(id).catch(() => null)));
+                const viewportMetrics = getCompositeViewportMetrics();
                 let workingDocument = normalizeCompositeDocument(store.getState().compositeDocument);
                 const appendedLayers = [];
+                const warnings = [];
 
                 for (let index = 0; index < records.length; index += 1) {
                     const record = records[index];
                     if (!record || getLibraryProjectType(record) !== 'studio') continue;
+                    setWorkspaceProgress('composite', {
+                        active: true,
+                        title: 'Adding Editor Projects',
+                        message: `Capturing "${record.name || `Editor Project ${index + 1}`}" for Composite...`,
+                        progress: 0.16 + ((index / Math.max(1, records.length)) * 0.72)
+                    });
                     const initialPayload = cloneSerializable(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(record.payload)));
                     if (!initialPayload?.preview?.imageData && record?.blob instanceof Blob) {
                         try {
@@ -4326,24 +4676,37 @@ window.addEventListener('DOMContentLoaded', async () => {
                         }
                     }
                     if (!initialPayload?.preview?.imageData && initialPayload?.source?.imageData) {
-                        initialPayload.preview = {
-                            imageData: String(initialPayload.source.imageData),
-                            width: Number(initialPayload.source.width || 0),
-                            height: Number(initialPayload.source.height || 0),
-                            updatedAt: Number(record.timestamp || Date.now())
-                        };
+                            initialPayload.preview = {
+                                imageData: String(initialPayload.source.imageData),
+                                width: Number(initialPayload.source.width || 0),
+                                height: Number(initialPayload.source.height || 0),
+                                updatedAt: Number(record.timestamp || Date.now())
+                            };
+                        }
+                    let authoritativePayload = initialPayload;
+                    try {
+                        const capture = await captureCompositeEditorLayerDocument(initialPayload);
+                        authoritativePayload = capture.payload || initialPayload;
+                    } catch (error) {
+                        warnings.push(error?.message || `Could not refresh "${record.name || 'that Editor project'}" before adding it to Composite.`);
+                        logProcess('warning', 'composite.layers', error?.message || `Could not refresh "${record.name || 'that Editor project'}" before adding it to Composite.`);
                     }
-                    const position = getCompositeLayerInsertPosition(workingDocument);
+                    const sourceWidth = Math.max(1, Number(authoritativePayload?.preview?.width || authoritativePayload?.source?.width || 1));
+                    const sourceHeight = Math.max(1, Number(authoritativePayload?.preview?.height || authoritativePayload?.source?.height || 1));
+                    const position = getCompositeLayerPlacement(workingDocument, sourceWidth, sourceHeight, viewportMetrics);
                     const nextLayer = {
                         id: createCompositeLayerId('editor'),
                         kind: 'editor-project',
-                        name: stripProjectExtension(record.name || initialPayload.source?.name || 'Editor Project') || 'Editor Project',
+                        name: stripProjectExtension(record.name || authoritativePayload.source?.name || 'Editor Project') || 'Editor Project',
                         visible: true,
                         locked: false,
                         z: workingDocument.layers.length,
                         x: position.x,
                         y: position.y,
-                        scale: 1,
+                        scale: position.scale,
+                        scaleX: position.scale,
+                        scaleY: position.scale,
+                        resizeMode: 'center-uniform',
                         rotation: 0,
                         opacity: 1,
                         blendMode: 'normal',
@@ -4352,7 +4715,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                             originalLibraryName: record.name || null,
                             originalProjectType: 'studio'
                         },
-                        embeddedEditorDocument: initialPayload
+                        embeddedEditorDocument: authoritativePayload
                     };
                     appendedLayers.push(nextLayer);
                     workingDocument = normalizeCompositeDocument({
@@ -4371,10 +4734,19 @@ window.addEventListener('DOMContentLoaded', async () => {
                         ...normalizeCompositeDocument(documentState),
                         layers: [...normalizeCompositeDocument(documentState).layers, ...appendedLayers],
                         selection: { layerId: appendedLayers[appendedLayers.length - 1]?.id || documentState.selection.layerId }
-                    }));
-                    queueCompositeLayerRerenders(appendedLayers.map((layer) => layer.id));
+                    }), {
+                        renderComposite: true,
+                        compositeAutosave: true,
+                        compositeAutosaveReason: 'Queued Composite autosave after adding Editor project layers.'
+                    });
                     logProcess('success', 'composite.layers', `Added ${appendedLayers.length} Editor project layer${appendedLayers.length === 1 ? '' : 's'} to Composite.`);
-                    setNotice(`Added ${appendedLayers.length} Editor project layer${appendedLayers.length === 1 ? '' : 's'} to Composite.`, 'success', 4200);
+                    setNotice(
+                        warnings.length
+                            ? `Added ${appendedLayers.length} Editor project layer${appendedLayers.length === 1 ? '' : 's'} to Composite. Some previews fell back to saved data.`
+                            : `Added ${appendedLayers.length} Editor project layer${appendedLayers.length === 1 ? '' : 's'} to Composite.`,
+                        warnings.length ? 'warning' : 'success',
+                        5200
+                    );
                 }
                 clearWorkspaceProgress('composite');
                 return appendedLayers;
@@ -4397,19 +4769,56 @@ window.addEventListener('DOMContentLoaded', async () => {
                 progress: 0.12
             });
             try {
+                const viewportMetrics = getCompositeViewportMetrics();
+                const prepared = backgroundTasks
+                    ? await backgroundTasks.runTask('composite', 'prepare-image-files', { files: sourceFiles }, {
+                        createRequest: () => buildWorkerFileListRequest(sourceFiles),
+                        priority: 'user-visible',
+                        processId: 'composite.layers',
+                        scope: 'section:composite',
+                        onProgress(progress) {
+                            setWorkspaceProgress('composite', {
+                                active: true,
+                                title: 'Adding Images',
+                                message: progress?.message || 'Embedding the selected images into Composite...',
+                                progress: 0.12 + ((Number(progress?.progress) || 0) * 0.48)
+                            });
+                        }
+                    })
+                    : await prepareCompositeImageFilesFallback(sourceFiles, {
+                        onProgress(progress) {
+                            setWorkspaceProgress('composite', {
+                                active: true,
+                                title: 'Adding Images',
+                                message: progress?.message || 'Embedding the selected images into Composite...',
+                                progress: 0.12 + ((Number(progress?.progress) || 0) * 0.48)
+                            });
+                        }
+                    });
+                const preparedItems = Array.isArray(prepared?.items) ? prepared.items : [];
+                const failures = Array.isArray(prepared?.failures) ? prepared.failures : [];
+                if (!preparedItems.length) {
+                    throw new Error(failures[0]?.reason || 'Could not read the selected images for Composite.');
+                }
                 let workingDocument = normalizeCompositeDocument(store.getState().compositeDocument);
                 const nextLayers = [];
-                for (let index = 0; index < sourceFiles.length; index += 1) {
-                    const file = sourceFiles[index];
-                    const layer = await createCompositeImageLayerFromFile(file, workingDocument);
+                for (let index = 0; index < preparedItems.length; index += 1) {
+                    const item = preparedItems[index];
+                    setWorkspaceProgress('composite', {
+                        active: true,
+                        title: 'Adding Images',
+                        message: `Placing "${item.name || `Image ${index + 1}`}" into Composite...`,
+                        progress: 0.62 + ((index / Math.max(1, preparedItems.length)) * 0.28)
+                    });
+                    const layer = createCompositeImageLayerFromPreparedItem(item, workingDocument, viewportMetrics);
                     nextLayers.push(layer);
                     workingDocument = normalizeCompositeDocument({
                         ...workingDocument,
                         layers: [...workingDocument.layers, layer],
                         selection: { layerId: layer.id }
                     });
-                    logProgressProcess('composite.layers', `Embedded image ${index + 1}/${sourceFiles.length}.`, (index + 1) / Math.max(1, sourceFiles.length), {
-                        dedupeKey: `composite-add-image:${file.name}:${index}`
+                    logProgressProcess('composite.layers', `Embedded image ${index + 1}/${preparedItems.length}.`, (index + 1) / Math.max(1, preparedItems.length), {
+                        dedupeKey: `composite-add-image:${item.name}:${index}`
                     });
                     await maybeYieldToUi(index, 1);
                 }
@@ -4417,10 +4826,20 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ...normalizeCompositeDocument(documentState),
                     layers: [...normalizeCompositeDocument(documentState).layers, ...nextLayers],
                     selection: { layerId: nextLayers[nextLayers.length - 1]?.id || documentState.selection.layerId }
-                }));
+                }), {
+                    renderComposite: true,
+                    compositeAutosave: true,
+                    compositeAutosaveReason: 'Queued Composite autosave after adding image layers.'
+                });
                 clearWorkspaceProgress('composite');
                 logProcess('success', 'composite.layers', `Added ${nextLayers.length} image layer${nextLayers.length === 1 ? '' : 's'} to Composite.`);
-                setNotice(`Added ${nextLayers.length} image layer${nextLayers.length === 1 ? '' : 's'} to Composite.`, 'success', 4200);
+                setNotice(
+                    failures.length
+                        ? `Added ${nextLayers.length} image layer${nextLayers.length === 1 ? '' : 's'} to Composite. ${failures.length} file${failures.length === 1 ? '' : 's'} could not be read.`
+                        : `Added ${nextLayers.length} image layer${nextLayers.length === 1 ? '' : 's'} to Composite.`,
+                    failures.length ? 'warning' : 'success',
+                    5200
+                );
                 return nextLayers;
             } catch (error) {
                 clearWorkspaceProgress('composite');
@@ -4528,7 +4947,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                 progress: 0.16
             });
             try {
-                const blob = await view.exportCompositePng(compositeDocument);
+                const blob = await renderCompositePngBlob(compositeDocument, {
+                    priority: 'user-visible',
+                    processId: 'composite.export',
+                    scope: 'section:composite'
+                });
                 const baseName = getSuggestedCompositeProjectName(compositeDocument) || 'composite-export';
                 setWorkspaceProgress('composite', {
                     active: true,
@@ -4614,7 +5037,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                             embeddedEditorDocument: capture.payload
                         }
                         : layer)
-                }));
+                }), {
+                    renderComposite: true,
+                    compositeAutosave: true,
+                    compositeAutosaveReason: 'Queued Composite autosave after updating the linked original Editor project.'
+                });
                 notifyLibraryChanged();
                 logProcess('success', 'composite.link', `Updated the original Editor Library project "${projectData.name}" from the linked Composite layer.`);
                 setNotice(`Updated "${projectData.name}" in the Library.`, 'success', 5200);

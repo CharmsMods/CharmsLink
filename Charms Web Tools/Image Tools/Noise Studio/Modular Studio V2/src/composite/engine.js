@@ -51,6 +51,10 @@ export class CompositeEngine {
         let sourceKey = `layer|${layer.id}`;
         if (layer.kind === 'editor-project') {
             sourceKey = `editor|${layer.id}|${layer.embeddedEditorDocument?.preview?.updatedAt || layer.embeddedEditorDocument?.timestamp || 0}`;
+        } else if (layer.kind === 'text') {
+            sourceKey = `text|${layer.id}|${layer.textAsset?.text || ''}|${layer.textAsset?.fontFamily || ''}|${layer.textAsset?.fontSize || 0}|${layer.textAsset?.color || ''}`;
+        } else if (layer.kind === 'square') {
+            sourceKey = `square|${layer.id}|${layer.squareAsset?.color || ''}`;
         } else if (layer.imageAsset) {
             sourceKey = `image|${layer.id}|${String(layer.imageAsset?.imageData || '').length}`;
         }
@@ -167,8 +171,8 @@ export class CompositeEngine {
             ctx.translate((targetCanvas.width * 0.5) + viewport.panX, (targetCanvas.height * 0.5) + viewport.panY);
             ctx.scale(viewport.scale, viewport.scale);
             ctx.translate(-viewport.centerWorld.x, -viewport.centerWorld.y);
-            const width = asset.width * layer.scale;
-            const height = asset.height * layer.scale;
+            const width = asset.width * (Number(layer.scaleX) || Number(layer.scale) || 1);
+            const height = asset.height * (Number(layer.scaleY) || Number(layer.scale) || 1);
             ctx.translate(layer.x + (width * 0.5), layer.y + (height * 0.5));
             ctx.rotate(layer.rotation || 0);
             ctx.scale(layer.flipX ? -1 : 1, layer.flipY ? -1 : 1);

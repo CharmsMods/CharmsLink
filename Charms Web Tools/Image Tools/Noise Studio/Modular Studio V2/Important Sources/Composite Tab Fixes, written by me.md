@@ -9,3 +9,6 @@ i want to somewhat change the way the canvas works, since what i am seeing right
 after the bounds are set, the next step is picking a resultion, which can either be custom, OR the user can click on different things that are both on the canvas and inside the bounds box, and the resolution of the render will change so that it can pixel match 1 to 1 with the selected object. This does not mean that if the user chooses an object on the canvas that is 1920 by 1080, that the output will be 1920 by 1080, because what if that image is scaled down on the canvas? that would mean that the resolution would need to be larger in order to account for that, so this is the logic behind exports, (and just ensuring that the canvas doesnt magically make objects change size or position and anything else when being exported).
 
 
+adding images from the editor; they appear on the canvas huge with no way to scale their size down except the scale, slider but it doesnt work super well and doesnt usually go down far enough, to see the whole thing
+
+export tab doesnt open
