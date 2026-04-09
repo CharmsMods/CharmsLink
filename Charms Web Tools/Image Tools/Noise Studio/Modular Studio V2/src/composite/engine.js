@@ -1,7 +1,6 @@
 import {
     COMPOSITE_MAX_ZOOM,
     COMPOSITE_MIN_ZOOM,
-    computeCompositeDocumentBounds,
     getActiveCompositeLayers,
     getCompositeLayerSourceImage,
     normalizeCompositeDocument
@@ -9,6 +8,15 @@ import {
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+}
+
+function rotatePoint(x, y, radians = 0) {
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return {
+        x: (x * cos) - (y * sin),
+        y: (x * sin) + (y * cos)
+    };
 }
 
 function createCanvas(width, height) {
@@ -52,7 +60,7 @@ export class CompositeEngine {
     async ensureLayerAsset(layer) {
         let sourceKey = `layer|${layer.id}`;
         if (layer.kind === 'editor-project') {
-            sourceKey = `editor|${layer.id}|${layer.embeddedEditorDocument?.preview?.updatedAt || layer.embeddedEditorDocument?.timestamp || 0}`;
+            sourceKey = `editor|${layer.id}|${layer.embeddedEditorDocument?.preview?.updatedAt || layer.embeddedEditorDocument?.timestamp || 0}|${layer.source?.renderWidth || 0}|${layer.source?.renderHeight || 0}`;
         } else if (layer.kind === 'text') {
             sourceKey = `text|${layer.id}|${layer.textAsset?.text || ''}|${layer.textAsset?.fontFamily || ''}|${layer.textAsset?.fontSize || 0}|${layer.textAsset?.color || ''}`;
         } else if (layer.kind === 'square') {
@@ -78,8 +86,8 @@ export class CompositeEngine {
         const image = await loadImageFromDataUrl(source.imageData);
         const next = {
             sourceKey,
-            width: image.width,
-            height: image.height,
+            width: Math.max(1, Number(source.width) || Number(image.width) || 1),
+            height: Math.max(1, Number(source.height) || Number(image.height) || 1),
             image
         };
         this.layerAssets.set(layer.id, next);
@@ -97,9 +105,81 @@ export class CompositeEngine {
         await Promise.all(normalized.layers.map((layer) => this.ensureLayerAsset(layer).catch(() => null)));
     }
 
+    getLayerDimensions(layer) {
+        const runtimeAsset = this.layerAssets.get(layer?.id);
+        if (runtimeAsset?.width && runtimeAsset?.height) {
+            return {
+                width: Math.max(1, Number(runtimeAsset.width) || 1),
+                height: Math.max(1, Number(runtimeAsset.height) || 1)
+            };
+        }
+        const source = getCompositeLayerSourceImage(layer);
+        return {
+            width: Math.max(1, Number(source.width) || 1),
+            height: Math.max(1, Number(source.height) || 1)
+        };
+    }
+
+    computeLayerBounds(layer) {
+        const dimensions = this.getLayerDimensions(layer);
+        const scaleX = Number(layer?.scaleX) || Number(layer?.scale) || 1;
+        const scaleY = Number(layer?.scaleY) || Number(layer?.scale) || 1;
+        const scaledWidth = dimensions.width * scaleX;
+        const scaledHeight = dimensions.height * scaleY;
+        const centerX = Number(layer?.x || 0) + (scaledWidth * 0.5);
+        const centerY = Number(layer?.y || 0) + (scaledHeight * 0.5);
+        const corners = [
+            rotatePoint(-scaledWidth * 0.5, -scaledHeight * 0.5, Number(layer?.rotation) || 0),
+            rotatePoint(scaledWidth * 0.5, -scaledHeight * 0.5, Number(layer?.rotation) || 0),
+            rotatePoint(scaledWidth * 0.5, scaledHeight * 0.5, Number(layer?.rotation) || 0),
+            rotatePoint(-scaledWidth * 0.5, scaledHeight * 0.5, Number(layer?.rotation) || 0)
+        ].map((point) => ({
+            x: point.x + centerX,
+            y: point.y + centerY
+        }));
+        const xs = corners.map((point) => point.x);
+        const ys = corners.map((point) => point.y);
+        return {
+            minX: Math.min(...xs),
+            minY: Math.min(...ys),
+            maxX: Math.max(...xs),
+            maxY: Math.max(...ys),
+            width: Math.max(0, Math.max(...xs) - Math.min(...xs)),
+            height: Math.max(0, Math.max(...ys) - Math.min(...ys))
+        };
+    }
+
+    computeDocumentBounds(document) {
+        const normalized = normalizeCompositeDocument(document);
+        const layers = getActiveCompositeLayers(normalized);
+        if (!layers.length) {
+            return {
+                minX: 0,
+                minY: 0,
+                maxX: 0,
+                maxY: 0,
+                width: 0,
+                height: 0
+            };
+        }
+        const boundsList = layers.map((layer) => this.computeLayerBounds(layer));
+        const minX = Math.min(...boundsList.map((entry) => entry.minX));
+        const minY = Math.min(...boundsList.map((entry) => entry.minY));
+        const maxX = Math.max(...boundsList.map((entry) => entry.maxX));
+        const maxY = Math.max(...boundsList.map((entry) => entry.maxY));
+        return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            width: Math.max(0, maxX - minX),
+            height: Math.max(0, maxY - minY)
+        };
+    }
+
     computeViewport(document, outputWidth, outputHeight, mode = 'screen') {
         const normalized = normalizeCompositeDocument(document);
-        const bounds = computeCompositeDocumentBounds(normalized);
+        const bounds = this.computeDocumentBounds(normalized);
         const safeWidth = Math.max(1, outputWidth || 1);
         const safeHeight = Math.max(1, outputHeight || 1);
         if (mode === 'export') {
@@ -204,8 +284,10 @@ export class CompositeEngine {
     async exportPngBlob(document) {
         const normalized = normalizeCompositeDocument(document);
         const isCustom = normalized.export.boundsMode === 'custom';
-        const boundsWidth = isCustom ? normalized.export.bounds.width : Math.max(1, Math.ceil(computeCompositeDocumentBounds(document).width || 1));
-        const boundsHeight = isCustom ? normalized.export.bounds.height : Math.max(1, Math.ceil(computeCompositeDocumentBounds(document).height || 1));
+        await this.syncDocument(normalized);
+        const bounds = this.computeDocumentBounds(normalized);
+        const boundsWidth = isCustom ? normalized.export.bounds.width : Math.max(1, Math.ceil(bounds.width || 1));
+        const boundsHeight = isCustom ? normalized.export.bounds.height : Math.max(1, Math.ceil(bounds.height || 1));
         const outputWidth = isCustom ? normalized.export.customResolution.width : boundsWidth;
         const outputHeight = isCustom ? normalized.export.customResolution.height : boundsHeight;
 
@@ -220,8 +302,10 @@ export class CompositeEngine {
     async capturePreview(document, maxEdge = 320) {
         const normalized = normalizeCompositeDocument(document);
         const isCustom = normalized.export.boundsMode === 'custom';
-        const boundsWidth = isCustom ? normalized.export.bounds.width : Math.max(1, Math.ceil(computeCompositeDocumentBounds(document).width || 1));
-        const boundsHeight = isCustom ? normalized.export.bounds.height : Math.max(1, Math.ceil(computeCompositeDocumentBounds(document).height || 1));
+        await this.syncDocument(normalized);
+        const bounds = this.computeDocumentBounds(normalized);
+        const boundsWidth = isCustom ? normalized.export.bounds.width : Math.max(1, Math.ceil(bounds.width || 1));
+        const boundsHeight = isCustom ? normalized.export.bounds.height : Math.max(1, Math.ceil(bounds.height || 1));
         const outputWidth = isCustom ? normalized.export.customResolution.width : boundsWidth;
         const outputHeight = isCustom ? normalized.export.customResolution.height : boundsHeight;
         

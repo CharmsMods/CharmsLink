@@ -10,10 +10,10 @@ const COMPOSITE_BLEND_MODES = new Set([
     'hue',
     'color'
 ]);
-export const COMPOSITE_MIN_SCALE = 0.0001;
-export const COMPOSITE_MAX_SCALE = 4096;
-export const COMPOSITE_MIN_ZOOM = 0.001;
-export const COMPOSITE_MAX_ZOOM = 4096;
+export const COMPOSITE_MIN_SCALE = 0.000001;
+export const COMPOSITE_MAX_SCALE = 1048576;
+export const COMPOSITE_MIN_ZOOM = 0.00001;
+export const COMPOSITE_MAX_ZOOM = 1048576;
 
 const COMPOSITE_LAYER_KINDS = new Set(['image', 'editor-project', 'text', 'square', 'circle', 'triangle']);
 const COMPOSITE_RESIZE_MODES = new Set(['center-uniform', 'anchor-uniform', 'anchor-stretch']);
@@ -72,10 +72,15 @@ function normalizePreview(preview = null) {
 }
 
 function normalizeLayerSource(source = {}) {
+    const renderWidth = Math.max(0, Math.round(Number(source?.renderWidth) || 0));
+    const renderHeight = Math.max(0, Math.round(Number(source?.renderHeight) || 0));
     return {
         originalLibraryId: source?.originalLibraryId ? String(source.originalLibraryId) : null,
         originalLibraryName: source?.originalLibraryName ? String(source.originalLibraryName) : null,
-        originalProjectType: source?.originalProjectType === 'studio' ? 'studio' : null
+        originalProjectType: source?.originalProjectType === 'studio' ? 'studio' : null,
+        generatedFromCompositeImage: !!source?.generatedFromCompositeImage,
+        renderWidth: renderWidth > 0 ? renderWidth : null,
+        renderHeight: renderHeight > 0 ? renderHeight : null
     };
 }
 
@@ -339,18 +344,27 @@ export function getCompositeLayerSourceImage(layer = {}) {
     }
     const embedded = normalizeEmbeddedEditorDocument(layer.embeddedEditorDocument);
     const preview = normalizePreview(embedded?.preview);
+    const layerSource = normalizeLayerSource(layer?.source);
+    const authoritativeWidth = Math.max(
+        1,
+        Math.round(Number(layerSource.renderWidth || preview?.width || embedded?.source?.width || 1) || 1)
+    );
+    const authoritativeHeight = Math.max(
+        1,
+        Math.round(Number(layerSource.renderHeight || preview?.height || embedded?.source?.height || 1) || 1)
+    );
     if (preview?.imageData) {
         return {
             imageData: preview.imageData,
-            width: Math.max(1, preview.width || embedded?.source?.width || 1),
-            height: Math.max(1, preview.height || embedded?.source?.height || 1)
+            width: authoritativeWidth,
+            height: authoritativeHeight
         };
     }
     if (String(embedded?.source?.imageData || '').startsWith('data:')) {
         return {
             imageData: String(embedded.source.imageData),
-            width: Math.max(1, Math.round(Number(embedded.source.width) || 1)),
-            height: Math.max(1, Math.round(Number(embedded.source.height) || 1))
+            width: authoritativeWidth,
+            height: authoritativeHeight
         };
     }
     return {

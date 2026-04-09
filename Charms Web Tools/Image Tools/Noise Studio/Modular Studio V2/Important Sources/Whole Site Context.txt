@@ -100,9 +100,18 @@ Current section responsibilities:
 
 - `Composite`
   - A separate rendering tab (`src/composite/`) allowing users to lay out multiple saved Editor projects, imported images, text objects, and simple shape objects into one scene.
-  - Features its own 2D rendering engine, world-space/infinite-canvas style stage, local interaction session for drag/pan/zoom work, and robust draggable UI bounds-based exporter.
+  - Features its own 2D rendering engine, world-space/infinite-canvas style stage, local interaction session for drag/pan/zoom work, very loose zoom/scale bounds for deep canvas work, and robust draggable UI bounds-based exporter.
   - The current Composite sidebar has `Layers`, `Transform`, `Blend`, and `Export` views.
+  - Composite-specific persistent preferences live in the top-level `Settings` tab under the `Composite` category, while the Composite sidebar itself stays focused on document/layer/export controls.
   - Supports self-contained Composite JSON save/load, Library save/load, and a bridge flow for updating the original Editor Library project when Composite was opened from that project.
+  - Plain uploaded Composite image layers can now be converted into linked Editor-project layers, opened directly in the Editor tab, and later persisted as their own normal Editor Library projects when the Composite project saves to the Library.
+  - Composite Library saves are supposed to keep a visible thumbnail even if live preview capture fails, by falling back to the captured export blob instead of clearing the saved preview image.
+  - If the current Editor tab already matches one of the Composite-linked Editor layers, jumping back into Editor for another linked layer should not trigger an extra "save current Editor project" prompt first.
+- Composite export currently renders through CPU 2D canvas in both the worker path and the main-thread fallback path; there is still not a separate GPU/WebGL export renderer yet.
+- The `Settings > Composite` category now includes an export execution-path preference (`Auto`, `Background Worker`, `Main Thread`) plus Composite export diagnostics. `Auto` is size-aware now: smaller exports stay on the main thread, while larger exports route to the background worker when Worker + OffscreenCanvas 2D + `createImageBitmap` support are available.
+- `Settings > Composite` also surfaces probed WebGL limits (`MAX_TEXTURE_SIZE`, viewport limits, GPU-safe edge) so future GPU export work can be planned against the current machine instead of guessed.
+  - Large embedded Composite image payloads should avoid `fetch(dataUrl)` decode paths during export/save work, because those can fail on huge Editor-backed layers; direct data-url decoding is safer for those cases.
+  - Large Composite Library loads should also avoid whole-payload stringify/parse clones and unnecessary deep metadata-stripping clones on the main thread, because those can stall the integrated Library loading overlay when a saved project contains very large embedded image payloads.
   - Integrated with the Library and has a "Pixel Match" logic allowing exports to render perfectly at the explicit resolution of bounded items.
 
 - `Settings`
@@ -276,13 +285,18 @@ Current section responsibilities:
 - `engine.js`
   - 2D compositor used for viewport rendering, preview capture, and PNG export.
   - Supports auto-bounds export plus explicit draggable export bounds with custom output resolution.
-  - Runtime layer assets are authoritative for live Composite sizing, so loaded image dimensions drive viewport handles and export math.
+  - Runtime layer assets are authoritative for live Composite sizing, but editor-backed layers now also persist their intended render width/height in Composite layer source metadata so the stage and export paths do not shrink/stretch them to match a stale preview bitmap size.
 
 - `ui.js`
   - Composite workspace UI.
   - Owns layer ingest from saved Editor projects or local images, transform/blend controls, export-bounds editing, project-picker overlay behavior, and Composite progress overlay wiring.
   - Uses a local interaction session so live drag/pan/zoom/bounds editing do not commit to the global store on every pointer move.
+  - Composite sidebar controls are supposed to stay stable during active typing or slider drags, so the panel DOM should not rebuild mid-interaction.
+  - Custom export seeding now prefers the union of currently visible clipped layer coverage inside the viewport, and can ignore giant background-like layers for that seed when smaller visible layers are also on screen.
+  - Composite "Frame" and custom export seeding should follow the live decoded layer bounds seen on canvas, including imported Editor-backed layers.
+  - Resize modes in the `Transform` panel are surfaced as explicit buttons so center-scale, opposite-side-scale, and stretch behavior are visible before the user drags canvas handles.
   - Current direct-canvas editing supports move, grouped selection handles, right-drag marquee selection on empty stage, middle-click pan, deselect-on-empty-click, and `Delete` removal of the current selection.
+  - Shared save/confirm app dialogs now put the app shell into an explicit modal input-blocking state so background workspaces, including Composite, should not receive pointer input while a popup is open.
 
 ### `src/settings/`
 
@@ -442,12 +456,13 @@ Important current Composite behavior:
 - Composite can export by automatic document bounds or by explicit draggable custom bounds.
 - Switching Export to `custom` now seeds the bounds from the visible viewport/document intersection when possible instead of always jumping to the full document bounds.
 - Custom export resolution stays aspect-locked to the current custom bounds, and pixel-match is only valid for visible layers fully contained inside those bounds.
-- Composite uses runtime-loaded layer dimensions for selection handles and pixel-match/export calculations so Editor-backed preview layers do not rely on stale embedded size metadata.
+- Composite uses runtime-loaded layer dimensions for selection handles and pixel-match/export calculations, and editor-backed layers can carry explicit `source.renderWidth` / `source.renderHeight` metadata so stage handles plus export math stay locked to the intended render size instead of the decoded preview bitmap size.
 - Current single-selection transform modes are `center-uniform`, `anchor-uniform`, and `anchor-stretch` where the selected layer type allows stretching.
 - Composite also has a local multi-selection path: right-drag on empty stage builds a marquee selection, grouped bounds appear around the selected items, and dragging a selected item or the grouped handles moves/scales the selection together.
 - Multi-selection and grouped handle mode are current UI-only state; the persisted payload still stores only `selection.layerId`.
 - Composite supports local text and simple shape objects directly on the canvas in addition to Editor/image layers.
 - Composite checker-background and wheel-zoom preferences now live in the top-level `Settings` section under the `Composite` category instead of a Composite-local settings panel.
+- Composite export backend selection also lives in `Settings > Composite`, and its runtime diagnostics are intentionally app-level diagnostics rather than saved project payload data.
 - The quick `Use View As Export` action lives in the Composite `Export` panel because it is an export workflow action, not an app-level setting.
 - Composite pan/zoom view changes do not trigger Library autosave by themselves.
 - Composite save/load uses the `composite-document` payload shape.

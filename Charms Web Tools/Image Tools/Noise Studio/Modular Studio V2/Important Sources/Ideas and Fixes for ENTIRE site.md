@@ -107,3 +107,16 @@ add the option to include the currrent entire settings state in the library json
 
 
 add a text layer to the editor tab
+
+
+NEW TAB IDEA:
+create a new asset generation tab: that has sub tabs inside it:
+QR codes
+Bar codes
+
+
+
+
+explore to see whether a translucent frosted glass effective material can be made for the 3D tab for materials is possible with the current glass settings, or if updates would need to be made to add that capability and ensure it works like it should with the path tracing
+
+whole site background UI background image behind everything, with some UI elements being slightly see-through for the picture, not a darkening see through type, but a frosted glass look

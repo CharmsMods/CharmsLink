@@ -26,6 +26,16 @@ function formatPercent(value = 0) {
     return `${(Math.max(0, Math.min(1, Number(value) || 0)) * 100).toFixed(0)}%`;
 }
 
+function formatInteger(value = 0) {
+    const numeric = Math.max(0, Math.round(Number(value) || 0));
+    return numeric ? numeric.toLocaleString() : '0';
+}
+
+function formatMegapixels(value = 0) {
+    const numeric = Math.max(0, Number(value) || 0);
+    return `${numeric.toFixed(numeric >= 100 ? 0 : 1).replace(/\.0$/, '')} MP`;
+}
+
 function normalizeCategory(category) {
     const normalized = String(category || '').trim().toLowerCase();
     return ['general', 'library', 'editor', 'composite', 'stitch', '3d', 'logs'].includes(normalized) ? normalized : 'general';
@@ -35,7 +45,7 @@ const CATEGORIES = [
     ['general', 'General', 'Theme, save behavior, workers, settings import/export'],
     ['library', 'Library', 'Storage, auto-load, defaults, maintenance'],
     ['editor', 'Editor', 'Viewport defaults, palette automation, checker tone'],
-    ['composite', 'Composite', 'Checker, zoom-lock, and live canvas viewport defaults'],
+    ['composite', 'Composite', 'Checker, zoom-lock, export routing, and graphics diagnostics'],
     ['stitch', 'Stitch', 'Analysis defaults, photo runtime diagnostics, workspace-first behavior'],
     ['3d', '3D', 'Navigation, helpers, snapping, render defaults'],
     ['logs', 'Logs', 'Retention, cards, flash effects, filters']
@@ -201,13 +211,47 @@ function renderCategoryContent(category, settings) {
     }
     if (category === 'composite') {
         const preferences = settings?.composite?.preferences || {};
+        const diagnostics = settings?.composite?.diagnostics || {};
+        const workerReady = !!(diagnostics.workerAvailable && diagnostics.offscreenCanvas2d && diagnostics.createImageBitmap);
+        const gpuSafeEdge = Math.max(0, Number(diagnostics.gpuSafeMaxEdge) || 0);
+        const maxTextureSize = Math.max(0, Number(diagnostics.maxTextureSize) || 0);
+        const maxViewportWidth = Math.max(0, Number(diagnostics.maxViewportWidth) || 0);
+        const maxViewportHeight = Math.max(0, Number(diagnostics.maxViewportHeight) || 0);
         return `
             <section class="settings-card">
                 <div class="settings-card-header"><div><div class="settings-eyebrow">Composite</div><h3>Viewport Preferences</h3></div></div>
-                <div class="settings-banner">These preferences apply to the current Composite workspace and seed new Composite projects. Quick export actions still stay inside the Composite Export panel.</div>
+                <div class="settings-banner">These preferences apply to the current Composite workspace and seed new Composite projects. Quick export actions still stay inside the Composite Export panel. Composite export is still CPU 2D canvas rendering in both paths. In <strong>Auto</strong>, smaller exports stay on the main thread while larger exports route into the background worker when OffscreenCanvas 2D plus image-bitmap support are available. Browser canvas maximum size is still environment-dependent.</div>
                 <div class="settings-field-grid">
                     ${renderField({ path: 'composite.preferences.showChecker', label: 'Show checker background', value: preferences.showChecker })}
                     ${renderField({ path: 'composite.preferences.zoomLocked', label: 'Lock wheel zoom by default', value: preferences.zoomLocked })}
+                    ${renderField({ type: 'select', path: 'composite.preferences.exportBackend', label: 'Export execution path', value: preferences.exportBackend, options: [['auto', 'Auto'], ['worker', 'Background Worker'], ['main-thread', 'Main Thread']], note: `Auto keeps small exports on the main thread and routes larger ones to the background worker at ${formatMegapixels(diagnostics.autoWorkerThresholdMegapixels || 0)} or ${formatInteger(diagnostics.autoWorkerThresholdEdge || 0)} px max-edge when worker rendering is ready.` })}
+                </div>
+            </section>
+            <section class="settings-card">
+                <div class="settings-card-header"><div><div class="settings-eyebrow">Composite Diagnostics</div><h3>Export Runtime Readiness</h3></div></div>
+                <div class="settings-kpi-grid">
+                    <div class="settings-kpi"><span>Worker Export</span><strong>${workerReady ? 'Ready' : 'Unavailable'}</strong></div>
+                    <div class="settings-kpi"><span>WebGL</span><strong>${diagnostics.webglAvailable ? 'Ready' : 'Unavailable'}</strong></div>
+                    <div class="settings-kpi"><span>WebGL 2</span><strong>${diagnostics.webgl2Available ? 'Ready' : 'Unavailable'}</strong></div>
+                    <div class="settings-kpi"><span>GPU Safe Edge</span><strong>${gpuSafeEdge ? `${formatInteger(gpuSafeEdge)} px` : 'Unknown'}</strong></div>
+                </div>
+                <div class="settings-field-grid" style="margin-top:16px">
+                    <div class="settings-field">
+                        <span>Auto worker threshold</span>
+                        <small>${formatMegapixels(diagnostics.autoWorkerThresholdMegapixels || 0)} or ${formatInteger(diagnostics.autoWorkerThresholdEdge || 0)} px max-edge.</small>
+                    </div>
+                    <div class="settings-field">
+                        <span>Worker prerequisites</span>
+                        <small>${diagnostics.workerAvailable ? 'Worker API ready' : 'Worker unavailable'}, ${diagnostics.offscreenCanvas2d ? 'OffscreenCanvas 2D ready' : 'OffscreenCanvas 2D unavailable'}, ${diagnostics.createImageBitmap ? 'createImageBitmap ready' : 'createImageBitmap unavailable'}.</small>
+                    </div>
+                    <div class="settings-field">
+                        <span>GPU limits</span>
+                        <small>Max texture ${maxTextureSize ? `${formatInteger(maxTextureSize)} px` : 'unknown'}; max viewport ${maxViewportWidth && maxViewportHeight ? `${formatInteger(maxViewportWidth)} x ${formatInteger(maxViewportHeight)} px` : 'unknown'}.</small>
+                    </div>
+                    <div class="settings-field">
+                        <span>Current renderer split</span>
+                        <small>Composite does not have a dedicated GPU/WebGL export renderer yet. These numbers are here to guide future GPU-safe planning, while current exports stay on CPU 2D canvas.</small>
+                    </div>
                 </div>
             </section>
         `;

@@ -1,5 +1,4 @@
 import {
-    computeCompositeDocumentBounds,
     getActiveCompositeLayers,
     getCompositeLayerSourceImage,
     normalizeCompositeDocument
@@ -10,6 +9,15 @@ import { reviveWorkerFileEntries } from '../filePayload.js';
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
+}
+
+function rotatePoint(x, y, radians = 0) {
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return {
+        x: (x * cos) - (y * sin),
+        y: (x * sin) + (y * cos)
+    };
 }
 
 function isLikelyImageFile(file) {
@@ -30,9 +38,62 @@ function mapCanvasBlendMode(mode) {
     return 'source-over';
 }
 
-function computeExportViewport(document) {
+function computeLayerBoundsFromAsset(layer, asset) {
+    const scaleX = Number(layer?.scaleX) || Number(layer?.scale) || 1;
+    const scaleY = Number(layer?.scaleY) || Number(layer?.scale) || 1;
+    const scaledWidth = Math.max(1, Number(asset?.width) || 1) * scaleX;
+    const scaledHeight = Math.max(1, Number(asset?.height) || 1) * scaleY;
+    const centerX = Number(layer?.x || 0) + (scaledWidth * 0.5);
+    const centerY = Number(layer?.y || 0) + (scaledHeight * 0.5);
+    const corners = [
+        rotatePoint(-scaledWidth * 0.5, -scaledHeight * 0.5, Number(layer?.rotation) || 0),
+        rotatePoint(scaledWidth * 0.5, -scaledHeight * 0.5, Number(layer?.rotation) || 0),
+        rotatePoint(scaledWidth * 0.5, scaledHeight * 0.5, Number(layer?.rotation) || 0),
+        rotatePoint(-scaledWidth * 0.5, scaledHeight * 0.5, Number(layer?.rotation) || 0)
+    ].map((point) => ({
+        x: point.x + centerX,
+        y: point.y + centerY
+    }));
+    const xs = corners.map((point) => point.x);
+    const ys = corners.map((point) => point.y);
+    return {
+        minX: Math.min(...xs),
+        minY: Math.min(...ys),
+        maxX: Math.max(...xs),
+        maxY: Math.max(...ys),
+        width: Math.max(0, Math.max(...xs) - Math.min(...xs)),
+        height: Math.max(0, Math.max(...ys) - Math.min(...ys))
+    };
+}
+
+function computeDocumentBoundsFromBitmaps(layers = [], bitmaps = new Map()) {
+    if (!layers.length) {
+        return {
+            minX: 0,
+            minY: 0,
+            maxX: 0,
+            maxY: 0,
+            width: 0,
+            height: 0
+        };
+    }
+    const boundsList = layers.map((layer) => computeLayerBoundsFromAsset(layer, bitmaps.get(layer.id)));
+    const minX = Math.min(...boundsList.map((entry) => entry.minX));
+    const minY = Math.min(...boundsList.map((entry) => entry.minY));
+    const maxX = Math.max(...boundsList.map((entry) => entry.maxX));
+    const maxY = Math.max(...boundsList.map((entry) => entry.maxY));
+    return {
+        minX,
+        minY,
+        maxX,
+        maxY,
+        width: Math.max(0, maxX - minX),
+        height: Math.max(0, maxY - minY)
+    };
+}
+
+function computeExportViewport(document, bounds) {
     const normalized = normalizeCompositeDocument(document);
-    const bounds = computeCompositeDocumentBounds(normalized);
     const isCustom = normalized.export.boundsMode === 'custom';
     const boundsWidth = isCustom ? Math.max(1, normalized.export.bounds.width) : Math.max(1, bounds.width || 1);
     const boundsHeight = isCustom ? Math.max(1, normalized.export.bounds.height) : Math.max(1, bounds.height || 1);
@@ -71,8 +132,8 @@ async function loadLayerBitmaps(document, context) {
         const bitmap = await createImageBitmap(blob);
         bitmaps.set(layer.id, {
             bitmap,
-            width: Math.max(1, Number(source.width) || bitmap.width || 1),
-            height: Math.max(1, Number(source.height) || bitmap.height || 1)
+            width: Math.max(1, Number(source.width) || Number(bitmap.width) || 1),
+            height: Math.max(1, Number(source.height) || Number(bitmap.height) || 1)
         });
     }
     return {
@@ -84,7 +145,8 @@ async function loadLayerBitmaps(document, context) {
 
 async function renderCompositeToCanvas(document, context) {
     const { normalized, layers, bitmaps } = await loadLayerBitmaps(document, context);
-    const viewport = computeExportViewport(normalized);
+    const bounds = computeDocumentBoundsFromBitmaps(layers, bitmaps);
+    const viewport = computeExportViewport(normalized, bounds);
     const canvas = new OffscreenCanvas(viewport.outputWidth, viewport.outputHeight);
     const ctx = canvas.getContext('2d', { alpha: true, willReadFrequently: false });
     if (!ctx) {

@@ -1,11 +1,11 @@
 import { CompositeEngine } from './engine.js';
 import {
+    computeCompositeFramedView,
     COMPOSITE_MAX_SCALE,
     COMPOSITE_MAX_ZOOM,
     COMPOSITE_MIN_SCALE,
     COMPOSITE_MIN_ZOOM,
     computeCompositeViewBounds,
-    computeCompositeDocumentBounds,
     getCompositeLayerDimensions,
     getCompositeLayerResizeMode,
     isCompositeLayerStretchCapable,
@@ -187,6 +187,36 @@ function renderColorRow(config = {}) {
     `;
 }
 
+function renderResizeModeChooser(config = {}) {
+    const options = Array.isArray(config.options) ? config.options : [];
+    const currentValue = String(config.value || '');
+    const disabled = !!config.disabled;
+    const dataAttrs = Object.entries(config.dataset || {})
+        .map(([key, value]) => `data-${key}="${escapeHtml(value)}"`)
+        .join(' ');
+    return `
+        <div class="composite-info-card">
+            <div class="composite-setting-label">
+                <span>${escapeHtml(config.label || 'Handle Mode')}</span>
+                <span>${escapeHtml(options.find((option) => option.value === currentValue)?.label || '')}</span>
+            </div>
+            <div class="composite-mode-grid">
+                ${options.map((option) => `
+                    <button
+                        type="button"
+                        class="composite-mode-button ${String(option.value) === currentValue ? 'is-active' : ''}"
+                        data-composite-action="set-layer-resize-mode-button"
+                        data-resize-mode="${escapeHtml(option.value)}"
+                        ${dataAttrs}
+                        ${disabled ? 'disabled' : ''}
+                    >${escapeHtml(option.label)}</button>
+                `).join('')}
+            </div>
+            ${config.help ? `<span class="composite-help">${escapeHtml(config.help)}</span>` : ''}
+        </div>
+    `;
+}
+
 const SIDEBAR_TABS = [
     { id: 'layers', label: 'Layers', description: 'Stack order, visibility, locking, and layer ingest.' },
     { id: 'transform', label: 'Transform', description: 'Position, scale, rotation, and opacity for the selected layer.' },
@@ -299,6 +329,10 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-card-badges{display:flex;flex-wrap:wrap;gap:4px}
             .composite-kind-badge{display:inline-flex;align-items:center;justify-content:center;min-height:18px;padding:0 5px;border:1px solid var(--comp-border-soft);background:rgba(184,178,163,.08);color:var(--comp-muted);font-size:9px;letter-spacing:.04em;text-transform:uppercase}
             .composite-card-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(68px,1fr));gap:6px;padding:0 7px 7px}
+            .composite-mode-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:6px}
+            .composite-mode-button{min-height:26px;padding:6px;border:1px solid var(--comp-border);border-radius:4px;background:#000;color:var(--comp-muted);text-align:left;cursor:pointer}
+            .composite-mode-button.is-active{background:var(--comp-accent);color:#fff;border-color:var(--comp-border)}
+            .composite-mode-button:disabled{opacity:.45;cursor:not-allowed}
             .composite-setting{display:flex;flex-direction:column;gap:6px;color:var(--comp-muted)}
             .composite-setting-label{display:flex;align-items:center;justify-content:space-between;gap:8px}
             .composite-setting-inputs{display:grid;grid-template-columns:minmax(0,1fr) 78px;gap:6px}
@@ -400,6 +434,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     `;
 
     const refs = {
+        sidebar: root.querySelector('.composite-sidebar'),
         tabs: [...root.querySelectorAll('[data-composite-action="workspace-tab"]')],
         panels: [...root.querySelectorAll('[data-composite-panel]')],
         domStage: root.querySelector('[data-composite-role="dom-stage"]'),
@@ -446,6 +481,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     let wheelCommitTimer = null;
     let panelInputActive = false;
     let panelInputRefreshTimer = null;
+    const panelPointerIds = new Set();
     let lastSidebarView = null;
     let selectedLayerIds = new Set();
     let selectionResizeMode = 'center-uniform';
@@ -614,6 +650,33 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         };
     }
 
+    function computeLiveDocumentBounds(document = currentStageDocument()) {
+        const layers = getActiveCompositeLayers(normalizeCompositeDocument(document));
+        if (!layers.length) {
+            return {
+                minX: 0,
+                minY: 0,
+                maxX: 0,
+                maxY: 0,
+                width: 0,
+                height: 0
+            };
+        }
+        const boundsList = layers.map((layer) => computeStageLayerBounds(layer));
+        const minX = Math.min(...boundsList.map((entry) => entry.minX));
+        const minY = Math.min(...boundsList.map((entry) => entry.minY));
+        const maxX = Math.max(...boundsList.map((entry) => entry.maxX));
+        const maxY = Math.max(...boundsList.map((entry) => entry.maxY));
+        return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            width: Math.max(0, maxX - minX),
+            height: Math.max(0, maxY - minY)
+        };
+    }
+
     function getSelectionScreenBounds(document = currentStageDocument()) {
         const bounds = getSelectionBounds(document);
         if (!bounds) return null;
@@ -735,6 +798,29 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         });
     }
 
+    function applyResizeModeChange(control = {}) {
+        if (control.selectionscope === 'multi') {
+            selectionResizeMode = String(control.value || 'center-uniform');
+            renderTransformPanel();
+            return true;
+        }
+        const layerId = control.layerid;
+        const layer = currentDocument.layers.find((entry) => entry.id === layerId) || null;
+        if (!layer) return false;
+        if (control.value === 'anchor-stretch') {
+            actions.updateCompositeLayerFields?.(layerId, { resizeMode: control.value });
+            return true;
+        }
+        const uniformScale = getLayerScaleValue(layer);
+        actions.updateCompositeLayerFields?.(layerId, {
+            resizeMode: control.value,
+            scale: uniformScale,
+            scaleX: uniformScale,
+            scaleY: uniformScale
+        });
+        return true;
+    }
+
     function setPanelInputActiveState(nextActive) {
         const activeState = !!nextActive;
         if (panelInputActive === activeState) return;
@@ -742,6 +828,10 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         if (!panelInputActive && active && !dragState) {
             render(currentDocument).catch(() => {});
         }
+    }
+
+    function isPanelInteractionLocked() {
+        return panelInputActive || panelPointerIds.size > 0;
     }
 
     function refreshPanelInputState() {
@@ -953,28 +1043,95 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         return match?.value || '';
     }
 
+    function intersectBounds(a, b) {
+        if (!a || !b) return null;
+        const minX = Math.max(Number(a.minX ?? a.x ?? 0), Number(b.minX ?? b.x ?? 0));
+        const minY = Math.max(Number(a.minY ?? a.y ?? 0), Number(b.minY ?? b.y ?? 0));
+        const maxX = Math.min(
+            Number(a.maxX ?? ((a.x ?? 0) + (a.width ?? 0))),
+            Number(b.maxX ?? ((b.x ?? 0) + (b.width ?? 0)))
+        );
+        const maxY = Math.min(
+            Number(a.maxY ?? ((a.y ?? 0) + (a.height ?? 0))),
+            Number(b.maxY ?? ((b.y ?? 0) + (b.height ?? 0)))
+        );
+        const width = maxX - minX;
+        const height = maxY - minY;
+        if (!(width > 0) || !(height > 0)) return null;
+        return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            width,
+            height
+        };
+    }
+
+    function unionBounds(boundsList = []) {
+        const valid = (Array.isArray(boundsList) ? boundsList : []).filter((entry) => entry && entry.width > 0 && entry.height > 0);
+        if (!valid.length) return null;
+        const minX = Math.min(...valid.map((entry) => entry.minX));
+        const minY = Math.min(...valid.map((entry) => entry.minY));
+        const maxX = Math.max(...valid.map((entry) => entry.maxX));
+        const maxY = Math.max(...valid.map((entry) => entry.maxY));
+        return {
+            minX,
+            minY,
+            maxX,
+            maxY,
+            width: Math.max(0, maxX - minX),
+            height: Math.max(0, maxY - minY)
+        };
+    }
+
     function computePreferredCustomExportBounds(document = currentDocument) {
         const normalized = normalizeCompositeDocument(document);
-        const liveBounds = computeCompositeDocumentBounds(normalized);
+        const liveBounds = computeLiveDocumentBounds(normalized);
         if (!(liveBounds.width > 0) || !(liveBounds.height > 0)) {
             return { ...normalized.export.bounds };
         }
         const metrics = getViewportMetrics();
         const viewBounds = computeCompositeViewBounds(normalized.view, metrics.width, metrics.height);
-        const intersected = {
-            minX: Math.max(liveBounds.minX, viewBounds.minX),
-            minY: Math.max(liveBounds.minY, viewBounds.minY),
-            maxX: Math.min(liveBounds.maxX, viewBounds.maxX),
-            maxY: Math.min(liveBounds.maxY, viewBounds.maxY)
-        };
-        const intersectWidth = intersected.maxX - intersected.minX;
-        const intersectHeight = intersected.maxY - intersected.minY;
-        if (intersectWidth >= 1 && intersectHeight >= 1) {
+        const clippedLayerBounds = normalized.layers
+            .filter((layer) => layer.visible !== false)
+            .map((layer) => {
+                const layerBounds = computeStageLayerBounds(layer);
+                const clipped = intersectBounds(layerBounds, viewBounds);
+                if (!clipped) return null;
+                const viewportArea = Math.max(1, viewBounds.width * viewBounds.height);
+                const layerArea = Math.max(1, layerBounds.width * layerBounds.height);
+                const clippedArea = clipped.width * clipped.height;
+                const backgroundCandidate = clippedArea >= (viewportArea * 0.94) && layerArea >= (viewportArea * 4);
+                return {
+                    layer,
+                    layerBounds,
+                    clipped,
+                    backgroundCandidate
+                };
+            })
+            .filter(Boolean);
+        const preferredClippedBounds = unionBounds(
+            (clippedLayerBounds.some((entry) => !entry.backgroundCandidate)
+                ? clippedLayerBounds.filter((entry) => !entry.backgroundCandidate)
+                : clippedLayerBounds
+            ).map((entry) => entry.clipped)
+        );
+        if (preferredClippedBounds?.width >= 1 && preferredClippedBounds?.height >= 1) {
+            return {
+                x: Math.round(preferredClippedBounds.minX),
+                y: Math.round(preferredClippedBounds.minY),
+                width: Math.max(1, Math.round(preferredClippedBounds.width)),
+                height: Math.max(1, Math.round(preferredClippedBounds.height))
+            };
+        }
+        const intersected = intersectBounds(liveBounds, viewBounds);
+        if (intersected?.width >= 1 && intersected?.height >= 1) {
             return {
                 x: Math.round(intersected.minX),
                 y: Math.round(intersected.minY),
-                width: Math.max(1, Math.round(intersectWidth)),
-                height: Math.max(1, Math.round(intersectHeight))
+                width: Math.max(1, Math.round(intersected.width)),
+                height: Math.max(1, Math.round(intersected.height))
             };
         }
         return {
@@ -1195,22 +1352,21 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             const resizeMode = getSelectionResizeMode(currentDocument);
             refs.transformPanel.innerHTML = `
                 <div class="composite-setting-stack">
-                    <div class="composite-info-card">
-                        <div class="composite-info-line"><span>Selection</span><strong>${selectedLayers.length} layers</strong></div>
-                        <div class="composite-info-line"><span>Bounds Position</span><strong>${escapeHtml(`${formatNumber(bounds?.minX || 0)}, ${formatNumber(bounds?.minY || 0)}`)}</strong></div>
-                        <div class="composite-info-line"><span>Bounds Size</span><strong>${escapeHtml(formatDimensions(bounds?.width || 0, bounds?.height || 0))}</strong></div>
-                    </div>
-                    ${renderSelectRow({
-                        label: 'Handle Mode',
-                        meta: getLayerResizeOptions({ kind: 'text' }).find((option) => option.value === resizeMode)?.label || '',
-                        action: 'set-layer-resize-mode',
-                        value: resizeMode,
-                        dataset: { selectionscope: 'multi' },
-                        options: RESIZE_MODE_OPTIONS
-                    })}
-                    <div class="composite-info-card">
-                        <span class="composite-help">Drag any selected object to move the group, use the gold handles to scale the group, or press Delete to remove the full selection.</span>
-                    </div>
+                <div class="composite-info-card">
+                    <div class="composite-info-line"><span>Selection</span><strong>${selectedLayers.length} layers</strong></div>
+                    <div class="composite-info-line"><span>Bounds Position</span><strong>${escapeHtml(`${formatNumber(bounds?.minX || 0)}, ${formatNumber(bounds?.minY || 0)}`)}</strong></div>
+                    <div class="composite-info-line"><span>Bounds Size</span><strong>${escapeHtml(formatDimensions(bounds?.width || 0, bounds?.height || 0))}</strong></div>
+                </div>
+                ${renderResizeModeChooser({
+                    label: 'Handle Mode',
+                    value: resizeMode,
+                    dataset: { selectionscope: 'multi' },
+                    options: RESIZE_MODE_OPTIONS,
+                    help: 'Grouped handles can scale from center, from the opposite side, or stretch from the opposite side.'
+                })}
+                <div class="composite-info-card">
+                    <span class="composite-help">Drag any selected object to move the group, use the gold handles to scale the group, or press Delete to remove the full selection.</span>
+                </div>
                     <div class="composite-card-actions">
                         <button type="button" class="toolbar-button" data-composite-action="clear-selection">Clear Selection</button>
                         <button type="button" class="toolbar-button" data-composite-action="remove-selected-layers">Delete Selected</button>
@@ -1232,18 +1388,31 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     <div class="composite-info-line"><span>Base Size</span><strong>${escapeHtml(formatDimensions(dimensions.width, dimensions.height))}</strong></div>
                     <div class="composite-info-line"><span>Rendered Size</span><strong>${escapeHtml(formatDimensions(rendered.width, rendered.height))}</strong></div>
                 </div>
+                ${layer.kind === 'image' ? `
+                    <div class="composite-card-actions">
+                        <button type="button" class="toolbar-button" data-composite-action="convert-layer-to-editor" data-layer-id="${layer.id}" ${layer.locked ? 'disabled' : ''}>Convert + Edit In Editor</button>
+                    </div>
+                    <div class="composite-info-card">
+                        <span class="composite-help">Converted image layers become linked Editor projects. Their generated Editor Library records are kept in sync when Composite saves to the Library.</span>
+                    </div>
+                ` : layer.kind === 'editor-project' ? `
+                    <div class="composite-card-actions">
+                        <button type="button" class="toolbar-button" data-composite-action="open-layer-in-editor" data-layer-id="${layer.id}">Open In Editor</button>
+                    </div>
+                ` : ''}
                 <div class="composite-card-actions">
                     <button type="button" class="toolbar-button" data-composite-action="toggle-layer-flip" data-layer-id="${layer.id}" data-axis="x" ${layer.locked ? 'disabled' : ''}>${layer.flipX ? 'Unflip X' : 'Flip X'}</button>
                     <button type="button" class="toolbar-button" data-composite-action="toggle-layer-flip" data-layer-id="${layer.id}" data-axis="y" ${layer.locked ? 'disabled' : ''}>${layer.flipY ? 'Unflip Y' : 'Flip Y'}</button>
                 </div>
-                ${renderSelectRow({
+                ${renderResizeModeChooser({
                     label: 'Handle Mode',
-                    meta: getLayerResizeOptions(layer).find((option) => option.value === resizeMode)?.label || '',
-                    action: 'set-layer-resize-mode',
                     value: resizeMode,
                     disabled: layer.locked,
                     dataset: { layerid: layer.id },
-                    options: getLayerResizeOptions(layer)
+                    options: getLayerResizeOptions(layer),
+                    help: supportsStretch
+                        ? 'This layer can also stretch or squish from the opposite side. Pick a mode here before dragging the canvas handles.'
+                        : 'Pick whether the layer scales from its center or from the opposite side before dragging the canvas handles.'
                 })}
                 ${renderLayerSpecificTransformControls(layer)}
                 ${renderRangeRow({ id: `layer-x-${layer.id}`, label: 'X Position', value: layer.x, min: -8192, max: 8192, step: 1, disabled: layer.locked, dataset: { layerid: layer.id, field: 'x' } })}
@@ -1261,7 +1430,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     function renderBlendPanel() {
         const selectedLayers = getSelectedLayers();
         const layer = selectedLayers.length === 1 ? selectedLayers[0] : null;
-        const bounds = computeCompositeDocumentBounds(currentDocument);
+        const bounds = computeLiveDocumentBounds(currentDocument);
         const sharedBlendMode = selectedLayers.length > 1 && selectedLayers.every((entry) => entry.blendMode === selectedLayers[0]?.blendMode)
             ? selectedLayers[0].blendMode
             : '';
@@ -1354,10 +1523,16 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                             ${enablePixelMatch ? 'Click Layer on Canvas...' : 'Match Layer 1:1'}
                         </button>
                     </div>
+                    <div class="composite-info-card">
+                        <span class="composite-help">Export execution path is controlled in Settings &gt; Composite. Current Composite export stays on CPU 2D canvas; the setting only chooses worker vs main-thread execution.</span>
+                    </div>
                 ` : `
                     <div class="composite-mini-empty">Export bounds and resolution will match the full visible area of all layers together automatically.</div>
                     <div class="composite-card-actions">
                         <button type="button" class="toolbar-button" data-composite-action="set-custom-export-from-view">Use View As Export</button>
+                    </div>
+                    <div class="composite-info-card">
+                        <span class="composite-help">Export execution path is controlled in Settings &gt; Composite. Current Composite export stays on CPU 2D canvas; the setting only chooses worker vs main-thread execution.</span>
                     </div>
                 `}
             </div>
@@ -1365,7 +1540,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     }
 
     function renderStageChrome() {
-        const bounds = computeCompositeDocumentBounds(currentDocument);
+        const bounds = computeLiveDocumentBounds(currentDocument);
         refs.title.textContent = currentDocument.layers.length
             ? `${currentDocument.layers.length} layer${currentDocument.layers.length === 1 ? '' : 's'} in Composite`
             : 'Composite Workspace';
@@ -1520,7 +1695,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             refs.tabs.forEach((tab) => tab.classList.toggle('is-active', tab.dataset.sidebarView === currentDocument.workspace.sidebarView));
             refs.panels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.compositePanel === currentDocument.workspace.sidebarView));
             renderStageChrome();
-            if (!panelInputActive || sidebarChanged) {
+            if (!isPanelInteractionLocked() || sidebarChanged) {
                 renderLayersPanel();
                 renderTransformPanel();
                 renderBlendPanel();
@@ -2141,6 +2316,14 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             actions.setCompositeSidebarView?.(node.dataset.sidebarView);
             return;
         }
+        if (action === 'set-layer-resize-mode-button') {
+            applyResizeModeChange({
+                value: node.dataset.resizeMode,
+                layerid: node.dataset.layerid,
+                selectionscope: node.dataset.selectionscope
+            });
+            return;
+        }
         if (action === 'select-layer') {
             const layerId = node.dataset.layerId || null;
             if (!layerId) return;
@@ -2195,6 +2378,16 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             actions.removeCompositeLayer?.(node.dataset.layerId);
             return;
         }
+        if (action === 'convert-layer-to-editor') {
+            await actions.convertCompositeLayerToEditorProject?.(node.dataset.layerId, {
+                openInEditor: true
+            });
+            return;
+        }
+        if (action === 'open-layer-in-editor') {
+            await actions.openCompositeLayerInEditor?.(node.dataset.layerId);
+            return;
+        }
         if (action === 'toggle-checker') {
             const input = node.matches('input') ? node : node.querySelector('input');
             if (actions.updateAppSetting) {
@@ -2207,7 +2400,18 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             return;
         }
         if (action === 'frame-view') {
-            actions.frameCompositeView?.(getViewportMetrics());
+            const bounds = computeLiveDocumentBounds(currentDocument);
+            const metrics = getViewportMetrics();
+            const framedView = computeCompositeFramedView(bounds, metrics.width, metrics.height, {
+                paddingPx: 48,
+                minZoom: COMPOSITE_MIN_ZOOM,
+                maxZoom: COMPOSITE_MAX_ZOOM
+            });
+            actions.patchCompositeView?.({
+                zoom: framedView.zoom,
+                panX: framedView.panX,
+                panY: framedView.panY
+            });
             return;
         }
         if (action === 'reset-pan') {
@@ -2359,26 +2563,13 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             return;
         }
         if (action === 'set-layer-resize-mode') {
-            if (target.dataset.selectionscope === 'multi') {
-                selectionResizeMode = String(target.value || 'center-uniform');
-                renderTransformPanel();
+            if (applyResizeModeChange({
+                value: target.value,
+                layerid: target.dataset.layerid,
+                selectionscope: target.dataset.selectionscope
+            })) {
                 return;
             }
-            const layerId = target.dataset.layerid;
-            const layer = currentDocument.layers.find((entry) => entry.id === layerId) || null;
-            if (!layer) return;
-            if (target.value === 'anchor-stretch') {
-                actions.updateCompositeLayerFields?.(layerId, { resizeMode: target.value });
-                return;
-            }
-            const uniformScale = getLayerScaleValue(layer);
-            actions.updateCompositeLayerFields?.(layerId, {
-                resizeMode: target.value,
-                scale: uniformScale,
-                scaleX: uniformScale,
-                scaleY: uniformScale
-            });
-            return;
         }
         if (action === 'update-export-resolution') {
             const field = target.dataset.field;
@@ -2452,6 +2643,27 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     });
 
     root.addEventListener('focusout', () => {
+        refreshPanelInputState();
+    });
+
+    root.addEventListener('pointerdown', (event) => {
+        if (!refs.sidebar?.contains(event.target)) return;
+        if (!isPanelEditableTarget(event.target)) return;
+        panelPointerIds.add(event.pointerId);
+        if (panelInputRefreshTimer) {
+            clearTimeout(panelInputRefreshTimer);
+            panelInputRefreshTimer = null;
+        }
+        setPanelInputActiveState(true);
+    });
+
+    window.addEventListener('pointerup', (event) => {
+        if (!panelPointerIds.delete(event.pointerId)) return;
+        refreshPanelInputState();
+    });
+
+    window.addEventListener('pointercancel', (event) => {
+        if (!panelPointerIds.delete(event.pointerId)) return;
         refreshPanelInputState();
     });
 
@@ -2553,6 +2765,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             active = false;
             dragState = null;
             panelInputActive = false;
+            panelPointerIds.clear();
             if (panelInputRefreshTimer) {
                 clearTimeout(panelInputRefreshTimer);
                 panelInputRefreshTimer = null;

@@ -1036,6 +1036,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
     const refs = {
         root,
+        appShell: root.querySelector('.app-shell'),
         sectionTabsSlot: root.querySelector('#sectionTabsSlot'),
         toolbarSlot: root.querySelector('#toolbarSlot'),
         workspaceShell: root.querySelector('#workspaceShell'),
@@ -1192,8 +1193,13 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         };
     }
 
+    function setAppDialogModalState(isOpen) {
+        refs.appShell?.classList.toggle('is-app-dialog-open', !!isOpen);
+    }
+
     function hideAppDialog(restoreFocus = false) {
         if (!refs.appDialog) return;
+        setAppDialogModalState(false);
         refs.appDialog.classList.remove('is-open');
         refs.appDialog.setAttribute('aria-hidden', 'true');
         refs.appDialogContent.innerHTML = '';
@@ -1246,10 +1252,16 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         refs.appDialogConfirm.classList.toggle('is-danger', appDialogState.isDanger);
         setAppDialogError('');
         setAppDialogBusy(false);
+        setAppDialogModalState(true);
         refs.appDialog.classList.add('is-open');
         refs.appDialog.setAttribute('aria-hidden', 'false');
         requestAnimationFrame(() => {
             appDialogState?.onOpen?.(getAppDialogContext());
+            const initialFocusTarget = refs.appDialogContent?.querySelector('input, textarea, select, button:not([disabled])')
+                || refs.appDialogConfirm;
+            if (initialFocusTarget && typeof initialFocusTarget.focus === 'function') {
+                initialFocusTarget.focus();
+            }
         });
     }
 

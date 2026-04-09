@@ -58,6 +58,7 @@ import { maybeYieldToUi, nextPaint } from './ui/scheduling.js';
 import { createBackgroundTaskBroker } from './workers/runtime.js';
 import { detectWorkerCapabilities } from './workers/capabilities.js';
 import { createWorkerFileEntries, createWorkerSingleFileEntry } from './workers/filePayload.js';
+import { detectGraphicsCapabilities } from './graphics/capabilities.js';
 import { createBootstrapMetrics } from './perf/bootstrapMetrics.js';
 import { createBootShell } from './ui/bootShell.js';
 import { computeAnalysisVisualsJs, computeDiffPreviewJs, extractPaletteFromFileJs } from './editor/backgroundCompute.js';
@@ -79,7 +80,11 @@ const STORE_NAME = 'LibraryProjects';
 const LIBRARY_META_ID = '__library_meta__';
 let backgroundTasks = null;
 let workerCapabilities = null;
+let graphicsCapabilities = null;
 let view = null;
+let appStore = null;
+const COMPOSITE_AUTO_WORKER_THRESHOLD_MEGAPIXELS = 16;
+const COMPOSITE_AUTO_WORKER_THRESHOLD_EDGE = 4096;
 
 function initDB() {
     return new Promise((resolve, reject) => {
@@ -174,7 +179,7 @@ function stableSerialize(value) {
 
 function stripLibraryEnvelopeMetadata(payload) {
     if (!payload || typeof payload !== 'object') return payload;
-    const cloned = JSON.parse(JSON.stringify(payload));
+    const cloned = { ...payload };
     delete cloned._libraryName;
     delete cloned._libraryTags;
     delete cloned._libraryProjectType;
@@ -188,6 +193,7 @@ function stripProjectFingerprintMetadata(payload) {
     const cloned = stripLibraryEnvelopeMetadata(payload);
     if (!cloned || typeof cloned !== 'object') return cloned;
     if (cloned.preview && typeof cloned.preview === 'object') {
+        cloned.preview = { ...cloned.preview };
         delete cloned.preview.width;
         delete cloned.preview.height;
         delete cloned.preview.imageData;
@@ -195,6 +201,7 @@ function stripProjectFingerprintMetadata(payload) {
     }
     if (isThreeDDocumentPayload(cloned)) {
         if (cloned.render && typeof cloned.render === 'object') {
+            cloned.render = { ...cloned.render };
             delete cloned.render.currentSamples;
         }
         delete cloned.renderJob;
@@ -655,7 +662,43 @@ function loadImageFromDataUrl(dataUrl) {
     });
 }
 
+function parseDataUrl(dataUrl) {
+    const source = String(dataUrl || '');
+    if (!source.startsWith('data:')) return null;
+    const commaIndex = source.indexOf(',');
+    if (commaIndex < 0) {
+        throw new Error('Invalid data URL.');
+    }
+    const meta = source.slice(5, commaIndex);
+    const payload = source.slice(commaIndex + 1);
+    const parts = meta.split(';').filter(Boolean);
+    const isBase64 = parts.some((part) => part.toLowerCase() === 'base64');
+    const mimeType = String(parts.find((part) => part.toLowerCase() !== 'base64') || 'application/octet-stream').trim() || 'application/octet-stream';
+    return {
+        mimeType,
+        isBase64,
+        payload
+    };
+}
+
+function base64ToUint8Array(base64) {
+    const normalized = String(base64 || '').replace(/\s+/g, '');
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+}
+
 async function dataUrlToBlob(dataUrl) {
+    const parsed = parseDataUrl(dataUrl);
+    if (parsed) {
+        const bytes = parsed.isBase64
+            ? base64ToUint8Array(parsed.payload)
+            : new TextEncoder().encode(parsed.payload.includes('%') ? decodeURIComponent(parsed.payload) : parsed.payload);
+        return new Blob([bytes], { type: parsed.mimeType });
+    }
     const response = await fetch(dataUrl);
     return response.blob();
 }
@@ -751,6 +794,24 @@ async function captureCompositeDocumentSnapshot(documentState) {
         preview = preview || null;
     }
 
+    if (!preview?.imageData && blob instanceof Blob) {
+        try {
+            const exportDataUrl = await blobToDataUrl(blob);
+            const previewDataUrl = await createLibraryImageAssetPreview(exportDataUrl, { maxEdge: 320 });
+            if (previewDataUrl) {
+                const previewImage = await loadImageFromDataUrl(previewDataUrl);
+                preview = createCompositePreviewSnapshot(
+                    normalized,
+                    previewDataUrl,
+                    Math.max(1, Number(previewImage.naturalWidth || previewImage.width || 1)),
+                    Math.max(1, Number(previewImage.naturalHeight || previewImage.height || 1))
+                );
+            }
+        } catch (_error) {
+            preview = preview || null;
+        }
+    }
+
     if (!blob && preview?.imageData) {
         try {
             blob = await dataUrlToBlob(preview.imageData);
@@ -796,9 +857,152 @@ function createCompositePngBlobFromResult(result = null) {
     return new Blob([buffer], { type: result?.mimeType || 'image/png' });
 }
 
+function getCompositeExportBackendPreference(settings = null) {
+    const requested = String(settings?.composite?.preferences?.exportBackend || '').trim().toLowerCase();
+    return requested === 'worker' || requested === 'main-thread' ? requested : 'auto';
+}
+
+function getCompositeExportTargetMetrics(documentState) {
+    const normalized = normalizeCompositeDocument(documentState);
+    const bounds = computeCompositeDocumentBounds(normalized);
+    const isCustom = normalized.export.boundsMode === 'custom';
+    const outputWidth = isCustom
+        ? Math.max(1, Math.round(Number(normalized.export.customResolution?.width) || 1))
+        : Math.max(1, Math.ceil(Number(bounds.width) || 1));
+    const outputHeight = isCustom
+        ? Math.max(1, Math.round(Number(normalized.export.customResolution?.height) || 1))
+        : Math.max(1, Math.ceil(Number(bounds.height) || 1));
+    const pixelCount = outputWidth * outputHeight;
+    return {
+        boundsMode: isCustom ? 'custom' : 'auto',
+        outputWidth,
+        outputHeight,
+        pixelCount,
+        megapixels: pixelCount / 1000000,
+        maxEdge: Math.max(outputWidth, outputHeight)
+    };
+}
+
+function formatCompositeExportTarget(target = null) {
+    if (!target) return 'an unknown output size';
+    const megapixels = Number(target.megapixels) || 0;
+    const megapixelLabel = megapixels >= 100
+        ? megapixels.toFixed(0)
+        : megapixels.toFixed(1).replace(/\.0$/, '');
+    return `${Math.max(1, Math.round(Number(target.outputWidth) || 1)).toLocaleString()}x${Math.max(1, Math.round(Number(target.outputHeight) || 1)).toLocaleString()} (${megapixelLabel} MP)`;
+}
+
+function canUseCompositeWorkerRendering() {
+    return !!backgroundTasks && !!workerCapabilities?.createImageBitmap && !!workerCapabilities?.offscreenCanvas2d;
+}
+
+function resolveCompositeRenderBackend(options = {}) {
+    const purpose = options.purpose === 'preview' ? 'preview' : 'export';
+    const preference = options.forceBackend === 'worker' || options.forceBackend === 'main-thread'
+        ? options.forceBackend
+        : getCompositeExportBackendPreference(options.settings || appStore?.getState?.().settings || null);
+    const workerCapable = canUseCompositeWorkerRendering();
+    const target = purpose === 'export' && options.document
+        ? getCompositeExportTargetMetrics(options.document)
+        : null;
+    const gpuSafeMaxEdge = Math.max(0, Number(graphicsCapabilities?.gpuSafeMaxEdge) || 0);
+    const exceedsGpuSafeEdge = !!(target && gpuSafeMaxEdge > 0 && target.maxEdge > gpuSafeMaxEdge);
+    const gpuEdgeNote = exceedsGpuSafeEdge
+        ? ` The current CPU 2D export path also avoids depending on a WebGL texture above the probed ${gpuSafeMaxEdge.toLocaleString()} px safe edge.`
+        : '';
+    if (preference === 'main-thread') {
+        return {
+            preference,
+            mode: 'main-thread',
+            workerCapable,
+            label: 'Main Thread 2D',
+            target,
+            fallbackReason: '',
+            decisionReason: purpose === 'export'
+                ? `Composite export used Main Thread 2D because Settings forced that path for ${formatCompositeExportTarget(target)}.${gpuEdgeNote}`.trim()
+                : 'Composite preview used Main Thread 2D because Settings forced that path.',
+            logKey: `forced-main-thread:${purpose}:${target?.outputWidth || 0}x${target?.outputHeight || 0}`
+        };
+    }
+    if (preference === 'worker' && workerCapable) {
+        return {
+            preference,
+            mode: 'worker',
+            workerCapable,
+            label: 'Background Worker 2D',
+            target,
+            fallbackReason: '',
+            decisionReason: purpose === 'export'
+                ? `Composite export used Background Worker 2D because Settings forced that path for ${formatCompositeExportTarget(target)}.${gpuEdgeNote}`.trim()
+                : 'Composite preview used Background Worker 2D because Settings forced that path.',
+            logKey: `forced-worker:${purpose}:${target?.outputWidth || 0}x${target?.outputHeight || 0}`
+        };
+    }
+    if (preference === 'worker') {
+        return {
+            preference,
+            mode: 'main-thread',
+            workerCapable: false,
+            label: 'Main Thread 2D',
+            target,
+            fallbackReason: purpose === 'export'
+                ? `Composite worker rendering was forced in Settings, but Worker + OffscreenCanvas 2D export is unavailable, so ${formatCompositeExportTarget(target)} fell back to Main Thread 2D.${gpuEdgeNote}`.trim()
+                : 'Composite worker rendering was forced in Settings, but Worker + OffscreenCanvas 2D preview is unavailable, so the app fell back to the main thread.',
+            decisionReason: '',
+            logKey: `forced-worker-fallback:${purpose}:${target?.outputWidth || 0}x${target?.outputHeight || 0}`
+        };
+    }
+    if (!workerCapable) {
+        return {
+            preference,
+            mode: 'main-thread',
+            workerCapable: false,
+            label: 'Main Thread 2D',
+            target,
+            fallbackReason: purpose === 'export'
+                ? `Composite worker rendering is unavailable, so ${formatCompositeExportTarget(target)} is running on Main Thread 2D.${gpuEdgeNote}`.trim()
+                : 'Composite worker rendering is unavailable, so preview is running on the main thread.',
+            decisionReason: '',
+            logKey: `auto-worker-unavailable:${purpose}:${target?.outputWidth || 0}x${target?.outputHeight || 0}`
+        };
+    }
+    if (purpose === 'export' && target) {
+        const useWorker = target.megapixels >= COMPOSITE_AUTO_WORKER_THRESHOLD_MEGAPIXELS
+            || target.maxEdge >= COMPOSITE_AUTO_WORKER_THRESHOLD_EDGE;
+        return {
+            preference,
+            mode: useWorker ? 'worker' : 'main-thread',
+            workerCapable: true,
+            label: useWorker ? 'Background Worker 2D' : 'Main Thread 2D',
+            target,
+            fallbackReason: '',
+            decisionReason: useWorker
+                ? `Composite export used Background Worker 2D because ${formatCompositeExportTarget(target)} crosses the Auto large-export threshold (${COMPOSITE_AUTO_WORKER_THRESHOLD_MEGAPIXELS} MP or ${COMPOSITE_AUTO_WORKER_THRESHOLD_EDGE.toLocaleString()} px max-edge).${gpuEdgeNote}`.trim()
+                : `Composite export kept ${formatCompositeExportTarget(target)} on Main Thread 2D because it stays below the Auto large-export threshold (${COMPOSITE_AUTO_WORKER_THRESHOLD_MEGAPIXELS} MP and ${COMPOSITE_AUTO_WORKER_THRESHOLD_EDGE.toLocaleString()} px max-edge).${gpuEdgeNote}`.trim(),
+            logKey: `${useWorker ? 'auto-worker' : 'auto-main-thread'}:${target.outputWidth}x${target.outputHeight}`
+        };
+    }
+    return {
+        preference,
+        mode: 'worker',
+        workerCapable: true,
+        label: 'Background Worker 2D',
+        target,
+        fallbackReason: '',
+        decisionReason: 'Composite preview used Background Worker 2D because worker preview rendering is available.',
+        logKey: `auto-worker:${purpose}`
+    };
+}
+
 async function renderCompositePreview(documentState, options = {}) {
     const normalized = normalizeCompositeDocument(documentState);
-    if (!backgroundTasks) {
+    const backend = resolveCompositeRenderBackend({
+        ...options,
+        document: normalized,
+        purpose: 'preview'
+    });
+    options.onBackend?.(backend);
+    if (backend.mode === 'main-thread') {
         if (!view?.captureCompositePreview) {
             throw new Error('Composite workspace preview is not ready yet.');
         }
@@ -817,7 +1021,13 @@ async function renderCompositePreview(documentState, options = {}) {
 
 async function renderCompositePngBlob(documentState, options = {}) {
     const normalized = normalizeCompositeDocument(documentState);
-    if (!backgroundTasks) {
+    const backend = resolveCompositeRenderBackend({
+        ...options,
+        document: normalized,
+        purpose: 'export'
+    });
+    options.onBackend?.(backend);
+    if (backend.mode === 'main-thread') {
         if (!view?.exportCompositePng) {
             throw new Error('Composite workspace export is not ready yet.');
         }
@@ -1621,6 +1831,24 @@ window.addEventListener('DOMContentLoaded', async () => {
         };
     }
 
+    function buildCompositeSettingsDiagnostics(overrides = {}) {
+        const current = activeSettings?.composite?.diagnostics || createDefaultAppSettings().composite.diagnostics;
+        return {
+            workerAvailable: overrides.workerAvailable ?? current.workerAvailable ?? !!workerCapabilities?.worker,
+            offscreenCanvas2d: overrides.offscreenCanvas2d ?? current.offscreenCanvas2d ?? !!workerCapabilities?.offscreenCanvas2d,
+            createImageBitmap: overrides.createImageBitmap ?? current.createImageBitmap ?? !!workerCapabilities?.createImageBitmap,
+            webglAvailable: overrides.webglAvailable ?? current.webglAvailable ?? !!graphicsCapabilities?.webglAvailable,
+            webgl2Available: overrides.webgl2Available ?? current.webgl2Available ?? !!graphicsCapabilities?.webgl2Available,
+            maxTextureSize: Math.max(0, Math.round(Number(overrides.maxTextureSize ?? current.maxTextureSize ?? graphicsCapabilities?.maxTextureSize) || 0)),
+            maxRenderbufferSize: Math.max(0, Math.round(Number(overrides.maxRenderbufferSize ?? current.maxRenderbufferSize ?? graphicsCapabilities?.maxRenderbufferSize) || 0)),
+            maxViewportWidth: Math.max(0, Math.round(Number(overrides.maxViewportWidth ?? current.maxViewportWidth ?? graphicsCapabilities?.maxViewportWidth) || 0)),
+            maxViewportHeight: Math.max(0, Math.round(Number(overrides.maxViewportHeight ?? current.maxViewportHeight ?? graphicsCapabilities?.maxViewportHeight) || 0)),
+            gpuSafeMaxEdge: Math.max(0, Math.round(Number(overrides.gpuSafeMaxEdge ?? current.gpuSafeMaxEdge ?? graphicsCapabilities?.gpuSafeMaxEdge) || 0)),
+            autoWorkerThresholdMegapixels: Number(overrides.autoWorkerThresholdMegapixels ?? current.autoWorkerThresholdMegapixels ?? COMPOSITE_AUTO_WORKER_THRESHOLD_MEGAPIXELS) || COMPOSITE_AUTO_WORKER_THRESHOLD_MEGAPIXELS,
+            autoWorkerThresholdEdge: Math.max(1, Math.round(Number(overrides.autoWorkerThresholdEdge ?? current.autoWorkerThresholdEdge ?? COMPOSITE_AUTO_WORKER_THRESHOLD_EDGE) || COMPOSITE_AUTO_WORKER_THRESHOLD_EDGE))
+        };
+    }
+
     function buildStitchSettingsDiagnostics(overrides = {}) {
         const current = activeSettings?.stitch?.diagnostics || createDefaultAppSettings().stitch.diagnostics;
         return {
@@ -1722,6 +1950,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     function normalizeSettingsForState(nextSettings, overrides = {}) {
         return normalizeAppSettings(nextSettings, {
             diagnostics: buildSettingsDiagnostics(overrides),
+            compositeDiagnostics: buildCompositeSettingsDiagnostics(overrides.compositeDiagnostics || {}),
             stitchDiagnostics: buildStitchSettingsDiagnostics(overrides.stitchDiagnostics || {})
         });
     }
@@ -2134,6 +2363,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     await nextPaint();
     bootMetrics.mark('boot-shell-painted', 'The lightweight boot shell rendered.');
     workerCapabilities = await detectWorkerCapabilities();
+    graphicsCapabilities = detectGraphicsCapabilities();
     backgroundTasks = createBackgroundTaskBroker({
         capabilities: workerCapabilities,
         onEvent: handleWorkerEvent,
@@ -2162,9 +2392,16 @@ window.addEventListener('DOMContentLoaded', async () => {
         dedupeKey: 'worker-capabilities-ready',
         dedupeWindowMs: 500
     });
+    logProcess('info', 'app.bootstrap', graphicsCapabilities?.webglAvailable
+        ? `Graphics capabilities ready: ${graphicsCapabilities.webgl2Available ? 'webgl2' : 'webgl'}; max texture ${Math.max(0, Number(graphicsCapabilities.maxTextureSize) || 0).toLocaleString()} px; max viewport ${Math.max(0, Number(graphicsCapabilities.maxViewportWidth) || 0).toLocaleString()} x ${Math.max(0, Number(graphicsCapabilities.maxViewportHeight) || 0).toLocaleString()} px; GPU-safe edge ${Math.max(0, Number(graphicsCapabilities.gpuSafeMaxEdge) || 0).toLocaleString()} px.`
+        : 'Graphics capabilities ready: WebGL is unavailable, so future GPU export paths should be treated as unsupported on this machine.', {
+        dedupeKey: 'graphics-capabilities-ready',
+        dedupeWindowMs: 500
+    });
     window.__modularStudioPerformance = {
         assetVersion: APP_ASSET_VERSION,
         capabilities: workerCapabilities,
+        graphicsCapabilities,
         snapshot() {
             return bootMetrics.snapshot();
         }
@@ -2181,6 +2418,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         maxCrashReplays: 2
     });
     store = createStore(createInitialState(activeSettings));
+    appStore = store;
     engine = new NoiseStudioEngine(registry, {
         onNotice: (text, type = 'info') => setNotice(text, type),
         computeAnalysisVisuals: (payload, options = {}) => backgroundTasks.runTask('editor', 'compute-analysis-visuals', payload, {
@@ -2912,6 +3150,96 @@ window.addEventListener('DOMContentLoaded', async () => {
         return value == null ? value : JSON.parse(JSON.stringify(value));
     }
 
+    function getComparableStudioPayload(payload = null) {
+        if (!payload || typeof payload !== 'object') return null;
+        return stripStudioPreview(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(cloneSerializable(payload))));
+    }
+
+    function findMatchingCompositeEditorLayerForEditorDocument(editorDocument, compositeDocument) {
+        const editorPayload = getComparableStudioPayload(buildLibraryPayload(editorDocument));
+        if (!editorPayload) return null;
+        const serializedEditorPayload = stableSerialize(editorPayload);
+        return normalizeCompositeDocument(compositeDocument).layers.find((layer) => {
+            if (layer?.kind !== 'editor-project' || !layer.embeddedEditorDocument) return false;
+            const embeddedPayload = getComparableStudioPayload(layer.embeddedEditorDocument);
+            return embeddedPayload && stableSerialize(embeddedPayload) === serializedEditorPayload;
+        }) || null;
+    }
+
+    async function syncEmbeddedEditorPayloadImageDimensions(payload = null) {
+        if (!payload || typeof payload !== 'object') return payload;
+        const nextPayload = cloneSerializable(payload);
+        let changed = false;
+
+        const previewDataUrl = String(nextPayload?.preview?.imageData || '');
+        if (previewDataUrl.startsWith('data:')) {
+            try {
+                const previewImage = await loadImageFromDataUrl(previewDataUrl);
+                const width = Math.max(1, Number(previewImage.naturalWidth || previewImage.width || 1));
+                const height = Math.max(1, Number(previewImage.naturalHeight || previewImage.height || 1));
+                if (Number(nextPayload.preview.width || 0) !== width || Number(nextPayload.preview.height || 0) !== height) {
+                    nextPayload.preview = {
+                        ...nextPayload.preview,
+                        width,
+                        height
+                    };
+                    changed = true;
+                }
+            } catch (_error) {
+                // Ignore preview dimension healing failures and keep existing metadata.
+            }
+        }
+
+        const sourceDataUrl = String(nextPayload?.source?.imageData || '');
+        if (sourceDataUrl.startsWith('data:')) {
+            try {
+                const sourceImage = await loadImageFromDataUrl(sourceDataUrl);
+                const width = Math.max(1, Number(sourceImage.naturalWidth || sourceImage.width || 1));
+                const height = Math.max(1, Number(sourceImage.naturalHeight || sourceImage.height || 1));
+                if (Number(nextPayload.source.width || 0) !== width || Number(nextPayload.source.height || 0) !== height) {
+                    nextPayload.source = {
+                        ...nextPayload.source,
+                        width,
+                        height
+                    };
+                    changed = true;
+                }
+            } catch (_error) {
+                // Ignore source dimension healing failures and keep existing metadata.
+            }
+        }
+
+        return changed ? nextPayload : payload;
+    }
+
+    function resolveCompositeEditorLayerRenderSize({ payload = null, preview = null, record = null, sourceMeta = null } = {}) {
+        const width = Math.max(
+            1,
+            Math.round(Number(
+                preview?.width
+                || payload?.preview?.width
+                || sourceMeta?.renderWidth
+                || record?.renderWidth
+                || payload?.source?.width
+                || record?.sourceWidth
+                || 1
+            ) || 1)
+        );
+        const height = Math.max(
+            1,
+            Math.round(Number(
+                preview?.height
+                || payload?.preview?.height
+                || sourceMeta?.renderHeight
+                || record?.renderHeight
+                || payload?.source?.height
+                || record?.sourceHeight
+                || 1
+            ) || 1)
+        );
+        return { width, height };
+    }
+
     function getCompositeBridgeState() {
         return store.getState().ui?.compositeEditorBridge || {
             active: false,
@@ -3002,15 +3330,279 @@ window.addEventListener('DOMContentLoaded', async () => {
         }, store.getState().settings);
     }
 
+    function buildEditorDocumentFromCompositeImageLayer(layer) {
+        const imageAsset = layer?.imageAsset;
+        if (!imageAsset?.imageData) {
+            throw new Error('This Composite image layer is missing its embedded image data.');
+        }
+        const baseDocument = store.getState().document;
+        const source = {
+            width: Math.max(1, Number(imageAsset.width) || 1),
+            height: Math.max(1, Number(imageAsset.height) || 1),
+            name: String(imageAsset.name || layer?.name || 'Image'),
+            imageData: String(imageAsset.imageData || '')
+        };
+        return applyEditorSettingsToDocument({
+            ...baseDocument,
+            version: 'mns/v2',
+            kind: 'document',
+            mode: 'studio',
+            workspace: normalizeWorkspace('studio', {
+                ...baseDocument.workspace,
+                batchOpen: false
+            }, false),
+            source,
+            palette: [],
+            layerStack: [],
+            selection: { layerInstanceId: null },
+            view: normalizeViewState({ ...baseDocument.view, zoom: 1 }),
+            export: { ...baseDocument.export },
+            batch: createEmptyBatchState()
+        }, store.getState().settings);
+    }
+
+    function buildEditorPayloadFromCompositeImageLayer(layer) {
+        return buildLibraryPayload(buildEditorDocumentFromCompositeImageLayer(layer));
+    }
+
+    function isGeneratedCompositeEditorLayer(layer) {
+        return !!(
+            layer
+            && layer.kind === 'editor-project'
+            && layer.embeddedEditorDocument
+            && layer.source?.generatedFromCompositeImage
+        );
+    }
+
+    async function persistEmbeddedStudioPayloadToLibrary(rawPayload, options = {}) {
+        const existingRecord = options.existingRecord && getLibraryProjectType(options.existingRecord) === 'studio'
+            ? options.existingRecord
+            : null;
+        const capture = await captureCompositeEditorLayerDocument(rawPayload);
+        const payload = capture.payload || rawPayload;
+        const editorDocument = buildEditorDocumentFromPayload(payload);
+        const projectData = buildLibraryProjectRecord({
+            id: existingRecord?.id || createLibraryProjectId(),
+            timestamp: Date.now(),
+            name: String(
+                options.name
+                || existingRecord?.name
+                || getSuggestedProjectName(editorDocument)
+                || 'Editor Project'
+            ).trim() || 'Editor Project',
+            blob: capture.blob || null,
+            payload,
+            tags: normalizeLibraryTags(options.tags || existingRecord?.tags || []),
+            projectType: 'studio',
+            hoverSource: payload.source,
+            sourceWidth: Number(payload.source?.width || 0),
+            sourceHeight: Number(payload.source?.height || 0),
+            sourceArea: Number(payload.source?.width || 0) * Number(payload.source?.height || 0),
+            sourceCount: payload.source?.imageData ? 1 : 0,
+            renderWidth: Number(capture.preview?.width || payload.preview?.width || payload.source?.width || 0),
+            renderHeight: Number(capture.preview?.height || payload.preview?.height || payload.source?.height || 0)
+        });
+        await saveToLibraryDB(projectData);
+        await upsertDerivedStudioAsset(projectData);
+        return {
+            projectData,
+            payload
+        };
+    }
+
+    async function persistGeneratedCompositeEditorProjects(documentState, options = {}) {
+        const normalized = normalizeCompositeDocument(documentState);
+        const nextLayers = [...normalized.layers];
+        let savedCount = 0;
+
+        for (let index = 0; index < nextLayers.length; index += 1) {
+            const layer = nextLayers[index];
+            if (!isGeneratedCompositeEditorLayer(layer)) continue;
+
+            const existingRecord = layer.source?.originalLibraryId
+                ? await getFromLibraryDB(layer.source.originalLibraryId).catch(() => null)
+                : null;
+            const fallbackName = `${stripProjectExtension(layer.name || 'Composite Image')} Editor`;
+            const { projectData, payload } = await persistEmbeddedStudioPayloadToLibrary(layer.embeddedEditorDocument, {
+                existingRecord,
+                name: layer.source?.originalLibraryName || fallbackName
+            });
+            nextLayers[index] = {
+                ...layer,
+                embeddedEditorDocument: payload,
+                source: {
+                    ...layer.source,
+                    originalLibraryId: projectData.id,
+                    originalLibraryName: projectData.name,
+                    originalProjectType: 'studio',
+                    generatedFromCompositeImage: true,
+                    renderWidth: Math.max(1, Number(projectData.renderWidth || payload?.preview?.width || payload?.source?.width || 1)),
+                    renderHeight: Math.max(1, Number(projectData.renderHeight || payload?.preview?.height || payload?.source?.height || 1))
+                }
+            };
+            savedCount += 1;
+            await maybeYieldToUi(index, 1);
+        }
+
+        const nextDocument = savedCount
+            ? normalizeCompositeDocument({
+                ...normalized,
+                layers: nextLayers
+            })
+            : normalized;
+
+        if (savedCount && options.updateStore) {
+            updateCompositeDocument(() => nextDocument, {
+                renderComposite: false,
+                skipCompositeAutosave: true
+            });
+        }
+        if (savedCount) {
+            notifyLibraryChanged();
+            if (options.log !== false) {
+                logProcess('success', 'composite.link', `Saved ${savedCount} generated Editor project${savedCount === 1 ? '' : 's'} linked from Composite.`);
+            }
+        }
+
+        return {
+            document: nextDocument,
+            savedCount
+        };
+    }
+
     async function captureCompositeEditorLayerDocument(rawPayload) {
-        const editorDocument = buildEditorDocumentFromPayload(rawPayload);
+        const preparedPayload = await syncEmbeddedEditorPayloadImageDimensions(rawPayload);
+        const editorDocument = buildEditorDocumentFromPayload(preparedPayload);
         if (!editorDocument.source?.imageData) {
             throw new Error('Editor-backed Composite layers require an embedded source image.');
         }
         const hiddenEngine = await ensureCompositeEditorRenderEngineReady();
         const image = await loadImageFromDataUrl(editorDocument.source.imageData);
         await hiddenEngine.loadImage(image, editorDocument.source);
-        return captureStudioDocumentSnapshot(hiddenEngine, editorDocument, rawPayload);
+        const capture = await captureStudioDocumentSnapshot(hiddenEngine, editorDocument, preparedPayload);
+        const payload = await syncEmbeddedEditorPayloadImageDimensions(capture.payload || preparedPayload);
+        return {
+            ...capture,
+            preview: payload?.preview || capture.preview || null,
+            payload
+        };
+    }
+
+    async function convertCompositeImageLayerToEditorProject(layerId, options = {}) {
+        const compositeState = normalizeCompositeDocument(store.getState().compositeDocument);
+        const currentLayer = compositeState.layers.find((layer) => layer.id === layerId) || null;
+        if (!currentLayer) {
+            throw new Error('That Composite layer could not be found.');
+        }
+        if (currentLayer.kind === 'editor-project' && currentLayer.embeddedEditorDocument) {
+            if (options.openInEditor) {
+                return openCompositeLayerInEditorFlow(currentLayer.id, { allowImageConversion: false });
+            }
+            return currentLayer;
+        }
+        if (currentLayer.kind !== 'image' || !currentLayer.imageAsset?.imageData) {
+            throw new Error('Select an embedded image layer before converting it into an Editor project.');
+        }
+
+        const payload = buildEditorPayloadFromCompositeImageLayer(currentLayer);
+        const capture = await captureCompositeEditorLayerDocument(payload);
+        const renderSize = resolveCompositeEditorLayerRenderSize({
+            payload: capture.payload,
+            preview: capture.preview,
+            sourceMeta: currentLayer.source
+        });
+        const nextLayer = {
+            ...currentLayer,
+            kind: 'editor-project',
+            embeddedEditorDocument: capture.payload,
+            imageAsset: null,
+            source: {
+                ...currentLayer.source,
+                originalProjectType: 'studio',
+                generatedFromCompositeImage: true,
+                renderWidth: renderSize.width,
+                renderHeight: renderSize.height
+            }
+        };
+        updateCompositeDocument((documentState) => ({
+            ...normalizeCompositeDocument(documentState),
+            layers: normalizeCompositeDocument(documentState).layers.map((layer) => layer.id === currentLayer.id ? nextLayer : layer),
+            selection: { layerId: currentLayer.id }
+        }), {
+            renderComposite: true,
+            compositeAutosave: true,
+            compositeAutosaveReason: 'Queued Composite autosave after converting an image layer into an Editor project.'
+        });
+
+        logProcess('success', 'composite.link', `Converted "${currentLayer.name || 'Image'}" into a linked Editor project inside Composite.`);
+        if (options.openInEditor) {
+            await openCompositeLayerInEditorFlow(currentLayer.id, { allowImageConversion: false });
+        } else if (!options.suppressNotice) {
+            setNotice(`Converted "${currentLayer.name || 'Image'}" into a linked Editor project.`, 'success', 5200);
+        }
+        return nextLayer;
+    }
+
+    async function openCompositeLayerInEditorFlow(layerId = null, options = {}) {
+        let compositeState = normalizeCompositeDocument(store.getState().compositeDocument);
+        let selectedLayer = layerId
+            ? compositeState.layers.find((layer) => layer.id === layerId) || null
+            : getSelectedCompositeLayer(compositeState);
+        let alreadyCheckedEditorReplace = false;
+        if (!selectedLayer) {
+            setNotice('Select a Composite layer first.', 'warning', 6000);
+            return false;
+        }
+        if (selectedLayer.kind === 'image' && selectedLayer.imageAsset?.imageData && options.allowImageConversion !== false) {
+            if (!await ensureProjectCanBeReplaced('studio', 'opening the linked Composite layer in Editor')) {
+                return false;
+            }
+            alreadyCheckedEditorReplace = true;
+            await convertCompositeImageLayerToEditorProject(selectedLayer.id, {
+                openInEditor: false,
+                suppressNotice: true
+            });
+            compositeState = normalizeCompositeDocument(store.getState().compositeDocument);
+            selectedLayer = compositeState.layers.find((layer) => layer.id === selectedLayer.id) || null;
+        }
+        if (!selectedLayer || selectedLayer.kind !== 'editor-project' || !selectedLayer.embeddedEditorDocument) {
+            setNotice('Select a linked Editor layer or convert an image layer first.', 'warning', 6000);
+            return false;
+        }
+
+        const currentEditorDocument = store.getState().document;
+        const matchingCompositeLayer = findMatchingCompositeEditorLayerForEditorDocument(currentEditorDocument, compositeState);
+        if (!matchingCompositeLayer && !alreadyCheckedEditorReplace && !await ensureProjectCanBeReplaced('studio', 'opening the linked Composite layer in Editor')) {
+            return false;
+        }
+
+        const editorDocument = buildEditorDocumentFromPayload(selectedLayer.embeddedEditorDocument);
+        if (!editorDocument.source?.imageData) {
+            throw new Error('The selected Composite layer is missing its embedded Editor source image.');
+        }
+        const image = await loadImageFromDataUrl(editorDocument.source.imageData);
+        await engine.loadImage(image, editorDocument.source);
+        stopPlayback();
+        paletteExtractionImage = null;
+        paletteExtractionOwner = null;
+        updateDocument(() => editorDocument, { render: false });
+        if (selectedLayer.source?.generatedFromCompositeImage && selectedLayer.source?.originalLibraryId) {
+            setActiveLibraryOrigin('studio', selectedLayer.source.originalLibraryId, selectedLayer.source.originalLibraryName);
+        } else {
+            clearActiveLibraryOrigin('studio');
+        }
+        setCompositeBridgeState({
+            active: true,
+            layerId: selectedLayer.id,
+            originalLibraryId: selectedLayer.source?.originalLibraryId || null,
+            originalLibraryName: selectedLayer.source?.originalLibraryName || null
+        });
+        commitActiveSection('editor');
+        engine.requestRender(store.getState().document);
+        logProcess('success', 'composite.link', matchingCompositeLayer
+            ? `Switched Editor from Composite-linked layer "${matchingCompositeLayer.name || 'Layer'}" to "${selectedLayer.name || 'Layer'}" without an extra save prompt.`
+            : `Opened "${selectedLayer.name || 'Layer'}" in Editor from Composite.`);
+        return true;
     }
 
     function getCompositeLayerPlacement(documentState, sourceWidth, sourceHeight, viewportMetrics = null, options = {}) {
@@ -3317,12 +3909,34 @@ window.addEventListener('DOMContentLoaded', async () => {
             await engine.loadImage(image, state.document.source);
         }
         const capture = await captureStudioDocumentSnapshot(engine, state.document);
+        const renderSize = resolveCompositeEditorLayerRenderSize({
+            payload: capture.payload,
+            preview: capture.preview,
+            sourceMeta: currentLayer.source
+        });
+        const activeStudioOrigin = getActiveLibraryOrigin('studio');
+        const nextSource = currentLayer.source?.generatedFromCompositeImage && activeStudioOrigin?.id
+            ? {
+                ...currentLayer.source,
+                originalLibraryId: activeStudioOrigin.id,
+                originalLibraryName: activeStudioOrigin.name || currentLayer.source?.originalLibraryName || null,
+                originalProjectType: 'studio',
+                generatedFromCompositeImage: true,
+                renderWidth: renderSize.width,
+                renderHeight: renderSize.height
+            }
+            : {
+                ...currentLayer.source,
+                renderWidth: renderSize.width,
+                renderHeight: renderSize.height
+            };
         updateCompositeDocument((documentState) => ({
             ...normalizeCompositeDocument(documentState),
             layers: normalizeCompositeDocument(documentState).layers.map((layer) => layer.id === bridge.layerId
                 ? {
                     ...layer,
-                    embeddedEditorDocument: capture.payload
+                    embeddedEditorDocument: capture.payload,
+                    source: nextSource
                 }
                 : layer)
         }), {
@@ -3343,12 +3957,22 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!layer || layer.kind !== 'editor-project' || !layer.embeddedEditorDocument) continue;
             try {
                 const capture = await captureCompositeEditorLayerDocument(layer.embeddedEditorDocument);
+                const renderSize = resolveCompositeEditorLayerRenderSize({
+                    payload: capture.payload,
+                    preview: capture.preview,
+                    sourceMeta: layer.source
+                });
                 updateCompositeDocument((documentState) => ({
                     ...normalizeCompositeDocument(documentState),
                     layers: normalizeCompositeDocument(documentState).layers.map((entry) => entry.id === layerId
                         ? {
                             ...entry,
-                            embeddedEditorDocument: capture.payload
+                            embeddedEditorDocument: capture.payload,
+                            source: {
+                                ...entry.source,
+                                renderWidth: renderSize.width,
+                                renderHeight: renderSize.height
+                            }
                         }
                         : entry)
                 }), {
@@ -4427,29 +5051,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (currentSection === 'composite' && nextSection === 'editor') {
                 const compositeState = normalizeCompositeDocument(store.getState().compositeDocument);
                 const selectedLayer = getSelectedCompositeLayer(compositeState);
-                if (selectedLayer?.kind === 'editor-project' && selectedLayer.embeddedEditorDocument) {
-                    if (!await ensureProjectCanBeReplaced('studio', 'opening the linked Composite layer in Editor')) return;
+                if (
+                    (selectedLayer?.kind === 'editor-project' && selectedLayer.embeddedEditorDocument)
+                    || (selectedLayer?.kind === 'image' && selectedLayer.imageAsset?.imageData)
+                ) {
                     try {
-                        const editorDocument = buildEditorDocumentFromPayload(selectedLayer.embeddedEditorDocument);
-                        if (!editorDocument.source?.imageData) {
-                            throw new Error('The selected Composite layer is missing its embedded Editor source image.');
-                        }
-                        const image = await loadImageFromDataUrl(editorDocument.source.imageData);
-                        await engine.loadImage(image, editorDocument.source);
-                        stopPlayback();
-                        paletteExtractionImage = null;
-                        paletteExtractionOwner = null;
-                        updateDocument(() => editorDocument, { render: false });
-                        clearActiveLibraryOrigin('studio');
-                        setCompositeBridgeState({
-                            active: true,
-                            layerId: selectedLayer.id,
-                            originalLibraryId: selectedLayer.source?.originalLibraryId || null,
-                            originalLibraryName: selectedLayer.source?.originalLibraryName || null
-                        });
-                        commitActiveSection('editor');
-                        engine.requestRender(store.getState().document);
-                        logProcess('success', 'composite.link', `Opened "${selectedLayer.name || 'Layer'}" in Editor from Composite.`);
+                        await openCompositeLayerInEditorFlow(selectedLayer.id);
                         return;
                     } catch (error) {
                         logProcess('error', 'composite.link', error?.message || 'Could not open the selected Composite layer in Editor.');
@@ -4492,6 +5099,27 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         openCompositeProjectPicker() {
             return view?.openCompositeProjectPicker?.();
+        },
+        async openCompositeLayerInEditor(layerId = null) {
+            return openCompositeLayerInEditorFlow(layerId);
+        },
+        async convertCompositeLayerToEditorProject(layerId = null, options = {}) {
+            if (!layerId) {
+                const selectedLayer = getSelectedCompositeLayer(normalizeCompositeDocument(store.getState().compositeDocument));
+                if (!selectedLayer?.id) {
+                    setNotice('Select an image layer first.', 'warning', 6000);
+                    return false;
+                }
+                layerId = selectedLayer.id;
+            }
+            try {
+                await convertCompositeImageLayerToEditorProject(layerId, options);
+                return true;
+            } catch (error) {
+                logProcess('error', 'composite.link', error?.message || 'Could not convert that Composite image layer into an Editor project.');
+                setNotice(error?.message || 'Could not convert that Composite image layer into an Editor project.', 'error', 7000);
+                return false;
+            }
         },
         addCompositeTextLayer() {
             const viewportMetrics = getCompositeViewportMetrics();
@@ -4841,7 +5469,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                         message: `Capturing "${record.name || `Editor Project ${index + 1}`}" for Composite...`,
                         progress: 0.16 + ((index / Math.max(1, records.length)) * 0.72)
                     });
-                    const initialPayload = cloneSerializable(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(record.payload)));
+                    const initialPayload = await syncEmbeddedEditorPayloadImageDimensions(
+                        cloneSerializable(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(record.payload)))
+                    );
                     if (!initialPayload?.preview?.imageData && record?.blob instanceof Blob) {
                         try {
                             initialPayload.preview = {
@@ -4863,15 +5493,22 @@ window.addEventListener('DOMContentLoaded', async () => {
                             };
                         }
                     let authoritativePayload = initialPayload;
+                    let authoritativePreview = initialPayload?.preview || null;
                     try {
                         const capture = await captureCompositeEditorLayerDocument(initialPayload);
                         authoritativePayload = capture.payload || initialPayload;
+                        authoritativePreview = capture.preview || authoritativePayload?.preview || initialPayload?.preview || null;
                     } catch (error) {
                         warnings.push(error?.message || `Could not refresh "${record.name || 'that Editor project'}" before adding it to Composite.`);
                         logProcess('warning', 'composite.layers', error?.message || `Could not refresh "${record.name || 'that Editor project'}" before adding it to Composite.`);
                     }
-                    const sourceWidth = Math.max(1, Number(authoritativePayload?.preview?.width || authoritativePayload?.source?.width || 1));
-                    const sourceHeight = Math.max(1, Number(authoritativePayload?.preview?.height || authoritativePayload?.source?.height || 1));
+                    const renderSize = resolveCompositeEditorLayerRenderSize({
+                        payload: authoritativePayload,
+                        preview: authoritativePreview,
+                        record
+                    });
+                    const sourceWidth = renderSize.width;
+                    const sourceHeight = renderSize.height;
                     const position = getCompositeLayerPlacement(workingDocument, sourceWidth, sourceHeight, viewportMetrics);
                     const nextLayer = {
                         id: createCompositeLayerId('editor'),
@@ -4892,7 +5529,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                         source: {
                             originalLibraryId: record.id || null,
                             originalLibraryName: record.name || null,
-                            originalProjectType: 'studio'
+                            originalProjectType: 'studio',
+                            renderWidth: renderSize.width,
+                            renderHeight: renderSize.height
                         },
                         embeddedEditorDocument: authoritativePayload
                     };
@@ -5126,11 +5765,31 @@ window.addEventListener('DOMContentLoaded', async () => {
                 progress: 0.16
             });
             try {
+                let selectedBackend = null;
                 const blob = await renderCompositePngBlob(compositeDocument, {
                     priority: 'user-visible',
                     processId: 'composite.export',
-                    scope: 'section:composite'
+                    scope: 'section:composite',
+                    onBackend(backend) {
+                        selectedBackend = backend || null;
+                    }
                 });
+                if (selectedBackend?.fallbackReason) {
+                    logProcess('warning', 'composite.export', selectedBackend.fallbackReason, {
+                        dedupeKey: `composite-export-backend-fallback:${selectedBackend.logKey || `${selectedBackend.preference}:${selectedBackend.mode}`}`,
+                        dedupeWindowMs: 800
+                    });
+                } else if (selectedBackend?.decisionReason) {
+                    logProcess('info', 'composite.export', selectedBackend.decisionReason, {
+                        dedupeKey: `composite-export-backend:${selectedBackend.logKey || `${selectedBackend.preference}:${selectedBackend.mode}`}`,
+                        dedupeWindowMs: 800
+                    });
+                } else if (selectedBackend?.label) {
+                    logProcess('info', 'composite.export', `Composite export used ${selectedBackend.label}.`, {
+                        dedupeKey: `composite-export-backend:${selectedBackend.logKey || `${selectedBackend.preference}:${selectedBackend.mode}`}`,
+                        dedupeWindowMs: 800
+                    });
+                }
                 const baseName = getSuggestedCompositeProjectName(compositeDocument) || 'composite-export';
                 setWorkspaceProgress('composite', {
                     active: true,
@@ -5190,6 +5849,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                     throw new Error('The original Editor Library project could not be found.');
                 }
                 const capture = await captureStudioDocumentSnapshot(engine, state.document);
+                const renderSize = resolveCompositeEditorLayerRenderSize({
+                    payload: capture.payload,
+                    preview: capture.preview
+                });
                 const projectData = buildLibraryProjectRecord({
                     id: existingRecord.id,
                     timestamp: Date.now(),
@@ -5213,7 +5876,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                     layers: normalizeCompositeDocument(documentState).layers.map((layer) => layer.id === bridge.layerId
                         ? {
                             ...layer,
-                            embeddedEditorDocument: capture.payload
+                            embeddedEditorDocument: capture.payload,
+                            source: {
+                                ...layer.source,
+                                renderWidth: renderSize.width,
+                                renderHeight: renderSize.height
+                            }
                         }
                         : layer)
                 }), {
@@ -6172,11 +6840,25 @@ window.addEventListener('DOMContentLoaded', async () => {
                 showLibraryNotice('This project type cannot be saved to the Library yet.', 'error', 7000);
                 return null;
             }
-            const currentDocument = adapter.getCurrentDocument(state);
+            let currentDocument = adapter.getCurrentDocument(state);
             if (adapter.isEmpty(currentDocument) || !adapter.canSave(currentDocument)) {
                 logProcess('warning', 'library.projects', adapter.emptyNotice || `Blocked ${adapter.label} save because the project is empty.`);
                 showLibraryNotice(adapter.emptyNotice || `There is no ${adapter.label} project ready to save.`, 'warning');
                 return null;
+            }
+
+            if (projectType === 'composite') {
+                try {
+                    const persistedGeneratedProjects = await persistGeneratedCompositeEditorProjects(currentDocument, {
+                        updateStore: true,
+                        log: !promptless
+                    });
+                    currentDocument = persistedGeneratedProjects.document;
+                } catch (error) {
+                    logProcess('error', 'composite.link', error?.message || 'Could not persist the generated Editor projects linked from Composite.');
+                    showLibraryNotice(error?.message || 'Could not persist the generated Editor projects linked from Composite.', 'error', 7000);
+                    return null;
+                }
             }
 
             const payloadParams = adapter.serializeDocument(currentDocument);
@@ -6275,12 +6957,22 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const existingRecord = saveId ? await getFromLibraryDB(saveId).catch(() => null) : null;
                 const capture = await adapter.captureDocument(currentDocument, payloadParams);
                 let captureBlob = capture?.blob || null;
+                let capturePayload = capture?.payload || payloadParams;
                 if (!captureBlob && String(capture?.payload?.preview?.imageData || '').startsWith('data:')) {
                     try {
                         captureBlob = await dataUrlToBlob(capture.payload.preview.imageData);
                     } catch (_error) {
                         captureBlob = null;
                     }
+                }
+                if (!captureBlob && existingRecord?.blob instanceof Blob) {
+                    captureBlob = existingRecord.blob;
+                }
+                if (!capturePayload?.preview?.imageData && existingRecord?.payload?.preview?.imageData) {
+                    capturePayload = {
+                        ...capturePayload,
+                        preview: cloneSerializable(existingRecord.payload.preview)
+                    };
                 }
                 if (!suppressWorkspaceOverlay) {
                     setWorkspaceProgress(projectType, {
@@ -6295,7 +6987,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     timestamp: Date.now(),
                     name,
                     blob: captureBlob,
-                    payload: capture.payload || payloadParams,
+                    payload: capturePayload,
                     tags: normalizeLibraryTags(existingRecord?.tags || []),
                     projectType,
                     ...(capture.summary || {})
@@ -6732,8 +7424,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async loadLibraryProject(payload, libraryId = null, libraryName = null) {
             try {
-                const payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
-                const rawState = normalizeLegacyDocumentPayload(JSON.parse(payloadStr));
+                const parsedPayload = typeof payload === 'string'
+                    ? JSON.parse(payload)
+                    : payload;
+                const rawState = normalizeLegacyDocumentPayload(parsedPayload);
                 const projectMeta = extractLibraryProjectMeta(rawState);
                 const adapter = projectAdapters?.getAdapterForPayload(rawState, projectMeta.projectType);
                 if (!adapter) throw new Error('This Library project type is not supported in the current build.');

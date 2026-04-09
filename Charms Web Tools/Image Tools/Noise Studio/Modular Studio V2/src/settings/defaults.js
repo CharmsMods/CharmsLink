@@ -30,7 +30,22 @@ export function createDefaultAppSettings() {
         composite: {
             preferences: {
                 showChecker: true,
-                zoomLocked: false
+                zoomLocked: false,
+                exportBackend: 'auto'
+            },
+            diagnostics: {
+                workerAvailable: false,
+                offscreenCanvas2d: false,
+                createImageBitmap: false,
+                webglAvailable: false,
+                webgl2Available: false,
+                maxTextureSize: 0,
+                maxRenderbufferSize: 0,
+                maxViewportWidth: 0,
+                maxViewportHeight: 0,
+                gpuSafeMaxEdge: 0,
+                autoWorkerThresholdMegapixels: 16,
+                autoWorkerThresholdEdge: 4096
             }
         },
         stitch: {

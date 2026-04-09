@@ -45,6 +45,43 @@ function normalizeDiagnostics(source = {}, defaults) {
     };
 }
 
+function normalizeCompositeDiagnostics(source = {}, defaults) {
+    return {
+        workerAvailable: typeof source.workerAvailable === 'boolean'
+            ? source.workerAvailable
+            : defaults.workerAvailable,
+        offscreenCanvas2d: typeof source.offscreenCanvas2d === 'boolean'
+            ? source.offscreenCanvas2d
+            : defaults.offscreenCanvas2d,
+        createImageBitmap: typeof source.createImageBitmap === 'boolean'
+            ? source.createImageBitmap
+            : defaults.createImageBitmap,
+        webglAvailable: typeof source.webglAvailable === 'boolean'
+            ? source.webglAvailable
+            : defaults.webglAvailable,
+        webgl2Available: typeof source.webgl2Available === 'boolean'
+            ? source.webgl2Available
+            : defaults.webgl2Available,
+        maxTextureSize: normalizeInteger(source.maxTextureSize, defaults.maxTextureSize, 0, 131072),
+        maxRenderbufferSize: normalizeInteger(source.maxRenderbufferSize, defaults.maxRenderbufferSize, 0, 131072),
+        maxViewportWidth: normalizeInteger(source.maxViewportWidth, defaults.maxViewportWidth, 0, 131072),
+        maxViewportHeight: normalizeInteger(source.maxViewportHeight, defaults.maxViewportHeight, 0, 131072),
+        gpuSafeMaxEdge: normalizeInteger(source.gpuSafeMaxEdge, defaults.gpuSafeMaxEdge, 0, 131072),
+        autoWorkerThresholdMegapixels: normalizeFiniteNumber(
+            source.autoWorkerThresholdMegapixels,
+            defaults.autoWorkerThresholdMegapixels,
+            0.1,
+            1048576
+        ),
+        autoWorkerThresholdEdge: normalizeInteger(
+            source.autoWorkerThresholdEdge,
+            defaults.autoWorkerThresholdEdge,
+            1,
+            131072
+        )
+    };
+}
+
 export function normalizeSettingsCategory(category) {
     const normalized = String(category || '').trim().toLowerCase();
     if (normalized === 'general' || normalized === 'library' || normalized === 'editor' || normalized === 'composite' || normalized === 'stitch' || normalized === '3d' || normalized === 'logs') {
@@ -60,6 +97,8 @@ export function normalizeAppSettings(candidate = {}, options = {}) {
     const editor = candidate.editor && typeof candidate.editor === 'object' ? candidate.editor : {};
     const composite = candidate.composite && typeof candidate.composite === 'object' ? candidate.composite : {};
     const compositePreferences = composite.preferences && typeof composite.preferences === 'object' ? composite.preferences : {};
+    const compositeDiagnostics = options.compositeDiagnostics
+        || (composite.diagnostics && typeof composite.diagnostics === 'object' ? composite.diagnostics : {});
     const stitch = candidate.stitch && typeof candidate.stitch === 'object' ? candidate.stitch : {};
     const stitchDefaults = stitch.defaults && typeof stitch.defaults === 'object' ? stitch.defaults : {};
     const stitchDiagnostics = options.stitchDiagnostics
@@ -106,8 +145,14 @@ export function normalizeAppSettings(candidate = {}, options = {}) {
                     : defaults.composite.preferences.showChecker,
                 zoomLocked: typeof compositePreferences.zoomLocked === 'boolean'
                     ? compositePreferences.zoomLocked
-                    : defaults.composite.preferences.zoomLocked
-            }
+                    : defaults.composite.preferences.zoomLocked,
+                exportBackend: normalizeChoice(
+                    String(compositePreferences.exportBackend || '').toLowerCase(),
+                    defaults.composite.preferences.exportBackend,
+                    new Set(['auto', 'worker', 'main-thread'])
+                )
+            },
+            diagnostics: normalizeCompositeDiagnostics(compositeDiagnostics, defaults.composite.diagnostics)
         },
         stitch: {
             defaults: {
@@ -199,7 +244,9 @@ export function stripDiagnosticsFromSettings(settings = {}) {
         general: normalized.general,
         library: normalized.library,
         editor: normalized.editor,
-        composite: normalized.composite,
+        composite: {
+            preferences: normalized.composite.preferences
+        },
         stitch: {
             defaults: normalized.stitch.defaults
         },

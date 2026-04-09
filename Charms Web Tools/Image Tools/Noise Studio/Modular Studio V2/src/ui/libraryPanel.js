@@ -549,7 +549,43 @@ async function blobToDataUrl(blob) {
     });
 }
 
+function parseDataUrl(dataUrl) {
+    const source = String(dataUrl || '');
+    if (!source.startsWith('data:')) return null;
+    const commaIndex = source.indexOf(',');
+    if (commaIndex < 0) {
+        throw new Error('Invalid data URL.');
+    }
+    const meta = source.slice(5, commaIndex);
+    const payload = source.slice(commaIndex + 1);
+    const parts = meta.split(';').filter(Boolean);
+    const isBase64 = parts.some((part) => part.toLowerCase() === 'base64');
+    const mimeType = String(parts.find((part) => part.toLowerCase() !== 'base64') || 'application/octet-stream').trim() || 'application/octet-stream';
+    return {
+        mimeType,
+        isBase64,
+        payload
+    };
+}
+
+function base64ToUint8Array(base64) {
+    const normalized = String(base64 || '').replace(/\s+/g, '');
+    const binary = atob(normalized);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return bytes;
+}
+
 async function dataUrlToBlob(dataUrl) {
+    const parsed = parseDataUrl(dataUrl);
+    if (parsed) {
+        const bytes = parsed.isBase64
+            ? base64ToUint8Array(parsed.payload)
+            : new TextEncoder().encode(parsed.payload.includes('%') ? decodeURIComponent(parsed.payload) : parsed.payload);
+        return new Blob([bytes], { type: parsed.mimeType });
+    }
     const response = await fetch(String(dataUrl || ''));
     return response.blob();
 }
