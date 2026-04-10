@@ -1,4 +1,6 @@
 import { getCropTransformMetrics, isCropTransformIdentity } from '../cropTransformShared.js';
+import { drawEditorTextToCanvas, measureEditorTextLayout, normalizeEditorTextParams } from '../../editor/textLayerShared.js';
+import { getEditorCanvasResolution } from '../../editor/baseCanvas.js';
 
 function toLegacyField(value) {
     if (typeof value === 'boolean') {
@@ -279,6 +281,157 @@ function bindCopy(gl, runtime, texture, outputFbo, channel = 0) {
     gl.uniform1i(gl.getUniformLocation(runtime.programs.copy, 'u_tex'), 0);
     gl.uniform1i(gl.getUniformLocation(runtime.programs.copy, 'u_channel'), channel);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
+function createTextLayerCanvas(width, height) {
+    if (typeof OffscreenCanvas === 'function') {
+        return new OffscreenCanvas(width, height);
+    }
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        return canvas;
+    }
+    return null;
+}
+
+function getLogicalEditorResolutionThroughInstance(documentState, stopInstanceId = null) {
+    const baseResolution = getEditorCanvasResolution(documentState);
+    let width = Math.max(1, Number(baseResolution.width) || 1);
+    let height = Math.max(1, Number(baseResolution.height) || 1);
+
+    for (const stackItem of documentState?.layerStack || []) {
+        if (stackItem.visible !== false && stackItem.enabled !== false) {
+            if (stackItem.layerId === 'scale') {
+                const factor = Math.max(0.1, parseFloat(stackItem.params?.scaleMultiplier || 1));
+                width = Math.max(1, Math.round(width * factor));
+                height = Math.max(1, Math.round(height * factor));
+            } else if (stackItem.layerId === 'expander') {
+                const padding = Math.max(0, Math.round(Number(stackItem.params?.expanderPadding || 0)));
+                width += padding * 2;
+                height += padding * 2;
+            } else if (stackItem.layerId === 'cropTransform') {
+                const cropMetrics = getCropTransformMetrics(stackItem.params, width, height);
+                width = Math.max(1, cropMetrics.outputWidth || width);
+                height = Math.max(1, cropMetrics.outputHeight || height);
+            }
+        }
+
+        if (stopInstanceId && stackItem.instanceId === stopInstanceId) {
+            break;
+        }
+    }
+
+    return { width, height };
+}
+
+function ensureTextLayerAsset(gl, runtime, instance) {
+    if (!runtime.textLayerAssets) runtime.textLayerAssets = {};
+    const params = normalizeEditorTextParams(instance.params || {});
+    const textureKey = `${params.textContent}|${params.textFontFamily}|${params.textFontSize}|${params.textColor}`;
+    let asset = runtime.textLayerAssets[instance.instanceId];
+    if (!asset) {
+        asset = runtime.textLayerAssets[instance.instanceId] = {
+            texture: gl.createTexture(),
+            canvas: null,
+            key: '',
+            layout: null,
+            surfaceTexture: gl.createTexture(),
+            surfaceCanvas: null,
+            surfaceKey: ''
+        };
+        gl.bindTexture(gl.TEXTURE_2D, asset.texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.bindTexture(gl.TEXTURE_2D, asset.surfaceTexture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+
+    if (asset.key !== textureKey || !asset.layout) {
+        const layout = measureEditorTextLayout(params);
+        asset.canvas = asset.canvas || createTextLayerCanvas(Math.max(1, Math.ceil(layout.width)), Math.max(1, Math.ceil(layout.height)));
+        if (!asset.canvas) return null;
+        asset.layout = drawEditorTextToCanvas(asset.canvas, params);
+        asset.key = textureKey;
+        gl.bindTexture(gl.TEXTURE_2D, asset.texture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, asset.canvas);
+    }
+
+    return {
+        texture: asset.texture,
+        layout: asset.layout,
+        params,
+        surfaceTexture: asset.surfaceTexture,
+        surfaceCanvas: asset.surfaceCanvas,
+        surfaceKey: asset.surfaceKey,
+        asset
+    };
+}
+
+function ensureTextLayerSurfaceAsset(gl, runtime, instance, documentState, inputResolution) {
+    const glyphAsset = ensureTextLayerAsset(gl, runtime, instance);
+    if (!glyphAsset?.asset || !glyphAsset?.layout) return null;
+    const logicalResolution = getLogicalEditorResolutionThroughInstance(documentState || {}, instance.instanceId);
+    const scaleX = inputResolution.w / Math.max(1, logicalResolution.width || inputResolution.w || 1);
+    const scaleY = inputResolution.h / Math.max(1, logicalResolution.height || inputResolution.h || 1);
+    const renderWidth = Math.max(1, glyphAsset.layout.width * scaleX);
+    const renderHeight = Math.max(1, glyphAsset.layout.height * scaleY);
+    const renderX = glyphAsset.params.textX * scaleX;
+    const renderY = glyphAsset.params.textY * scaleY;
+    const surfaceKey = [
+        glyphAsset.asset.key,
+        `${inputResolution.w}x${inputResolution.h}`,
+        `${logicalResolution.width}x${logicalResolution.height}`,
+        renderX,
+        renderY,
+        renderWidth,
+        renderHeight,
+        glyphAsset.params.textRotation || 0
+    ].join('|');
+
+    if (glyphAsset.asset.surfaceKey !== surfaceKey || !glyphAsset.asset.surfaceCanvas) {
+        const surfaceCanvas = glyphAsset.asset.surfaceCanvas
+            && glyphAsset.asset.surfaceCanvas.width === inputResolution.w
+            && glyphAsset.asset.surfaceCanvas.height === inputResolution.h
+            ? glyphAsset.asset.surfaceCanvas
+            : createTextLayerCanvas(Math.max(1, inputResolution.w), Math.max(1, inputResolution.h));
+        if (!surfaceCanvas) return null;
+        surfaceCanvas.width = Math.max(1, inputResolution.w);
+        surfaceCanvas.height = Math.max(1, inputResolution.h);
+        const context = surfaceCanvas.getContext('2d', { alpha: true });
+        if (!context) return null;
+        context.clearRect(0, 0, surfaceCanvas.width, surfaceCanvas.height);
+        context.save();
+        context.translate(renderX + (renderWidth * 0.5), renderY + (renderHeight * 0.5));
+        context.rotate((-(glyphAsset.params.textRotation || 0) * Math.PI) / 180);
+        context.drawImage(
+            glyphAsset.asset.canvas,
+            -renderWidth * 0.5,
+            -renderHeight * 0.5,
+            renderWidth,
+            renderHeight
+        );
+        context.restore();
+
+        glyphAsset.asset.surfaceCanvas = surfaceCanvas;
+        glyphAsset.asset.surfaceKey = surfaceKey;
+        gl.bindTexture(gl.TEXTURE_2D, glyphAsset.asset.surfaceTexture);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, surfaceCanvas);
+    }
+
+    return {
+        texture: glyphAsset.asset.surfaceTexture,
+        layout: glyphAsset.layout,
+        params: glyphAsset.params
+    };
 }
 
 function ensureMaskBuffers(gl, runtime) {
@@ -895,6 +1048,32 @@ function renderTiltShiftBlur(gl, runtime, inputTex, outputFbo, instance, options
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
+function renderTextOverlay(gl, runtime, inputTex, outputFbo, instance, options = {}) {
+    const inputResolution = options.inputResolution || { w: runtime.renderWidth, h: runtime.renderHeight };
+    const asset = ensureTextLayerSurfaceAsset(gl, runtime, instance, options.documentState || {}, inputResolution);
+    if (!asset?.texture) {
+        bindCopy(gl, runtime, inputTex, outputFbo, 0);
+        return;
+    }
+
+    gl.useProgram(runtime.programs.textOverlay);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
+    gl.viewport(0, 0, inputResolution.w, inputResolution.h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, inputTex);
+    gl.uniform1i(gl.getUniformLocation(runtime.programs.textOverlay, 'u_base'), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, asset.texture);
+    gl.uniform1i(gl.getUniformLocation(runtime.programs.textOverlay, 'u_overlay'), 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform2f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_res'), inputResolution.w, inputResolution.h);
+    gl.uniform2f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_overlayPos'), 0, 0);
+    gl.uniform2f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_overlaySize'), inputResolution.w, inputResolution.h);
+    gl.uniform1f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_opacity'), asset.params.textOpacity);
+    gl.uniform1f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_rotationDegrees'), 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+}
+
 function isEnabled(instance, layerDef) {
     return layerDef.enableKey ? instance.enabled : true;
 }
@@ -948,6 +1127,12 @@ export function renderLayer(gl, runtime, layerDef, instance, inputTex, outputFbo
             break;
         case 'cropTransform':
             renderCropTransform(gl, runtime, inputTex, outputFbo, instance, options);
+            break;
+        case 'textOverlay':
+            renderTextOverlay(gl, runtime, inputTex, outputFbo, instance, {
+                ...options,
+                documentState
+            });
             break;
         case 'tiltShiftBlur':
             renderTiltShiftBlur(gl, runtime, inputTex, outputFbo, instance, options);

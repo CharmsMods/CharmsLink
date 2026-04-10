@@ -1,4 +1,5 @@
 import { saveJsonLocally } from './localSave.js';
+import { normalizeEditorBase, normalizeEditorSource } from '../editor/baseCanvas.js';
 
 function normalizeStudioPreview(preview) {
     if (!preview || typeof preview !== 'object' || !preview.imageData) {
@@ -16,12 +17,14 @@ function buildStudioPayload(state, {
     includeSource = true,
     preview = null
 } = {}) {
+    const normalizedSource = normalizeEditorSource(state.source);
     const payload = {
         version: 'mns/v2',
         kind: 'document',
         mode: 'studio',
         workspace: state.workspace,
-        source: includeSource && state.source?.imageData ? state.source : null,
+        source: includeSource && normalizedSource.imageData ? normalizedSource : null,
+        base: normalizeEditorBase(state.base, normalizedSource),
         palette: state.palette,
         layerStack: state.layerStack,
         selection: state.selection,

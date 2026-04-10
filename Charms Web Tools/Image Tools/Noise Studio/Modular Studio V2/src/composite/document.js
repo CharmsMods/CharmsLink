@@ -18,6 +18,7 @@ export const COMPOSITE_MAX_ZOOM = 1048576;
 const COMPOSITE_LAYER_KINDS = new Set(['image', 'editor-project', 'text', 'square', 'circle', 'triangle']);
 const COMPOSITE_RESIZE_MODES = new Set(['center-uniform', 'anchor-uniform', 'anchor-stretch']);
 const COMPOSITE_STRETCH_LAYER_KINDS = new Set(['text', 'square', 'circle', 'triangle']);
+const COMPOSITE_CROP_LAYER_KINDS = new Set(['image', 'editor-project']);
 
 const textMetricsCache = new Map();
 const generatedSourceCache = new Map();
@@ -142,6 +143,30 @@ function normalizeTriangleAsset(asset = {}) {
         width: 2,
         height: 2
     };
+}
+
+function supportsCompositeCropping(kindOrLayer) {
+    const kind = typeof kindOrLayer === 'string'
+        ? String(kindOrLayer || '').toLowerCase()
+        : String(kindOrLayer?.kind || '').toLowerCase();
+    return COMPOSITE_CROP_LAYER_KINDS.has(kind);
+}
+
+function normalizeCompositeCrop(crop = {}, kindOrLayer = 'image', sourceDimensions = null) {
+    if (!supportsCompositeCropping(kindOrLayer)) return null;
+    const safeWidth = Math.max(1, Math.round(Number(sourceDimensions?.width) || 1));
+    const safeHeight = Math.max(1, Math.round(Number(sourceDimensions?.height) || 1));
+    const maxHorizontalCrop = Math.max(0, safeWidth - 1);
+    const maxVerticalCrop = Math.max(0, safeHeight - 1);
+    let left = Math.min(maxHorizontalCrop, Math.max(0, Math.round(Number(crop?.left) || 0)));
+    let right = Math.min(maxHorizontalCrop, Math.max(0, Math.round(Number(crop?.right) || 0)));
+    let top = Math.min(maxVerticalCrop, Math.max(0, Math.round(Number(crop?.top) || 0)));
+    let bottom = Math.min(maxVerticalCrop, Math.max(0, Math.round(Number(crop?.bottom) || 0)));
+    right = Math.min(right, Math.max(0, safeWidth - left - 1));
+    left = Math.min(left, Math.max(0, safeWidth - right - 1));
+    bottom = Math.min(bottom, Math.max(0, safeHeight - top - 1));
+    top = Math.min(top, Math.max(0, safeHeight - bottom - 1));
+    return { left, top, right, bottom };
 }
 
 function supportsCompositeStretching(kindOrLayer) {
@@ -374,6 +399,30 @@ export function getCompositeLayerSourceImage(layer = {}) {
     };
 }
 
+export function getCompositeLayerSourceDimensions(layer) {
+    const source = getCompositeLayerSourceImage(layer);
+    return {
+        width: Math.max(1, Number(source.width) || 1),
+        height: Math.max(1, Number(source.height) || 1)
+    };
+}
+
+export function getCompositeLayerCrop(layer, sourceDimensions = null) {
+    const kind = resolveCompositeLayerKind(layer);
+    if (!supportsCompositeCropping(kind)) return null;
+    const dimensions = sourceDimensions || getCompositeLayerSourceDimensions(layer);
+    return normalizeCompositeCrop(layer?.crop, kind, dimensions);
+}
+
+export function isCompositeLayerCropCapable(layer) {
+    return supportsCompositeCropping(layer?.kind || layer);
+}
+
+export function hasCompositeLayerCrop(layer) {
+    const crop = getCompositeLayerCrop(layer);
+    return !!crop && (crop.left > 0 || crop.top > 0 || crop.right > 0 || crop.bottom > 0);
+}
+
 export function normalizeCompositeLayer(layer = {}, index = 0) {
     let kind = resolveCompositeLayerKind(layer);
     const fallbackScale = Math.max(COMPOSITE_MIN_SCALE, Number(layer?.scale) || 1);
@@ -420,29 +469,41 @@ export function normalizeCompositeLayer(layer = {}, index = 0) {
         textAsset: kind === 'text' ? normalizeTextAsset(layer?.textAsset || layer?.text) : null,
         squareAsset: kind === 'square' ? normalizeSquareAsset(layer?.squareAsset) : null,
         circleAsset: kind === 'circle' ? normalizeCircleAsset(layer?.circleAsset) : null,
-        triangleAsset: kind === 'triangle' ? normalizeTriangleAsset(layer?.triangleAsset) : null
+        triangleAsset: kind === 'triangle' ? normalizeTriangleAsset(layer?.triangleAsset) : null,
+        crop: null
     };
 
     if (normalized.kind === 'editor-project' && !normalized.embeddedEditorDocument && normalized.imageAsset) {
         kind = 'image';
-        return {
+        const next = {
             ...normalized,
             kind,
             name: String(layer?.name || `Image ${index + 1}`),
             imageAsset: normalizeImageAsset(layer?.imageAsset),
             embeddedEditorDocument: null
         };
+        return {
+            ...next,
+            crop: getCompositeLayerCrop(next)
+        };
     }
     if (normalized.kind === 'image' && !normalized.imageAsset && normalized.embeddedEditorDocument) {
         kind = 'editor-project';
-        return {
+        const next = {
             ...normalized,
             kind,
             name: String(layer?.name || `Editor Layer ${index + 1}`),
             imageAsset: null
         };
+        return {
+            ...next,
+            crop: getCompositeLayerCrop(next)
+        };
     }
-    return normalized;
+    return {
+        ...normalized,
+        crop: getCompositeLayerCrop(normalized)
+    };
 }
 
 export function createEmptyCompositeDocument() {
@@ -544,10 +605,11 @@ export function getSelectedCompositeLayer(document) {
 }
 
 export function getCompositeLayerDimensions(layer) {
-    const source = getCompositeLayerSourceImage(layer);
+    const source = getCompositeLayerSourceDimensions(layer);
+    const crop = getCompositeLayerCrop(layer, source);
     return {
-        width: Math.max(1, Number(source.width) || 1),
-        height: Math.max(1, Number(source.height) || 1)
+        width: Math.max(1, Number(source.width) - Number(crop?.left || 0) - Number(crop?.right || 0)),
+        height: Math.max(1, Number(source.height) - Number(crop?.top || 0) - Number(crop?.bottom || 0))
     };
 }
 

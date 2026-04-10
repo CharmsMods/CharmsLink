@@ -77,8 +77,11 @@ Current section responsibilities:
 - `Editor`
   - The original modular image-processing engine.
   - Uses the registry-driven layer stack and the WebGL pipeline.
+  - Now boots with a persistent `Base` canvas even when no source image is loaded.
+  - The Editor sidebar now has `Edit`, `Base`, `Layer`, `Pipeline`, and `Scopes` views.
+  - Now also includes a real `Text Overlay` Editor layer that lives inside the normal Editor registry/render path.
   - Owns normal state-file save/load for studio documents.
-  - Newly saved Editor JSON files are now self-contained: they embed both the original `source` image and an optional `preview` object containing the latest rendered PNG plus dimensions/timestamp.
+  - Newly saved Editor JSON files are now self-contained around the current canvas state: they always save `base`, they save `source` only when an embedded image exists, and they may also embed a `preview` object containing the latest rendered PNG plus dimensions/timestamp.
 
 - `Library`
   - Integrated project browser backed by IndexedDB.
@@ -400,6 +403,7 @@ Important fields:
 - `kind`
 - `mode`
 - `workspace`
+- `base`
 - `source`
 - `palette`
 - `layerStack`
@@ -720,18 +724,40 @@ The Editor side is still the original modular image-processing app:
 
 - registry-driven layer stack
 - custom WebGL rendering pipeline
-- source image plus layer stack controls
+- persistent base canvas plus optional source image
 - scopes and compare views
 - batch folder processing
+- selected `Text Overlay` layers now also expose a preview box with direct drag and corner-handle resize interaction
+- the Editor engine now always renders from a generated base surface canvas, so text-only and source-less projects still run through the normal pipeline/export/save flow
 
 Normal flow:
 
 1. A UI event calls an `actions.*` method.
 2. `state.document` changes.
 3. `createWorkspaceUI(...).render(state)` rerenders the shell.
-4. If the update requests Studio rendering and the Studio engine has an image, the engine rerenders using `state.document`.
+4. If the update requests Studio rendering and the Studio engine has a loaded base surface, the engine rerenders using `state.document`.
 
 The addition of Stitch did not replace the Studio engine. It added a second engine beside it.
+
+Current Editor text-layer behavior:
+
+- `textOverlay` is a normal Editor layer definition in the registry, not a separate Editor sub-tool.
+- It stores `textContent`, `textFontFamily`, `textFontSize`, `textColor`, `textOpacity`, `textRotation`, `textX`, and `textY` in the layer params.
+- The render path generates a text texture and composites it over the current Editor image inside the normal WebGL layer pipeline.
+- Because the Editor always has a base canvas now, `textOverlay` can be used on a blank transparent/solid canvas without loading an image first.
+- Later Editor `scale`, `expander`, and `cropTransform` layers still affect the text because it is part of the same downstream image chain.
+- When the selected layer is `textOverlay`, the Editor preview draws a local overlay box with move/resize handles plus a rotate handle so the text can be manipulated directly on canvas while saving back into the same layer params.
+- On large canvases where the live Editor preview is temporarily downscaled for working resolution, the text layer render path, the on-canvas text overlay box, and bgPatcher upstream color picking now all scale against that same live preview resolution so the visible text, picker hotspot, and box stay aligned.
+- The text layer still stores `textX` / `textY` as top-left Editor-space params, but the live shader path now translates them into the engine's render-space origin before compositing so large-canvas preview downscaling does not make the visible text drift away from the box/picker coordinates.
+- The current live text pass now rasterizes text into a full preview-sized surface first, then composites that surface as a normal overlay layer. That is meant to keep large-canvas preview placement consistent with the Editor overlay box even when the live preview is downscaled below the saved base resolution.
+
+Current Editor base-canvas behavior:
+
+- `state.document.base` is now part of the saved Editor payload and stores the base canvas width/height plus `backgroundMode: 'transparent' | 'solid'` and `backgroundColor`.
+- The new `Base` tab owns blank-canvas resolution controls, common resolution presets, aspect presets, background mode/color, and the "remove image" action.
+- Removing the source image does not destroy the Editor canvas; it clears `state.document.source` and keeps the current base canvas dimensions/background settings.
+- Loading an image into a source-less Editor with custom Base settings prompts whether the canvas should switch to the image's native resolution or keep the user-defined Base size.
+- If the user keeps the current Base size, the source image is fit inside that canvas before the rest of the Editor layer stack runs.
 
 ## 7. Stitch Engine Architecture
 
@@ -1032,6 +1058,10 @@ A saved project record now effectively contains:
 - `renderWidth`
 - `renderHeight`
 
+Current Studio Library summary rule:
+
+- For saved Editor projects, `sourceWidth` / `sourceHeight` now track the saved base-canvas dimensions, not only the embedded source-image dimensions, so source-less Editor projects still sort/filter/render with meaningful size metadata.
+
 ### Current Library asset record shape
 
 A saved asset record now effectively contains:
@@ -1070,6 +1100,7 @@ Important Asset Library rules:
 For Studio Library projects:
 
 - `hoverSource` is the embedded original source image.
+- If a Studio project was saved without a source image, `hoverSource` can be `null` and the Library card falls back to the saved preview/render dimensions instead of pretending there is an original image.
 
 For Stitch Library projects:
 
@@ -1116,6 +1147,7 @@ Used for Editor/Studio projects:
   "selection": {},
   "view": {},
   "export": {},
+  "base": {},
   "source": {},
   "preview": {},
   "layerStack": []
@@ -1125,10 +1157,10 @@ Used for Editor/Studio projects:
 Important Studio payload rules:
 
 - `preview` is optional on import/load for backward compatibility.
-- Newly saved Editor JSON files now always try to embed both:
-  - `source.imageData`
-  - `preview.imageData`
-- Studio runtime restore ignores `preview` as authoritative render state; the actual editable state still comes from `source` + `layerStack` + normal document fields.
+- Newly saved Editor JSON files now always save `base`.
+- Newly saved Editor JSON files save `source` only when there is an embedded source image to preserve.
+- Newly saved Editor JSON files still try to save `preview.imageData` so Library/local save flows can reuse the latest rendered PNG.
+- Studio runtime restore ignores `preview` as authoritative render state; the actual editable state still comes from `base` + optional `source` + `layerStack` + normal document fields.
 
 ### Stitch project payload
 
@@ -1289,7 +1321,7 @@ These fields are for Library round-tripping. They are stripped before normal eng
 
 - Editor `Save` now captures the current rendered PNG and embeds it into `payload.preview`.
 - The old Editor `Save Image` toggle was removed; Editor JSON saves are now intended to be self-contained by default.
-- If there is no embeddable source image, the app still saves JSON but warns that source/render embedding was unavailable.
+- The save path now supports source-less Editor projects: `base` is still saved, `preview` is still captured when possible, and Library sync can still run even if `source` is absent.
 
 ### Save Composite state JSON
 

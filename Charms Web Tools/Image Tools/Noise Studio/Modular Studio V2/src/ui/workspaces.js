@@ -9,6 +9,17 @@ import { createLogsPanel } from './logsPanel.js';
 import { createSettingsPanel } from './settingsPanel.js';
 import { createProgressOverlayController } from './progressOverlay.js';
 import { getCropTransformMetrics } from '../engine/cropTransformShared.js';
+import {
+    EDITOR_BASE_ASPECT_PRESETS,
+    EDITOR_BASE_RESOLUTION_PRESETS,
+    getEditorCanvasLabel,
+    getEditorCanvasResolution,
+    hasEditorCanvas,
+    hasEditorSourceImage,
+    normalizeEditorBase,
+    normalizeEditorSource
+} from '../editor/baseCanvas.js';
+import { EDITOR_TEXT_FONT_OPTIONS, getEditorTextBounds, measureEditorTextLayout, normalizeEditorTextParams } from '../editor/textLayerShared.js';
 
 const GROUP_LABELS = {
     base: 'Base',
@@ -20,6 +31,7 @@ const GROUP_LABELS = {
 };
 const STUDIO_TABS = [
     { id: 'edit', label: 'Edit' },
+    { id: 'base', label: 'Base' },
     { id: 'layer', label: 'Layer' },
     { id: 'pipeline', label: 'Pipeline' },
     { id: 'scopes', label: 'Scopes' }
@@ -91,8 +103,9 @@ function rgbaToLabel(color) {
 }
 
 function computeResolutionThroughInstance(state, stopInstanceId = null) {
-    let width = Math.max(1, Number(state.document.source.width) || 1);
-    let height = Math.max(1, Number(state.document.source.height) || 1);
+    const baseResolution = getEditorCanvasResolution(state.document);
+    let width = Math.max(1, Number(baseResolution.width) || 1);
+    let height = Math.max(1, Number(baseResolution.height) || 1);
 
     for (const stackItem of state.document.layerStack) {
         if (stackItem.visible !== false && stackItem.enabled !== false) {
@@ -438,6 +451,63 @@ function renderExpanderEditor(instance, state) {
     `;
 }
 
+function renderTextLayerEditor(instance) {
+    const params = normalizeEditorTextParams(instance.params || {});
+    const layout = measureEditorTextLayout(params);
+    return `
+        <div class="custom-layer-editor">
+            <div class="info-banner">Type directly here, then drag the text box in the preview to move it, drag a corner handle to resize it, or use the top rotate handle for rotation.</div>
+            <section class="custom-group">
+                <div class="panel-heading">Content</div>
+                <div class="control-row">
+                    <div class="control-row-top"><label>Text</label></div>
+                    <textarea class="editor-textarea" rows="5" data-control-instance="${instance.instanceId}" data-control-key="textContent">${escapeHtml(params.textContent)}</textarea>
+                </div>
+            </section>
+            <section class="custom-group">
+                <div class="panel-heading">Typography</div>
+                <div class="control-row">
+                    <div class="control-row-top"><label>Font Family</label></div>
+                    <select data-control-instance="${instance.instanceId}" data-control-key="textFontFamily">
+                        ${EDITOR_TEXT_FONT_OPTIONS.map((font) => `<option value="${escapeHtml(font)}" ${font === params.textFontFamily ? 'selected' : ''}>${escapeHtml(font)}</option>`).join('')}
+                    </select>
+                </div>
+                ${rangeRow(instance, 'textFontSize', 'Font Size (px)', 4, 4096, 1, params.textFontSize)}
+                ${rangeRow(instance, 'textOpacity', 'Opacity', 0, 1, 0.01, params.textOpacity)}
+                ${rangeRow(instance, 'textRotation', 'Rotation (deg)', -180, 180, 0.1, params.textRotation)}
+                <div class="control-row control-row-color">
+                    <div class="control-row-top">
+                        <label>Color</label>
+                        <span class="control-value">${String(params.textColor).toUpperCase()}</span>
+                    </div>
+                    <div class="color-row">
+                        <input type="color" value="${params.textColor}" data-control-instance="${instance.instanceId}" data-control-key="textColor">
+                        <button type="button" class="mini-button" data-action="arm-eyedropper" data-target="${instance.instanceId}:textColor">Pick</button>
+                    </div>
+                </div>
+            </section>
+            <section class="custom-group">
+                <div class="panel-heading">Placement</div>
+                <div class="text-grid">
+                    <label class="control-row compact-control">
+                        <div class="control-row-top"><span>X</span></div>
+                        <input type="number" step="1" value="${formatNumber(params.textX)}" data-control-instance="${instance.instanceId}" data-control-key="textX">
+                    </label>
+                    <label class="control-row compact-control">
+                        <div class="control-row-top"><span>Y</span></div>
+                        <input type="number" step="1" value="${formatNumber(params.textY)}" data-control-instance="${instance.instanceId}" data-control-key="textY">
+                    </label>
+                </div>
+                <div class="info-banner is-data"><span>Current Bounds</span><strong>${Math.round(layout.width)} x ${Math.round(layout.height)}</strong></div>
+                <div class="button-cluster">
+                    <button type="button" class="mini-button" data-action="text-layer-center" data-instance="${instance.instanceId}">Center In Frame</button>
+                    <button type="button" class="mini-button" data-action="export-current">Export PNG</button>
+                </div>
+            </section>
+        </div>
+    `;
+}
+
 function layerHasControlKey(layerDef, key) {
     const walk = (controls = []) => controls.some((control) => {
         if (!control || typeof control !== 'object') return false;
@@ -516,6 +586,8 @@ function renderControl(instance, control, state, layerDef) {
             return renderBgPatcherEditor(instance);
         case 'expanderEditor':
             return renderExpanderEditor(instance, state);
+        case 'textLayerEditor':
+            return renderTextLayerEditor(instance);
         default:
             return '';
     }
@@ -629,6 +701,90 @@ function renderPipeline(state, registry) {
         </div>
     `;
 }
+
+function renderBasePanel(state) {
+    const base = normalizeEditorBase(state.document.base, state.document.source);
+    const source = normalizeEditorSource(state.document.source);
+    const hasSourceImage = hasEditorSourceImage(state.document);
+
+    return `
+        <div class="panel-section">
+            <div class="inspector-header compact-header">
+                <div>
+                    <div class="eyebrow">Editor Base</div>
+                    <h3>Base Canvas</h3>
+                    <p>Sets the underlying Editor canvas even when no source image is loaded. Effects, text, export, save, and Library capture all use this base.</p>
+                </div>
+                <div class="inspector-note">Source images are fit inside the current base canvas when the resolutions differ.</div>
+            </div>
+        </div>
+        <div class="panel-section controls-section">
+            <div class="custom-layer-editor">
+                <section class="custom-group">
+                    <div class="panel-heading">Canvas Resolution</div>
+                    <div class="text-grid">
+                        <label class="control-row compact-control">
+                            <div class="control-row-top"><span>Width</span></div>
+                            <input type="number" min="1" max="32768" step="1" value="${base.width}" data-editor-base-dimension="width">
+                        </label>
+                        <label class="control-row compact-control">
+                            <div class="control-row-top"><span>Height</span></div>
+                            <input type="number" min="1" max="32768" step="1" value="${base.height}" data-editor-base-dimension="height">
+                        </label>
+                    </div>
+                    <div class="button-cluster" style="margin-top: 8px;">
+                        <button type="button" class="mini-button" data-action="editor-base-swap-dimensions">Swap W/H</button>
+                    </div>
+                    <div class="info-banner is-data"><span>Current Canvas</span><strong>${base.width} x ${base.height}</strong></div>
+                    <div class="button-cluster">
+                        ${EDITOR_BASE_RESOLUTION_PRESETS.map((preset) => `<button type="button" class="mini-button" data-action="editor-base-resolution-preset" data-width="${preset.width}" data-height="${preset.height}">${preset.label}</button>`).join('')}
+                    </div>
+                </section>
+                <section class="custom-group">
+                    <div class="panel-heading">Aspect Presets</div>
+                    <div class="button-cluster">
+                        ${EDITOR_BASE_ASPECT_PRESETS.map((preset) => `<button type="button" class="mini-button" data-action="editor-base-aspect-preset" data-width="${preset.width}" data-height="${preset.height}">${preset.label}</button>`).join('')}
+                    </div>
+                    <div class="info-banner">Aspect preset buttons preserve the larger current side so ratio changes stay predictable instead of fighting the resolution presets.</div>
+                </section>
+                <section class="custom-group">
+                    <div class="panel-heading">Background</div>
+                    <div class="button-cluster">
+                        <button type="button" class="mini-button ${base.backgroundMode !== 'solid' ? 'is-active' : ''}" data-action="editor-base-background-mode" data-mode="transparent">Transparent</button>
+                        <button type="button" class="mini-button ${base.backgroundMode === 'solid' ? 'is-active' : ''}" data-action="editor-base-background-mode" data-mode="solid">Solid Color</button>
+                    </div>
+                    ${base.backgroundMode === 'solid' ? `
+                        <div class="control-row control-row-color">
+                            <div class="control-row-top">
+                                <label>Background Color</label>
+                                <span class="control-value">${String(base.backgroundColor).toUpperCase()}</span>
+                            </div>
+                            <div class="color-row">
+                                <input type="color" value="${base.backgroundColor}" data-editor-base-background-color="1">
+                            </div>
+                        </div>
+                    ` : '<div class="info-banner">Transparent keeps the base as full alpha pixels until an image, text, or later effect writes visible color.</div>'}
+                </section>
+                <section class="custom-group">
+                    <div class="panel-heading">Source Image</div>
+                    ${hasSourceImage ? `
+                        <div class="info-banner is-data"><span>Loaded Source</span><strong>${escapeHtml(source.name || 'Embedded Image')} | ${source.width} x ${source.height}</strong></div>
+                        <div class="button-cluster">
+                            <button type="button" class="mini-button" data-action="trigger-image-input">Replace Image</button>
+                            <button type="button" class="mini-button danger" data-action="editor-remove-image">Remove Image</button>
+                        </div>
+                    ` : `
+                        <div class="empty-inline">No source image is loaded. The Editor is running directly from the Base canvas.</div>
+                        <div class="button-cluster">
+                            <button type="button" class="mini-button" data-action="trigger-image-input">Load Image</button>
+                        </div>
+                    `}
+                </section>
+            </div>
+        </div>
+    `;
+}
+
 function renderScopes(state, registry) {
     const selected = selectedInstance(state);
     return `
@@ -656,6 +812,7 @@ function renderSidebar(state, registry) {
     let body = '';
 
     if (currentView === 'pipeline') body = renderPipeline(state, registry);
+    else if (currentView === 'base') body = renderBasePanel(state);
     else if (currentView === 'scopes') body = renderScopes(state, registry);
     else if (currentView === 'layer') body = renderLayerPanel(state, registry);
     else body = `<div class="panel-section"><div class="panel-heading">Effect Library</div>${renderGroups(state, registry)}</div>`;
@@ -733,7 +890,7 @@ function renderJsonCompareDialog(state) {
                             ${results.map((res, i) => `
                                 <div class="scope-card" style="cursor: pointer;" data-action="json-compare-select" data-index="${i}">
                                     <div class="scope-card-header" style="text-overflow:ellipsis; overflow:hidden; white-space:nowrap;" title="${res.filename}">${res.filename}</div>
-                                    <div style="position: relative; width: 100%; aspect-ratio: ${Math.max(1, res.payload.source?.width || 1)} / ${Math.max(1, res.payload.source?.height || 1)}; background: #000;">
+                                    <div style="position: relative; width: 100%; aspect-ratio: ${Math.max(1, res.payload.base?.width || res.payload.source?.width || 1)} / ${Math.max(1, res.payload.base?.height || res.payload.source?.height || 1)}; background: #000;">
                                         <img src="${res.url}" class="json-compare-image" style="width: 100%; height: 100%; object-fit: contain; pointer-events: auto;" onmouseenter="this.dataset.swapSrc=this.src; this.src='${res.payload.source?.imageData || ''}'" onmouseleave="this.src=this.dataset.swapSrc" />
                                     </div>
                                 </div>
@@ -805,12 +962,14 @@ function renderStitchToolbar(state) {
 
 function renderCompositeToolbar(state) {
     const layerCount = state.compositeDocument?.layers?.length || 0;
+    const hasSelection = !!state.compositeDocument?.selection?.layerId;
     return `
         <header class="toolbar">
             <div class="toolbar-cluster">
                 <button type="button" class="toolbar-button" data-action="composite-new-project">New Project</button>
                 <button type="button" class="toolbar-button" data-action="composite-add-editor-project">Add Editor Project</button>
                 <button type="button" class="toolbar-button" data-action="composite-add-images">Add Images</button>
+                ${hasSelection ? '<button type="button" class="toolbar-button" data-action="composite-replace-with">Replace With</button>' : ''}
                 <button type="button" class="toolbar-button" data-action="composite-add-text">Add Text</button>
                 <button type="button" class="toolbar-button" data-action="composite-add-square">Add Square</button>
                 <button type="button" class="toolbar-button" data-action="composite-add-circle">Add Circle</button>
@@ -977,7 +1136,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 <aside class="workspace-sidebar" id="sidebarPanel"></aside>
                 <section class="workspace-center">
                     <div class="preview-topbar">
-                        <div class="preview-title-block"><div class="eyebrow">Preview</div><h2 id="previewTitle">No source loaded</h2></div>
+                        <div class="preview-title-block"><div class="eyebrow">Preview</div><h2 id="previewTitle">Blank Canvas</h2></div>
                         <div class="preview-toolbar">
                             <label class="tiny-toggle"><input type="checkbox" id="highQualityPreviewToggle"><span>High Quality</span></label>
                             <label class="tiny-toggle"><input type="checkbox" id="hoverCompareToggle"><span>Hover Original</span></label>
@@ -990,9 +1149,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                         </div>
                     </div>
                     <div class="preview-shell" id="previewShell">
-                        <div class="preview-empty" id="previewEmpty"><strong>No image loaded</strong><span>Load an image to start editing.</span></div>
+                        <div class="preview-empty" id="previewEmpty"><strong>No canvas available</strong><span>Set a Base canvas or load a project to start editing.</span></div>
                         <div class="preview-stage" id="previewStage">
-                            <div class="preview-scale-wrap" id="previewScaleWrap"><canvas id="sourcePreviewCanvas"></canvas><canvas id="displayCanvas"></canvas><canvas id="hoverPreviewCanvas" class="hover-preview-canvas"></canvas><div class="ca-pin-overlay" id="caPinOverlay"></div><div class="ca-pin-overlay" id="tiltShiftPinOverlay" style="border-radius: 50%; box-shadow: 0 0 0 1px #fff, inset 0 0 0 1px rgba(0,0,0,0.5);"></div><div id="previewBrushCursor" style="display: none; position: absolute; pointer-events: none; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,0.7), inset 0 0 0 1px rgba(0,0,0,0.5); z-index: 100; transform: translate(-50%, -50%); border: 1px dashed rgba(255,255,255,0.3);"></div></div>
+                            <div class="preview-scale-wrap" id="previewScaleWrap"><canvas id="sourcePreviewCanvas"></canvas><canvas id="displayCanvas"></canvas><canvas id="hoverPreviewCanvas" class="hover-preview-canvas"></canvas><div class="editor-text-overlay-shell" id="editorTextOverlayShell"></div><div class="ca-pin-overlay" id="caPinOverlay"></div><div class="ca-pin-overlay" id="tiltShiftPinOverlay" style="border-radius: 50%; box-shadow: 0 0 0 1px #fff, inset 0 0 0 1px rgba(0,0,0,0.5);"></div><div id="previewBrushCursor" style="display: none; position: absolute; pointer-events: none; border-radius: 50%; box-shadow: 0 0 0 1px rgba(255,255,255,0.7), inset 0 0 0 1px rgba(0,0,0,0.5); z-index: 100; transform: translate(-50%, -50%); border: 1px dashed rgba(255,255,255,0.3);"></div></div>
                         </div>
                         <div class="preview-loupe" id="previewLoupe"><canvas id="previewLoupeCanvas" width="88" height="88"></canvas></div>
                     </div>
@@ -1054,6 +1213,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         hoverPreviewCanvas: root.querySelector('#hoverPreviewCanvas'),
         previewStage: root.querySelector('#previewStage'),
         previewScaleWrap: root.querySelector('#previewScaleWrap'),
+        editorTextOverlayShell: root.querySelector('#editorTextOverlayShell'),
         previewBrushCursor: root.querySelector('#previewBrushCursor'),
         previewTitle: root.querySelector('#previewTitle'),
         previewZoomRange: root.querySelector('#previewZoomRange'),
@@ -1101,6 +1261,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     let previewClickSuppressed = false;
     let previewInteraction = null;
     let brushInteraction = null;
+    let textLayerInteraction = null;
     let latestState = null;
     let lastActiveSection = null;
     let lastSourceSignature = '';
@@ -1434,16 +1595,32 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         return state ? selectedInstance(state) : null;
     }
 
+    function getActivePreviewResolution(state = getLiveState()) {
+        const activeCanvas = getActivePreviewCanvas(state);
+        if (!activeCanvas) return null;
+        if (hasProcessedPreview(state) && activeCanvas === refs.canvas) {
+            const gl = activeCanvas.getContext('webgl2');
+            return {
+                width: Math.max(1, Number(gl?.drawingBufferWidth) || Number(activeCanvas.width) || 1),
+                height: Math.max(1, Number(gl?.drawingBufferHeight) || Number(activeCanvas.height) || 1)
+            };
+        }
+        return {
+            width: Math.max(1, Number(activeCanvas.width) || 1),
+            height: Math.max(1, Number(activeCanvas.height) || 1)
+        };
+    }
+
     function getPreviewPixelPosition(clientX, clientY) {
-        const activeCanvas = getActivePreviewCanvas(getLiveState());
-        if (!activeCanvas?.width || !activeCanvas?.height) return null;
+        const resolution = getActivePreviewResolution(getLiveState());
+        if (!resolution?.width || !resolution?.height) return null;
         const uv = clientToImageUv(clientX, clientY, refs.previewScaleWrap.getBoundingClientRect());
         if (!uv) return null;
         return {
-            x: clamp(Math.floor(uv.x * activeCanvas.width), 0, Math.max(0, activeCanvas.width - 1)),
-            y: clamp(Math.floor(uv.y * activeCanvas.height), 0, Math.max(0, activeCanvas.height - 1)),
-            width: activeCanvas.width,
-            height: activeCanvas.height
+            x: clamp(Math.floor(uv.x * resolution.width), 0, Math.max(0, resolution.width - 1)),
+            y: clamp(Math.floor(uv.y * resolution.height), 0, Math.max(0, resolution.height - 1)),
+            width: resolution.width,
+            height: resolution.height
         };
     }
 
@@ -1457,6 +1634,342 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             width: sample.width,
             height: sample.height
         };
+    }
+
+    function rotatePoint(point, radiansValue) {
+        const cos = Math.cos(radiansValue);
+        const sin = Math.sin(radiansValue);
+        return {
+            x: (point.x * cos) - (point.y * sin),
+            y: (point.x * sin) + (point.y * cos)
+        };
+    }
+
+    function rotatePointAround(point, center, degreesValue = 0) {
+        const radiansValue = (Number(degreesValue) || 0) * (Math.PI / 180);
+        const rotated = rotatePoint({
+            x: (Number(point.x) || 0) - (Number(center.x) || 0),
+            y: (Number(point.y) || 0) - (Number(center.y) || 0)
+        }, radiansValue);
+        return {
+            x: rotated.x + (Number(center.x) || 0),
+            y: rotated.y + (Number(center.y) || 0)
+        };
+    }
+
+    function getTextBoundsCenter(bounds) {
+        return {
+            x: Number(bounds.x || 0) + (Number(bounds.width || 0) * 0.5),
+            y: Number(bounds.y || 0) + (Number(bounds.height || 0) * 0.5)
+        };
+    }
+
+    function normalizeDegrees(value) {
+        let degreesValue = Number(value) || 0;
+        while (degreesValue > 180) degreesValue -= 360;
+        while (degreesValue <= -180) degreesValue += 360;
+        return degreesValue;
+    }
+
+    function getTextLayerInputRenderMetrics(state, instanceId) {
+        const logicalResolution = computeResolutionThroughInstance(state, instanceId);
+        const renderMetrics = actions.getLayerInputMetrics?.(instanceId) || null;
+        const renderWidth = Math.max(1, Number(renderMetrics?.width) || logicalResolution.width || 1);
+        const renderHeight = Math.max(1, Number(renderMetrics?.height) || logicalResolution.height || 1);
+        return {
+            logicalWidth: Math.max(1, Number(logicalResolution.width) || 1),
+            logicalHeight: Math.max(1, Number(logicalResolution.height) || 1),
+            renderWidth,
+            renderHeight,
+            scaleX: renderWidth / Math.max(1, Number(logicalResolution.width) || 1),
+            scaleY: renderHeight / Math.max(1, Number(logicalResolution.height) || 1)
+        };
+    }
+
+    function scaleTextPointToRender(point, metrics) {
+        return {
+            x: (Number(point.x) || 0) * (Number(metrics?.scaleX) || 1),
+            y: (Number(point.y) || 0) * (Number(metrics?.scaleY) || 1)
+        };
+    }
+
+    function scaleTextPointToLogical(point, metrics) {
+        return {
+            x: (Number(point.x) || 0) / Math.max(0.000001, Number(metrics?.scaleX) || 1),
+            y: (Number(point.y) || 0) / Math.max(0.000001, Number(metrics?.scaleY) || 1)
+        };
+    }
+
+    function scaleTextBoundsToRender(bounds, metrics) {
+        const topLeft = scaleTextPointToRender({ x: bounds.x, y: bounds.y }, metrics);
+        return {
+            x: topLeft.x,
+            y: topLeft.y,
+            width: Math.max(1, (Number(bounds.width) || 0) * (Number(metrics?.scaleX) || 1)),
+            height: Math.max(1, (Number(bounds.height) || 0) * (Number(metrics?.scaleY) || 1)),
+            right: topLeft.x + (Math.max(1, (Number(bounds.width) || 0) * (Number(metrics?.scaleX) || 1))),
+            bottom: topLeft.y + (Math.max(1, (Number(bounds.height) || 0) * (Number(metrics?.scaleY) || 1)))
+        };
+    }
+
+    function getTextInteractionDocumentPoint(instanceId, clientX, clientY, transforms, renderMetrics) {
+        const inputPixel = getLayerInputPixelPosition(instanceId, clientX, clientY);
+        if (inputPixel) {
+            return scaleTextPointToLogical(inputPixel, renderMetrics);
+        }
+        const previewPixel = getPreviewPixelPosition(clientX, clientY);
+        if (!previewPixel) return null;
+        const renderPoint = applyInverseTextTransforms(previewPixel, transforms);
+        return scaleTextPointToLogical(renderPoint, renderMetrics);
+    }
+
+    function getTextLayerTailTransforms(state, instanceId, renderMetrics = null) {
+        const stack = state?.document?.layerStack || [];
+        const startIndex = stack.findIndex((instance) => instance.instanceId === instanceId);
+        if (startIndex === -1) return { transforms: [], finalResolution: { width: 1, height: 1 } };
+
+        let width = Math.max(1, Number(renderMetrics?.renderWidth) || computeResolutionThroughInstance(state, instanceId).width);
+        let height = Math.max(1, Number(renderMetrics?.renderHeight) || computeResolutionThroughInstance(state, instanceId).height);
+        const transforms = [];
+
+        for (let index = startIndex + 1; index < stack.length; index += 1) {
+            const instance = stack[index];
+            if (instance.visible === false || instance.enabled === false) continue;
+            if (instance.layerId === 'scale') {
+                const factor = Math.max(0.1, parseFloat(instance.params?.scaleMultiplier || 1));
+                transforms.push({
+                    type: 'scale',
+                    factor
+                });
+                width = Math.max(1, Math.round(width * factor));
+                height = Math.max(1, Math.round(height * factor));
+            } else if (instance.layerId === 'expander') {
+                const padding = Math.max(0, Math.round(Number(instance.params?.expanderPadding || 0)));
+                transforms.push({
+                    type: 'expander',
+                    padding
+                });
+                width += padding * 2;
+                height += padding * 2;
+            } else if (instance.layerId === 'cropTransform') {
+                const metrics = getCropTransformMetrics(instance.params, width, height);
+                transforms.push({
+                    type: 'cropTransform',
+                    metrics,
+                    rotationDegrees: Number(instance.params?.cropRotation || 0),
+                    flipX: !!instance.params?.cropFlipX,
+                    flipY: !!instance.params?.cropFlipY
+                });
+                width = metrics.outputWidth;
+                height = metrics.outputHeight;
+            }
+        }
+
+        return {
+            transforms,
+            finalResolution: { width, height }
+        };
+    }
+
+    function applyForwardTextTransforms(point, transforms = []) {
+        let next = { x: Number(point.x) || 0, y: Number(point.y) || 0 };
+        transforms.forEach((transform) => {
+            if (transform.type === 'scale') {
+                next = {
+                    x: next.x * transform.factor,
+                    y: next.y * transform.factor
+                };
+            } else if (transform.type === 'expander') {
+                next = {
+                    x: next.x + transform.padding,
+                    y: next.y + transform.padding
+                };
+            } else if (transform.type === 'cropTransform') {
+                const metrics = transform.metrics;
+                const center = {
+                    x: metrics.cropWidthFloat * 0.5,
+                    y: metrics.cropHeightFloat * 0.5
+                };
+                const rotated = rotatePoint({
+                    x: next.x - metrics.leftPx - center.x,
+                    y: next.y - metrics.topPx - center.y
+                }, (transform.rotationDegrees * Math.PI) / 180);
+                next = {
+                    x: (transform.flipX ? -rotated.x : rotated.x) + center.x,
+                    y: (transform.flipY ? -rotated.y : rotated.y) + center.y
+                };
+            }
+        });
+        return next;
+    }
+
+    function applyInverseTextTransforms(point, transforms = []) {
+        let next = { x: Number(point.x) || 0, y: Number(point.y) || 0 };
+        for (let index = transforms.length - 1; index >= 0; index -= 1) {
+            const transform = transforms[index];
+            if (transform.type === 'scale') {
+                next = {
+                    x: next.x / Math.max(0.000001, transform.factor),
+                    y: next.y / Math.max(0.000001, transform.factor)
+                };
+            } else if (transform.type === 'expander') {
+                next = {
+                    x: next.x - transform.padding,
+                    y: next.y - transform.padding
+                };
+            } else if (transform.type === 'cropTransform') {
+                const metrics = transform.metrics;
+                const center = {
+                    x: metrics.cropWidthFloat * 0.5,
+                    y: metrics.cropHeightFloat * 0.5
+                };
+                const flipped = {
+                    x: transform.flipX ? -(next.x - center.x) : (next.x - center.x),
+                    y: transform.flipY ? -(next.y - center.y) : (next.y - center.y)
+                };
+                const rotated = rotatePoint(flipped, (-transform.rotationDegrees * Math.PI) / 180);
+                next = {
+                    x: rotated.x + center.x + metrics.leftPx,
+                    y: rotated.y + center.y + metrics.topPx
+                };
+            }
+        }
+        return next;
+    }
+
+    function getSelectedTextLayerOverlayMetrics(state = getLiveState()) {
+        if (!state?.document) return null;
+        const current = selectedInstance(state);
+        if (!current || current.layerId !== 'textOverlay' || current.visible === false || current.enabled === false || !hasEditorCanvas(state?.document) || !refs.editorTextOverlayShell) return null;
+        const params = normalizeEditorTextParams(current.params || {});
+        const overlayRotation = -params.textRotation;
+        const layout = measureEditorTextLayout(params);
+        const logicalBounds = getEditorTextBounds(params);
+        const renderMetrics = getTextLayerInputRenderMetrics(state, current.instanceId);
+        const bounds = scaleTextBoundsToRender(logicalBounds, renderMetrics);
+        const center = getTextBoundsCenter(bounds);
+        const logicalCenter = getTextBoundsCenter(logicalBounds);
+        const tail = getTextLayerTailTransforms(state, current.instanceId, renderMetrics);
+        const topLeft = applyForwardTextTransforms(rotatePointAround({ x: bounds.x, y: bounds.y }, center, overlayRotation), tail.transforms);
+        const topRight = applyForwardTextTransforms(rotatePointAround({ x: bounds.right, y: bounds.y }, center, overlayRotation), tail.transforms);
+        const bottomRight = applyForwardTextTransforms(rotatePointAround({ x: bounds.right, y: bounds.bottom }, center, overlayRotation), tail.transforms);
+        const bottomLeft = applyForwardTextTransforms(rotatePointAround({ x: bounds.x, y: bounds.bottom }, center, overlayRotation), tail.transforms);
+        const width = Math.max(1, bounds.width);
+        const height = Math.max(1, bounds.height);
+        return {
+            instance: current,
+            params,
+            layout,
+            bounds,
+            center,
+            logicalBounds,
+            logicalCenter,
+            renderMetrics,
+            transforms: tail.transforms,
+            corners: { topLeft, topRight, bottomRight, bottomLeft },
+            matrix: {
+                a: (topRight.x - topLeft.x) / width,
+                b: (topRight.y - topLeft.y) / width,
+                c: (bottomLeft.x - topLeft.x) / height,
+                d: (bottomLeft.y - topLeft.y) / height,
+                e: topLeft.x,
+                f: topLeft.y
+            }
+        };
+    }
+
+    function renderSelectedTextOverlay(state = getLiveState()) {
+        const metrics = getSelectedTextLayerOverlayMetrics(state);
+        if (!metrics) return '';
+        return `
+            <div class="editor-text-overlay" style="width:${metrics.bounds.width}px; height:${metrics.bounds.height}px; transform: matrix(${metrics.matrix.a}, ${metrics.matrix.b}, ${metrics.matrix.c}, ${metrics.matrix.d}, ${metrics.matrix.e}, ${metrics.matrix.f});">
+                <div class="editor-text-overlay-body" data-editor-text-box="${metrics.instance.instanceId}"></div>
+                <div class="editor-text-overlay-rotate-line"></div>
+                <div class="editor-text-overlay-rotate-handle" data-editor-text-rotate="1" data-instance="${metrics.instance.instanceId}"></div>
+                ${['nw', 'ne', 'se', 'sw'].map((handle) => `<div class="editor-text-overlay-handle is-${handle}" data-editor-text-handle="${handle}" data-instance="${metrics.instance.instanceId}"></div>`).join('')}
+            </div>
+        `;
+    }
+
+    function syncSelectedTextOverlay(state = getLiveState()) {
+        if (!refs.editorTextOverlayShell) return;
+        refs.editorTextOverlayShell.innerHTML = renderSelectedTextOverlay(state);
+    }
+
+    function getResizeAnchor(bounds, handle) {
+        if (handle === 'nw') return { x: bounds.right, y: bounds.bottom };
+        if (handle === 'ne') return { x: bounds.x, y: bounds.bottom };
+        if (handle === 'sw') return { x: bounds.right, y: bounds.y };
+        return { x: bounds.x, y: bounds.y };
+    }
+
+    function buildResizedTextParams(startParams, handle, localPoint) {
+        const startBounds = getEditorTextBounds(startParams);
+        const anchor = getResizeAnchor(startBounds, handle);
+        const scaleX = Math.abs((localPoint.x - anchor.x) / Math.max(1, startBounds.width));
+        const scaleY = Math.abs((localPoint.y - anchor.y) / Math.max(1, startBounds.height));
+        const nextFontSize = clamp(Math.round(startParams.textFontSize * Math.max(0.1, scaleX, scaleY)), 4, 4096);
+        const sized = {
+            ...startParams,
+            textFontSize: nextFontSize
+        };
+        const nextBounds = getEditorTextBounds(sized);
+        if (handle === 'nw') {
+            return { ...sized, textX: anchor.x - nextBounds.width, textY: anchor.y - nextBounds.height };
+        }
+        if (handle === 'ne') {
+            return { ...sized, textX: anchor.x, textY: anchor.y - nextBounds.height };
+        }
+        if (handle === 'sw') {
+            return { ...sized, textX: anchor.x - nextBounds.width, textY: anchor.y };
+        }
+        return { ...sized, textX: anchor.x, textY: anchor.y };
+    }
+
+    function updateTextLayerInteraction(clientX, clientY) {
+        if (!textLayerInteraction) return;
+        const current = currentSelectedInstance();
+        if (!current || current.instanceId !== textLayerInteraction.instanceId || current.layerId !== 'textOverlay') {
+            textLayerInteraction = null;
+            syncSelectedTextOverlay();
+            return;
+        }
+        const documentPoint = getTextInteractionDocumentPoint(
+            textLayerInteraction.instanceId,
+            clientX,
+            clientY,
+            textLayerInteraction.transforms,
+            textLayerInteraction.renderMetrics
+        );
+        if (!documentPoint) return;
+        const nextParams = textLayerInteraction.mode === 'drag'
+            ? {
+                ...textLayerInteraction.startParams,
+                textX: textLayerInteraction.startParams.textX + (documentPoint.x - textLayerInteraction.startPoint.x),
+                textY: textLayerInteraction.startParams.textY + (documentPoint.y - textLayerInteraction.startPoint.y)
+            }
+            : textLayerInteraction.mode === 'rotate'
+                ? {
+                    ...textLayerInteraction.startParams,
+                    textRotation: normalizeDegrees(
+                        textLayerInteraction.startParams.textRotation
+                        - (((Math.atan2(documentPoint.y - textLayerInteraction.center.y, documentPoint.x - textLayerInteraction.center.x) - textLayerInteraction.startAngle) * 180) / Math.PI)
+                    )
+                }
+                : buildResizedTextParams(
+                    textLayerInteraction.startParams,
+                    textLayerInteraction.handle,
+                    rotatePointAround(documentPoint, textLayerInteraction.center, textLayerInteraction.startParams.textRotation)
+                );
+
+        actions.updateInstance(textLayerInteraction.instanceId, (instance) => ({
+            ...instance,
+            params: {
+                ...instance.params,
+                ...nextParams
+            }
+        }), { render: true, skipViewRender: true });
+        syncSelectedTextOverlay();
     }
 
     function hitTestBgPatch(instance, pixelX, pixelY) {
@@ -1490,13 +2003,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         const loupeActive = eyedropperKind === 'bg-patcher-main'
             || eyedropperKind === 'bg-patcher-protected'
             || eyedropperKind === 'bg-patcher-patch'
+            || eyedropperKind === 'bg-patcher-add-sample'
             || eyedropperKind === 'expander-color';
-        if (!state || !loupeActive || !state.document.source.width) {
-            hideLoupe();
-            return;
-        }
-        const activeCanvas = getActivePreviewCanvas(state);
-        if (!activeCanvas?.width || !activeCanvas?.height) {
+        if (!state || !loupeActive || !hasEditorCanvas(state.document)) {
             hideLoupe();
             return;
         }
@@ -1505,17 +2014,34 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             hideLoupe();
             return;
         }
-        const pixel = getPreviewPixelPosition(clientX, clientY);
-        if (!pixel) {
+
+        const useLayerInputPreview = eyedropperKind === 'bg-patcher-main'
+            || eyedropperKind === 'bg-patcher-protected'
+            || eyedropperKind === 'bg-patcher-patch'
+            || eyedropperKind === 'bg-patcher-add-sample';
+        const inputPreview = useLayerInputPreview
+            ? actions.getLayerInputPreview?.(state.eyedropperTarget?.instanceId)
+            : null;
+        const activeCanvas = inputPreview?.canvas || getActivePreviewCanvas(state);
+        const activeResolution = inputPreview
+            ? {
+                width: Math.max(1, Number(inputPreview.width) || Number(activeCanvas?.width) || 1),
+                height: Math.max(1, Number(inputPreview.height) || Number(activeCanvas?.height) || 1)
+            }
+            : getActivePreviewResolution(state);
+        const pixel = useLayerInputPreview
+            ? getLayerInputPixelPosition(state.eyedropperTarget?.instanceId, clientX, clientY)
+            : getPreviewPixelPosition(clientX, clientY);
+        if (!activeCanvas || !activeResolution?.width || !activeResolution?.height || !pixel) {
             hideLoupe();
             return;
         }
 
         const zoomWindow = 11;
-        const sampleWidth = Math.min(zoomWindow, activeCanvas.width);
-        const sampleHeight = Math.min(zoomWindow, activeCanvas.height);
-        const sourceX = clamp(pixel.x - Math.floor(sampleWidth / 2), 0, Math.max(0, activeCanvas.width - sampleWidth));
-        const sourceY = clamp(pixel.y - Math.floor(sampleHeight / 2), 0, Math.max(0, activeCanvas.height - sampleHeight));
+        const sampleWidth = Math.min(zoomWindow, activeResolution.width);
+        const sampleHeight = Math.min(zoomWindow, activeResolution.height);
+        const sourceX = clamp(pixel.x - Math.floor(sampleWidth / 2), 0, Math.max(0, activeResolution.width - sampleWidth));
+        const sourceY = clamp(pixel.y - Math.floor(sampleHeight / 2), 0, Math.max(0, activeResolution.height - sampleHeight));
         loupeCtx.clearRect(0, 0, refs.previewLoupeCanvas.width, refs.previewLoupeCanvas.height);
         loupeCtx.imageSmoothingEnabled = false;
         loupeCtx.drawImage(activeCanvas, sourceX, sourceY, sampleWidth, sampleHeight, 0, 0, refs.previewLoupeCanvas.width, refs.previewLoupeCanvas.height);
@@ -1566,9 +2092,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
     function applyPreviewScale() {
         if (!latestState) return;
-        const hasSource = !!latestState.document.source.width && !!latestState.document.source.height;
-        const activeCanvas = getActivePreviewCanvas(latestState);
-        if (!hasSource || !activeCanvas?.width || !activeCanvas?.height) {
+        const hasSource = hasEditorCanvas(latestState.document);
+        const resolution = getActivePreviewResolution(latestState);
+        if (!hasSource || !resolution?.width || !resolution?.height) {
             refs.previewScaleWrap.style.transform = 'translate(0px, 0px) scale(1)';
             refs.previewScaleWrap.style.width = '0px';
             refs.previewScaleWrap.style.height = '0px';
@@ -1578,13 +2104,13 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         const transform = computePreviewTransform(
             Math.max(1, refs.previewStage.clientWidth),
             Math.max(1, refs.previewStage.clientHeight),
-            activeCanvas.width,
-            activeCanvas.height,
+            resolution.width,
+            resolution.height,
             latestState.document.view.zoom,
             viewportState.pointer
         );
-        refs.previewScaleWrap.style.width = `${activeCanvas.width}px`;
-        refs.previewScaleWrap.style.height = `${activeCanvas.height}px`;
+        refs.previewScaleWrap.style.width = `${resolution.width}px`;
+        refs.previewScaleWrap.style.height = `${resolution.height}px`;
         refs.previewScaleWrap.style.transform = `translate(${transform.offsetX}px, ${transform.offsetY}px) scale(${transform.visualScale})`;
         refs.previewZoomLabel.textContent = `${Number(latestState.document.view.zoom || 1).toFixed(2)}x`;
     }
@@ -1690,10 +2216,15 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         updateWheelFromPointer(event.clientX, event.clientY);
         updateBgPatchDrag(event.clientX, event.clientY);
         updateBgBrushDrag(event.clientX, event.clientY);
+        updateTextLayerInteraction(event.clientX, event.clientY);
     });
     window.addEventListener('pointerup', () => {
         wheelDrag = null;
         previewInteraction = null;
+        if (textLayerInteraction) {
+            textLayerInteraction = null;
+            render(getLiveState());
+        }
         if (brushInteraction) {
             const current = currentSelectedInstance();
             if (current && current.instanceId === brushInteraction.instanceId) {
@@ -1714,6 +2245,10 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         wheelDrag = null;
         previewInteraction = null;
         brushInteraction = null;
+        if (textLayerInteraction) {
+            textLayerInteraction = null;
+            render(getLiveState());
+        }
     });
     window.addEventListener('keydown', (event) => {
         if (appDialogState) {
@@ -1734,7 +2269,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         const type = document.activeElement?.type;
         if (tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && (type === 'text' || type === 'number' || type === 'search' || type === 'color'))) return;
         const state = getLiveState();
-        if (!state?.document.source.width || (state.document.view.zoom || 1) <= 1) return;
+        if (!hasEditorCanvas(state?.document) || (state.document.view.zoom || 1) <= 1) return;
         event.preventDefault();
         actions.toggleZoomLock();
     });
@@ -1761,6 +2296,11 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             },
             'open-state': () => refs.stateInput.click(),
             'set-studio-view': () => actions.setStudioView(node.dataset.view),
+            'editor-base-resolution-preset': () => actions.applyEditorBaseResolutionPreset?.(parseInt(node.dataset.width, 10), parseInt(node.dataset.height, 10)),
+            'editor-base-aspect-preset': () => actions.applyEditorBaseAspectPreset?.(parseInt(node.dataset.width, 10), parseInt(node.dataset.height, 10)),
+            'editor-base-swap-dimensions': () => actions.swapEditorBaseDimensions?.(),
+            'editor-base-background-mode': () => actions.setEditorBaseBackgroundMode?.(node.dataset.mode),
+            'editor-remove-image': () => actions.removeEditorSourceImage?.(),
             'add-layer': () => actions.addLayer(node.dataset.layer),
             'tilt-shift-pick-focus': () => {
                 const instance = getLiveState()?.document.layerStack.find((item) => item.instanceId === node.dataset.instance);
@@ -1773,12 +2313,14 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             'toggle-layer-enabled': () => actions.toggleLayerEnabled(node.dataset.instance),
             'toggle-layer-visible': () => actions.toggleLayerVisible(node.dataset.instance),
             'reset-ca-center': () => actions.resetCaCenter(node.dataset.instance),
+            'text-layer-center': () => actions.centerTextLayer(node.dataset.instance),
             'set-wheel-neutral': () => actions.updateControl(node.dataset.instance, node.dataset.key, '#ffffff'),
             'save-state': actions.saveState,
             'save-to-library': () => actions.saveProjectToLibrary(),
             'composite-new-project': actions.newCompositeProject,
             'composite-add-editor-project': () => actions.openCompositeProjectPicker?.(),
             'composite-add-images': () => actions.openCompositeImagePicker?.(),
+            'composite-replace-with': () => actions.openCompositeReplaceMenu?.(),
             'composite-add-text': actions.addCompositeTextLayer,
             'composite-add-square': actions.addCompositeSquareLayer,
             'composite-add-circle': actions.addCompositeCircleLayer,
@@ -1860,6 +2402,38 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         if (event.target === refs.appDialog && appDialogState?.closeOnOverlay && !appDialogState?.isAlert) {
             cancelAppDialog();
         }
+    });
+    root.addEventListener('pointerdown', (event) => {
+        const handle = event.target.closest('[data-editor-text-handle]');
+        const rotateHandle = event.target.closest('[data-editor-text-rotate]');
+        const body = event.target.closest('[data-editor-text-box]');
+        if (typeof event.button === 'number' && event.button !== 0) return;
+        if (!handle && !rotateHandle && !body) return;
+        if (getLiveState()?.eyedropperTarget) return;
+        const metrics = getSelectedTextLayerOverlayMetrics();
+        if (!metrics) return;
+        const documentPoint = getTextInteractionDocumentPoint(
+            metrics.instance.instanceId,
+            event.clientX,
+            event.clientY,
+            metrics.transforms,
+            metrics.renderMetrics
+        );
+        if (!documentPoint) return;
+        previewClickSuppressed = true;
+        textLayerInteraction = {
+            instanceId: metrics.instance.instanceId,
+            mode: rotateHandle ? 'rotate' : (handle ? 'resize' : 'drag'),
+            handle: handle?.dataset.editorTextHandle || 'se',
+            startParams: normalizeEditorTextParams(metrics.instance.params || {}),
+            startPoint: documentPoint,
+            startAngle: Math.atan2(documentPoint.y - metrics.logicalCenter.y, documentPoint.x - metrics.logicalCenter.x),
+            center: metrics.logicalCenter,
+            transforms: metrics.transforms,
+            renderMetrics: metrics.renderMetrics
+        };
+        event.preventDefault();
+        event.stopPropagation();
     });
     root.addEventListener('pointermove', (event) => {
         const specCanvas = event.target.closest('.tolerance-spectrum-canvas');
@@ -1975,8 +2549,12 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     });
     root.addEventListener('input', (event) => {
         const target = event.target;
-        if (target.dataset.controlInstance && target.dataset.controlKey && (target.type === 'range' || target.type === 'number')) {
-            syncDraftControl(target);
+        if (target.dataset.controlInstance && target.dataset.controlKey) {
+            const isRangeOrNumber = target.type === 'range' || target.type === 'number';
+            const isTextEntry = target.type === 'text' || String(target.tagName || '').toLowerCase() === 'textarea';
+            if (isRangeOrNumber) {
+                syncDraftControl(target);
+            }
             if (target.type === 'range') {
                 actions.updateControl(
                     target.dataset.controlInstance,
@@ -1988,6 +2566,17 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                     const state = getLiveState();
                     if (state) drawToleranceSpectrums(state);
                 }
+                if (target.dataset.controlKey.startsWith('text')) {
+                    syncSelectedTextOverlay();
+                }
+            } else if (isTextEntry) {
+                actions.updateControl(
+                    target.dataset.controlInstance,
+                    target.dataset.controlKey,
+                    target.value,
+                    { render: true, skipViewRender: true }
+                );
+                syncSelectedTextOverlay();
             }
         } else if (target.dataset.bgProtectedInstance && target.dataset.bgProtectedIndex) {
             actions.updateBgPatcherProtectedTolerance(
@@ -2009,7 +2598,12 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     });
     root.addEventListener('change', (event) => {
         const target = event.target;
-        if (target.dataset.controlInstance && target.dataset.controlKey) actions.updateControl(target.dataset.controlInstance, target.dataset.controlKey, target.type === 'checkbox' ? target.checked : target.value);
+        if (target.dataset.controlInstance && target.dataset.controlKey) {
+            actions.updateControl(target.dataset.controlInstance, target.dataset.controlKey, target.type === 'checkbox' ? target.checked : target.value);
+            if (String(target.dataset.controlKey || '').startsWith('text')) {
+                syncSelectedTextOverlay();
+            }
+        }
         else if (target.dataset.bgPatchColorInstance && target.dataset.bgPatchColorIndex) actions.updateBgPatcherPatch(target.dataset.bgPatchColorInstance, parseInt(target.dataset.bgPatchColorIndex, 10), { color: target.value });
         else if (target.dataset.expanderInstance && target.dataset.expanderChannel) {
             const instance = getLiveState()?.document.layerStack.find((item) => item.instanceId === target.dataset.expanderInstance);
@@ -2023,6 +2617,18 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         else if (target.id === 'hoverCompareToggle') actions.setHoverCompareEnabled(target.checked);
         else if (target.id === 'isolateActiveLayerToggle') actions.setRenderUpToActiveLayer(target.checked);
         else if (target.id === 'loadImageToggle') actions.setLoadImageOnOpen(target.checked);
+        else if (target.dataset.editorBaseDimension) {
+            const state = getLiveState();
+            const base = normalizeEditorBase(state?.document?.base, state?.document?.source);
+            const nextWidth = target.dataset.editorBaseDimension === 'width'
+                ? target.value
+                : base.width;
+            const nextHeight = target.dataset.editorBaseDimension === 'height'
+                ? target.value
+                : base.height;
+            actions.setEditorBaseDimensions?.(nextWidth, nextHeight);
+        }
+        else if (target.dataset.editorBaseBackgroundColor) actions.setEditorBaseBackgroundColor?.(target.value);
 
         else if (target.id === 'themeToggle') actions.setTheme(target.checked);
         else if (target.dataset.action === 'batch-fps') actions.setBatchFps(parseInt(target.value, 10) || 10);
@@ -2067,9 +2673,10 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             logsTabPulseTone = 'info';
         }
         const isEditorActive = activeSection === 'editor';
-        const hasSource = !!state.document.source.width && !!state.document.source.height;
+        const hasSource = hasEditorCanvas(state.document);
         const processedPreview = hasProcessedPreview(state);
-        const sourceSignature = `${state.document.source.name}|${state.document.source.width}x${state.document.source.height}`;
+        const baseResolution = getEditorCanvasResolution(state.document);
+        const sourceSignature = `${getEditorCanvasLabel(state.document)}|${baseResolution.width}x${baseResolution.height}`;
         if (sourceSignature !== lastSourceSignature) {
             lastSourceSignature = sourceSignature;
             resetViewportPointer();
@@ -2166,7 +2773,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             }
 
             drawToleranceSpectrums(state);
-            refs.previewTitle.textContent = state.document.source.name || 'No source loaded';
+            refs.previewTitle.textContent = getEditorCanvasLabel(state.document);
             refs.previewZoomRange.value = String(state.document.view.zoom);
             refs.previewScaleWrap.style.display = hasSource ? 'block' : 'none';
             refs.previewStage.style.display = hasSource ? 'flex' : 'none';
@@ -2180,6 +2787,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 && (
                     current.params.bgPatcherPatchEnabled
                     || state.eyedropperTarget?.kind === 'bg-patcher-main'
+                    || state.eyedropperTarget?.kind === 'bg-patcher-add-sample'
                     || state.eyedropperTarget?.kind === 'bg-patcher-protected'
                     || state.eyedropperTarget?.kind === 'bg-patcher-patch'
                 );
@@ -2208,16 +2816,19 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 refs.tiltShiftPinOverlay.style.display = 'none';
             }
             const loupeEyedropper = state.eyedropperTarget?.kind === 'bg-patcher-main'
+                || state.eyedropperTarget?.kind === 'bg-patcher-add-sample'
                 || state.eyedropperTarget?.kind === 'bg-patcher-protected'
                 || state.eyedropperTarget?.kind === 'bg-patcher-patch'
                 || state.eyedropperTarget?.kind === 'expander-color';
             if (!hasSource || !loupeEyedropper) {
                 hideLoupe();
             }
+            syncSelectedTextOverlay(state);
             applyPreviewScale();
             bindPipelineDrag();
         } else {
             hideLoupe();
+            syncSelectedTextOverlay(null);
         }
 
         if (activeSection === 'composite') {
@@ -2279,6 +2890,12 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
     return {
         render,
+        syncEditorPreviewOverlays() {
+            const state = getLiveState();
+            if (!state || state.ui.activeSection !== 'editor') return;
+            syncSelectedTextOverlay(state);
+            applyPreviewScale();
+        },
         setEditorProgress(payload = null) {
             if (payload?.active) {
                 editorProgressOverlay.show(payload);
@@ -2314,6 +2931,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         },
         openCompositeProjectPicker() {
             return compositePanel.openProjectPicker?.();
+        },
+        openCompositeReplaceMenu() {
+            return compositePanel.openReplaceMenuForSelection?.();
         },
         getCompositeViewportMetrics() {
             return compositePanel.getViewportMetrics?.();

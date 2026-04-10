@@ -2,6 +2,7 @@ import { createDefaultViewState, normalizeViewState } from '../state/documentHel
 import { createEmptyCompositeDocument, normalizeCompositeDocument } from '../composite/document.js';
 import { createEmptyThreeDDocument, normalizeThreeDDocument } from '../3d/document.js';
 import { createEmptyStitchDocument, normalizeStitchDocument } from '../stitch/document.js';
+import { normalizeEditorBase, normalizeEditorSource } from '../editor/baseCanvas.js';
 
 export function applyGeneralThemeToEditorView(view = {}, settings = null) {
     const defaults = createDefaultViewState();
@@ -24,6 +25,8 @@ export function applyEditorSettingsToDocument(document = {}, settings = null) {
     });
     return {
         ...document,
+        source: normalizeEditorSource(document?.source),
+        base: normalizeEditorBase(document?.base, document?.source),
         view: nextView
     };
 }

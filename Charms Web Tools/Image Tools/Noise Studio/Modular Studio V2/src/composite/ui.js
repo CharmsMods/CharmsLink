@@ -3,15 +3,19 @@ import {
     computeCompositeFramedView,
     COMPOSITE_MAX_SCALE,
     COMPOSITE_MAX_ZOOM,
+    getCompositeLayerCrop,
     COMPOSITE_MIN_SCALE,
     COMPOSITE_MIN_ZOOM,
     computeCompositeViewBounds,
-    getCompositeLayerDimensions,
     getCompositeLayerResizeMode,
+    getCompositeLayerSourceDimensions,
+    hasCompositeLayerCrop,
+    isCompositeLayerCropCapable,
     isCompositeLayerStretchCapable,
     normalizeCompositeDocument,
     getActiveCompositeLayers
 } from './document.js';
+import { EDITOR_TEXT_FONT_OPTIONS } from '../editor/textLayerShared.js';
 import { createProgressOverlayController } from '../ui/progressOverlay.js';
 
 function escapeHtml(value) {
@@ -153,6 +157,18 @@ function renderSelectRow(config = {}) {
     `;
 }
 
+function getFontSelectOptions(currentValue = 'Arial') {
+    const normalizedValue = String(currentValue || 'Arial').trim() || 'Arial';
+    const options = EDITOR_TEXT_FONT_OPTIONS.map((font) => ({ value: font, label: font }));
+    if (!EDITOR_TEXT_FONT_OPTIONS.includes(normalizedValue)) {
+        options.unshift({
+            value: normalizedValue,
+            label: `${normalizedValue} (Current)`
+        });
+    }
+    return options;
+}
+
 function renderColorRow(config = {}) {
     const attrs = Object.entries(config.dataset || {})
         .map(([key, value]) => `data-${key}="${escapeHtml(value)}"`)
@@ -288,7 +304,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-stage-wrap.is-dragging{cursor:grabbing}
             .composite-stage-wrap.is-checker{background:linear-gradient(45deg, rgba(255,255,255,.1) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.1) 75%, rgba(255,255,255,.1)),linear-gradient(45deg, rgba(255,255,255,.08) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.08) 75%, rgba(255,255,255,.08));background-size:24px 24px;background-position:0 0,12px 12px}
             .composite-dom-stage{position:absolute;overflow:visible;pointer-events:none}
-            .composite-layer{position:absolute;pointer-events:auto;user-select:none;transform-origin:center center}
+            .composite-layer{position:absolute;pointer-events:auto;user-select:none;transform-origin:center center;overflow:hidden}
+            .composite-layer-media{position:absolute;display:block;max-width:none;max-height:none;pointer-events:none;user-select:none}
             .composite-empty{position:absolute;inset:12px;display:none;align-items:center;justify-content:center;flex-direction:column;gap:6px;text-align:center;pointer-events:none;color:var(--comp-muted);border:1px dashed var(--comp-border-soft);background:rgba(0,0,0,.74)}
             .composite-empty.is-visible{display:flex}
             .composite-export-bounds{position:absolute;border:1px solid #0bf;pointer-events:none;z-index:20;display:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.5)}
@@ -307,6 +324,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-selection-box{position:absolute;border:1px solid #f0c26d;pointer-events:none;z-index:18;display:none;box-shadow:0 0 0 1px rgba(240,194,109,.32)}
             .composite-selection-box.is-visible{display:block}
             .composite-selection-box[data-selection-mode="multi"]{border-style:dashed;box-shadow:0 0 0 1px rgba(240,194,109,.2)}
+            .composite-selection-box[data-interaction-mode="crop"]{border-color:#79d8ff;box-shadow:0 0 0 1px rgba(121,216,255,.24)}
+            .composite-selection-box[data-interaction-mode="crop"] .composite-selection-handle{background:#79d8ff}
             .composite-selection-handle{position:absolute;width:12px;height:12px;background:#f0c26d;border:1px solid #fff;pointer-events:auto;z-index:19}
             .composite-selection-handle.nw{top:-6px;left:-6px;cursor:nwse-resize}
             .composite-selection-handle.ne{top:-6px;right:-6px;cursor:nesw-resize}
@@ -350,6 +369,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-picker-overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:12px;background:rgba(0,0,0,.78);z-index:30}
             .composite-picker-overlay.is-open{display:flex}
             .composite-picker-panel{width:min(1080px,100%);height:min(86vh,760px);display:flex;flex-direction:column;gap:8px;padding:10px}
+            .composite-choice-panel{width:min(420px,100%);display:flex;flex-direction:column;gap:10px;padding:12px}
             .composite-picker-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
             .composite-picker-header .eyebrow{margin:0 0 2px;color:var(--comp-muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
             .composite-picker-header h3{margin:0;font-size:12px}
@@ -415,17 +435,33 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             <div class="composite-picker-overlay" data-composite-role="picker-overlay">
                 <div class="composite-picker-panel">
                     <div class="composite-picker-header">
-                        <div><div class="eyebrow">Library Editor Projects</div><h3>Add Editor Projects To Composite</h3></div>
+                        <div><div class="eyebrow" data-composite-role="picker-eyebrow">Library Editor Projects</div><h3 data-composite-role="picker-title">Add Editor Projects To Composite</h3></div>
                         <button type="button" class="toolbar-button" data-composite-action="close-picker">Close</button>
                     </div>
                     <div class="composite-picker-actions">
                         <div class="composite-picker-selection" data-composite-role="picker-selection">Loading editor projects...</div>
                         <div style="display:flex;gap:6px;flex-wrap:wrap">
                             <button type="button" class="toolbar-button" data-composite-action="refresh-picker">Refresh</button>
-                            <button type="button" class="primary-button" data-composite-action="confirm-picker">Add Selected</button>
+                            <button type="button" class="primary-button" data-composite-action="confirm-picker" data-composite-role="picker-confirm">Add Selected</button>
                         </div>
                     </div>
                     <div class="composite-picker-grid" data-composite-role="picker-grid"></div>
+                </div>
+            </div>
+            <div class="composite-picker-overlay" data-composite-role="replace-overlay">
+                <div class="composite-card composite-choice-panel">
+                    <div class="composite-picker-header">
+                        <div><div class="eyebrow">Composite Replacement</div><h3>Replace With</h3></div>
+                        <button type="button" class="toolbar-button" data-composite-action="close-replace-overlay">Close</button>
+                    </div>
+                    <div class="composite-info-card" data-composite-role="replace-copy">
+                        <span class="composite-help">Choose what should replace the selected layer.</span>
+                    </div>
+                    <div class="composite-card-actions">
+                        <button type="button" class="toolbar-button" data-composite-action="replace-with-editor-project">Editor Project</button>
+                        <button type="button" class="toolbar-button" data-composite-action="replace-with-images">Image File</button>
+                        <button type="button" class="toolbar-button" data-composite-action="close-replace-overlay">Cancel</button>
+                    </div>
                 </div>
             </div>
             <input type="file" accept="image/*" multiple hidden data-composite-role="image-input">
@@ -454,7 +490,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         exportBoundsUI: root.querySelector('[data-composite-role="export-bounds"]'),
         pickerOverlay: root.querySelector('[data-composite-role="picker-overlay"]'),
         pickerGrid: root.querySelector('[data-composite-role="picker-grid"]'),
-        pickerSelection: root.querySelector('[data-composite-role="picker-selection"]')
+        pickerSelection: root.querySelector('[data-composite-role="picker-selection"]'),
+        pickerEyebrow: root.querySelector('[data-composite-role="picker-eyebrow"]'),
+        pickerTitle: root.querySelector('[data-composite-role="picker-title"]'),
+        pickerConfirm: root.querySelector('[data-composite-role="picker-confirm"]'),
+        replaceOverlay: root.querySelector('[data-composite-role="replace-overlay"]'),
+        replaceCopy: root.querySelector('[data-composite-role="replace-copy"]')
     };
 
     const engine = new CompositeEngine({
@@ -485,6 +526,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     let lastSidebarView = null;
     let selectedLayerIds = new Set();
     let selectionResizeMode = 'center-uniform';
+    let activeCropLayerId = null;
+    let replacementTargetLayerId = null;
     const layerNodes = new Map();
 
     function logWorkspace(level, message, options = {}) {
@@ -525,7 +568,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         return node.type !== 'file' && node.type !== 'hidden';
     }
 
-    function getStageLayerSourceDimensions(layer) {
+    function getStageLayerBaseSourceDimensions(layer) {
         const runtimeAsset = engine.layerAssets.get(layer?.id);
         if (runtimeAsset?.width && runtimeAsset?.height) {
             return {
@@ -533,7 +576,25 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 height: Math.max(1, Number(runtimeAsset.height) || 1)
             };
         }
-        return getCompositeLayerDimensions(layer);
+        return getCompositeLayerSourceDimensions(layer);
+    }
+
+    function getStageLayerCrop(layer) {
+        return getCompositeLayerCrop(layer, getStageLayerBaseSourceDimensions(layer)) || {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0
+        };
+    }
+
+    function getStageLayerSourceDimensions(layer) {
+        const source = getStageLayerBaseSourceDimensions(layer);
+        const crop = getStageLayerCrop(layer);
+        return {
+            width: Math.max(1, Number(source.width) - crop.left - crop.right),
+            height: Math.max(1, Number(source.height) - crop.top - crop.bottom)
+        };
     }
 
     function getStageLayerRenderedSize(layer) {
@@ -626,6 +687,11 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 layerId: nextPrimaryId || null
             }
         });
+        syncCropMode(currentDocument);
+        if (replacementTargetLayerId && !currentDocument.layers.some((layer) => layer.id === replacementTargetLayerId && selectedLayerIds.has(layer.id))) {
+            clearReplacementTarget();
+            closeReplaceOverlay();
+        }
         sessionDocument = dragState ? sessionDocument : currentDocument;
         if (options.syncStore !== false) {
             actions.selectCompositeLayer?.(nextPrimaryId || null);
@@ -634,6 +700,85 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             render(currentDocument).catch(() => {});
         }
         return currentDocument;
+    }
+
+    function syncCropMode(document = currentDocument) {
+        const layer = selectedLayer(document);
+        if (!layer || layer.id !== activeCropLayerId || !isCompositeLayerCropCapable(layer)) {
+            activeCropLayerId = null;
+        }
+        return activeCropLayerId;
+    }
+
+    function isActiveCropLayer(layer, document = currentDocument) {
+        if (!layer || !isCompositeLayerCropCapable(layer)) return false;
+        syncCropMode(document);
+        return layer.id === activeCropLayerId;
+    }
+
+    function getReplacementTargetLayer(document = currentDocument) {
+        const normalized = normalizeCompositeDocument(document);
+        return normalized.layers.find((layer) => layer.id === replacementTargetLayerId) || null;
+    }
+
+    function clearReplacementTarget() {
+        replacementTargetLayerId = null;
+        refs.imageInput.multiple = true;
+    }
+
+    function updatePickerModeUI(document = currentDocument) {
+        const replacementTarget = getReplacementTargetLayer(document);
+        if (refs.pickerEyebrow) {
+            refs.pickerEyebrow.textContent = replacementTarget ? 'Replace Layer With Editor Project' : 'Library Editor Projects';
+        }
+        if (refs.pickerTitle) {
+            refs.pickerTitle.textContent = replacementTarget
+                ? `Replace "${replacementTarget.name || 'Layer'}" With Editor Project`
+                : 'Add Editor Projects To Composite';
+        }
+        if (refs.pickerConfirm) {
+            refs.pickerConfirm.textContent = replacementTarget ? 'Replace Layer' : 'Add Selected';
+        }
+    }
+
+    function renderReplaceOverlay(document = currentDocument) {
+        if (!refs.replaceCopy) return;
+        const replacementTarget = getReplacementTargetLayer(document);
+        refs.replaceCopy.innerHTML = replacementTarget
+            ? `
+                <div class="composite-info-line"><span>Selected Layer</span><strong>${escapeHtml(replacementTarget.name || 'Layer')}</strong></div>
+                <span class="composite-help">Choose whether this layer should be replaced with a saved Editor project or a normal embedded image. The replacement keeps the current layer slot and preserves transform-style properties like position, rotation, scale, opacity, and blend mode.</span>
+            `
+            : '<span class="composite-help">Select one layer before opening Replace With.</span>';
+    }
+
+    function closeReplaceOverlay() {
+        refs.replaceOverlay?.classList.remove('is-open');
+        renderReplaceOverlay(currentDocument);
+    }
+
+    function openReplaceOverlay(layerId = null) {
+        const selectedLayers = getSelectedLayers(currentDocument);
+        if (selectedLayers.length !== 1) {
+            setStatus('Select exactly one Composite layer before using Replace With.', 'warning');
+            return false;
+        }
+        const layer = layerId
+            ? currentDocument.layers.find((entry) => entry.id === layerId) || null
+            : selectedLayers[0];
+        if (!layer) {
+            setStatus('Select one Composite layer before using Replace With.', 'warning');
+            return false;
+        }
+        if (layer.locked) {
+            setStatus('Unlock the selected Composite layer before replacing it.', 'warning');
+            return false;
+        }
+        replacementTargetLayerId = layer.id;
+        updatePickerModeUI(currentDocument);
+        renderReplaceOverlay(currentDocument);
+        refs.replaceOverlay?.classList.add('is-open');
+        return true;
     }
 
     function getSelectionBounds(document = currentDocument) {
@@ -744,6 +889,18 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             activeX: dir.includes('e') ? 1 : dir.includes('w') ? -1 : 0,
             activeY: dir.includes('s') ? 1 : dir.includes('n') ? -1 : 0
         };
+    }
+
+    function getHorizontalCropField(displaySide, flipX = false) {
+        return displaySide === 'left'
+            ? (flipX ? 'right' : 'left')
+            : (flipX ? 'left' : 'right');
+    }
+
+    function getVerticalCropField(displaySide, flipY = false) {
+        return displaySide === 'top'
+            ? (flipY ? 'bottom' : 'top')
+            : (flipY ? 'top' : 'bottom');
     }
 
     function buildLayerPatchFromScales(layer, nextScaleX, nextScaleY, nextX = layer.x, nextY = layer.y) {
@@ -1208,12 +1365,14 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     function updateSelectedLayerUI(document = currentStageDocument()) {
         if (!refs.selectionUI) return;
         const normalized = normalizeCompositeDocument(document);
+        syncCropMode(normalized);
         const selectedLayers = getSelectedLayers(normalized).filter((layer) => layer.visible !== false);
         const layer = selectedLayers.length === 1 ? selectedLayers[0] : null;
         const selectionBounds = selectedLayers.length > 1 ? getSelectionBounds(normalized) : null;
         const isVisible = selectedLayers.length > 0 && normalized.workspace.sidebarView !== 'export';
         refs.selectionUI.classList.toggle('is-visible', isVisible);
         refs.selectionUI.dataset.selectionMode = selectedLayers.length > 1 ? 'multi' : 'single';
+        refs.selectionUI.dataset.interactionMode = layer && isActiveCropLayer(layer, normalized) ? 'crop' : 'scale';
         if (!isVisible) return;
 
         const metrics = getViewportMetrics();
@@ -1297,12 +1456,13 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     disabled: layer.locked,
                     dataset: { layerid: layer.id, asset: 'textAsset', field: 'text' }
                 })}
-                ${renderTextInputRow({
+                ${renderSelectRow({
                     label: 'Font Family',
                     value: layer.textAsset?.fontFamily || 'Arial',
                     action: 'update-layer-asset-text',
                     disabled: layer.locked,
-                    dataset: { layerid: layer.id, asset: 'textAsset', field: 'fontFamily' }
+                    dataset: { layerid: layer.id, asset: 'textAsset', field: 'fontFamily' },
+                    options: getFontSelectOptions(layer.textAsset?.fontFamily || 'Arial')
                 })}
                 ${renderRangeRow({
                     id: `layer-font-size-${layer.id}`,
@@ -1375,10 +1535,15 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             `;
             return;
         }
+        const sourceDimensions = getStageLayerBaseSourceDimensions(layer);
         const dimensions = getStageLayerSourceDimensions(layer);
         const rendered = getStageLayerRenderedSize(layer);
         const resizeMode = getCompositeLayerResizeMode(layer);
         const supportsStretch = isCompositeLayerStretchCapable(layer);
+        const cropCapable = isCompositeLayerCropCapable(layer);
+        const crop = getStageLayerCrop(layer);
+        const cropModeActive = isActiveCropLayer(layer);
+        const hasCrop = hasCompositeLayerCrop(layer);
         const showStretchScales = supportsStretch && resizeMode === 'anchor-stretch';
         refs.transformPanel.innerHTML = `
             <div class="composite-setting-stack">
@@ -1387,6 +1552,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     <div class="composite-info-line"><span>Type</span><strong>${escapeHtml(layer.kind === 'editor-project' ? 'Embedded Editor Project' : mapLayerKindLabel(layer))}</strong></div>
                     <div class="composite-info-line"><span>Base Size</span><strong>${escapeHtml(formatDimensions(dimensions.width, dimensions.height))}</strong></div>
                     <div class="composite-info-line"><span>Rendered Size</span><strong>${escapeHtml(formatDimensions(rendered.width, rendered.height))}</strong></div>
+                    ${cropCapable ? `<div class="composite-info-line"><span>Original Source</span><strong>${escapeHtml(formatDimensions(sourceDimensions.width, sourceDimensions.height))}</strong></div>` : ''}
                 </div>
                 ${layer.kind === 'image' ? `
                     <div class="composite-card-actions">
@@ -1398,6 +1564,19 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 ` : layer.kind === 'editor-project' ? `
                     <div class="composite-card-actions">
                         <button type="button" class="toolbar-button" data-composite-action="open-layer-in-editor" data-layer-id="${layer.id}">Open In Editor</button>
+                    </div>
+                ` : ''}
+                ${cropCapable ? `
+                    <div class="composite-info-card">
+                        <div class="composite-info-line"><span>Crop Mode</span><strong>${cropModeActive ? 'Handles Active' : 'Inactive'}</strong></div>
+                        <div class="composite-info-line"><span>Crop Insets</span><strong>${escapeHtml(`L ${crop.left} | T ${crop.top} | R ${crop.right} | B ${crop.bottom}`)}</strong></div>
+                        <span class="composite-help">${cropModeActive
+                            ? 'Drag the stage handles to trim the visible image. While crop mode is active, the gold selection handles switch to blue crop handles.'
+                            : 'Use the stage handles to crop this image non-destructively without opening the Editor.'}</span>
+                    </div>
+                    <div class="composite-card-actions">
+                        <button type="button" class="toolbar-button" data-composite-action="${cropModeActive ? 'exit-layer-crop-mode' : 'enter-layer-crop-mode'}" data-layer-id="${layer.id}" ${layer.locked ? 'disabled' : ''}>${cropModeActive ? 'Exit Crop Mode' : 'Crop With Handles'}</button>
+                        <button type="button" class="toolbar-button" data-composite-action="reset-layer-crop" data-layer-id="${layer.id}" ${(layer.locked || !hasCrop) ? 'disabled' : ''}>Reset Crop</button>
                     </div>
                 ` : ''}
                 <div class="composite-card-actions">
@@ -1554,9 +1733,13 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     }
 
     function renderPicker() {
+        updatePickerModeUI(currentDocument);
+        const replacementTarget = getReplacementTargetLayer(currentDocument);
         const selectedCount = selectedPickerIds.size;
         refs.pickerSelection.textContent = pickerItems.length
-            ? `${selectedCount} selected of ${pickerItems.length} saved Editor project${pickerItems.length === 1 ? '' : 's'}`
+            ? replacementTarget
+                ? `${selectedCount ? '1' : '0'} selected. Choose one saved Editor project to replace "${replacementTarget.name || 'Layer'}".`
+                : `${selectedCount} selected of ${pickerItems.length} saved Editor project${pickerItems.length === 1 ? '' : 's'}`
             : 'No saved Editor projects are available in the Library.';
         refs.pickerGrid.innerHTML = pickerItems.length
             ? pickerItems.map((item) => `
@@ -1575,6 +1758,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     }
 
     async function refreshPicker() {
+        updatePickerModeUI(currentDocument);
         refs.pickerSelection.textContent = 'Loading saved Editor projects...';
         refs.pickerGrid.innerHTML = '';
         try {
@@ -1586,7 +1770,9 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         }
     }
 
-    async function openProjectPicker() {
+    async function openProjectPicker(options = {}) {
+        replacementTargetLayerId = options.replaceLayerId || null;
+        updatePickerModeUI(currentDocument);
         selectedPickerIds = new Set();
         refs.pickerOverlay.classList.add('is-open');
         await refreshPicker();
@@ -1596,6 +1782,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         const ids = [...selectedPickerIds];
         if (!ids.length) return;
         refs.pickerOverlay.classList.remove('is-open');
+        const replacementTarget = getReplacementTargetLayer(currentDocument);
+        if (replacementTarget) {
+            clearReplacementTarget();
+            await actions.replaceCompositeLayerWithEditorProject?.(replacementTarget.id, ids[0]);
+            return;
+        }
         await actions.addCompositeEditorProjects?.(ids);
     }
 
@@ -1646,26 +1838,37 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         for (const layer of layers) {
             const asset = engine.layerAssets.get(layer.id);
             if (!asset?.image) continue;
-            const scaledWidth = asset.width * getLayerScaleValue(layer, 'x');
-            const scaledHeight = asset.height * getLayerScaleValue(layer, 'y');
+            const sourceDimensions = getStageLayerBaseSourceDimensions(layer);
+            const crop = getStageLayerCrop(layer);
+            const scaledWidth = Math.max(0.0001, (sourceDimensions.width - crop.left - crop.right) * getLayerScaleValue(layer, 'x'));
+            const scaledHeight = Math.max(0.0001, (sourceDimensions.height - crop.top - crop.bottom) * getLayerScaleValue(layer, 'y'));
+            const scaledSourceWidth = Math.max(0.0001, sourceDimensions.width * getLayerScaleValue(layer, 'x'));
+            const scaledSourceHeight = Math.max(0.0001, sourceDimensions.height * getLayerScaleValue(layer, 'y'));
             const flipScaleX = layer.flipX ? -1 : 1;
             const flipScaleY = layer.flipY ? -1 : 1;
             const cssBlendMode = layer.blendMode === 'add' ? 'plus-lighter' : layer.blendMode === 'normal' ? 'normal' : layer.blendMode;
 
             let node = layerNodes.get(layer.id) || null;
             if (!node) {
-                node = window.document.createElement('img');
+                node = window.document.createElement('div');
                 node.className = 'composite-layer';
                 node.dataset.layerId = layer.id;
                 node.style.position = 'absolute';
                 node.style.pointerEvents = 'auto';
                 node.style.userSelect = 'none';
                 node.style.transformOrigin = 'center center';
+                node.style.overflow = 'hidden';
                 node.draggable = false;
+                const media = window.document.createElement('img');
+                media.className = 'composite-layer-media';
+                media.alt = '';
+                media.draggable = false;
+                node.appendChild(media);
                 layerNodes.set(layer.id, node);
                 refs.domStage.appendChild(node);
             }
-            if (node.src !== asset.image.src) node.src = asset.image.src;
+            const media = node.querySelector('.composite-layer-media');
+            if (media && media.src !== asset.image.src) media.src = asset.image.src;
             node.style.width = `${scaledWidth}px`;
             node.style.height = `${scaledHeight}px`;
             node.style.left = `${layer.x}px`;
@@ -1674,6 +1877,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             node.style.opacity = layer.opacity !== undefined ? layer.opacity : 1;
             node.style.mixBlendMode = cssBlendMode;
             node.style.display = layer.visible === false ? 'none' : 'block';
+            if (media) {
+                media.style.width = `${scaledSourceWidth}px`;
+                media.style.height = `${scaledSourceHeight}px`;
+                media.style.left = `${-crop.left * getLayerScaleValue(layer, 'x')}px`;
+                media.style.top = `${-crop.top * getLayerScaleValue(layer, 'y')}px`;
+            }
         }
 
         const sortedLayers = [...layers].sort((a, b) => (a.z || 0) - (b.z || 0));
@@ -1686,6 +1895,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     async function render(document) {
         currentDocument = normalizeCompositeDocument(document);
         syncSelectionFromDocument(currentDocument);
+        syncCropMode(currentDocument);
         const sidebarChanged = currentDocument.workspace.sidebarView !== lastSidebarView;
         if (currentDocument.workspace.sidebarView !== 'export' || currentDocument.export.boundsMode !== 'custom') {
             enablePixelMatch = false;
@@ -1695,6 +1905,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             refs.tabs.forEach((tab) => tab.classList.toggle('is-active', tab.dataset.sidebarView === currentDocument.workspace.sidebarView));
             refs.panels.forEach((panel) => panel.classList.toggle('is-active', panel.dataset.compositePanel === currentDocument.workspace.sidebarView));
             renderStageChrome();
+            updatePickerModeUI(currentDocument);
+            renderReplaceOverlay(currentDocument);
             if (!isPanelInteractionLocked() || sidebarChanged) {
                 renderLayersPanel();
                 renderTransformPanel();
@@ -1847,7 +2059,10 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             }
             const layer = selectedLayer(sessionDocument);
             if (!layer || layer.locked) return;
+            const cropModeActive = isActiveCropLayer(layer, sessionDocument);
+            const baseSource = getStageLayerBaseSourceDimensions(layer);
             const source = getStageLayerSourceDimensions(layer);
+            const crop = getStageLayerCrop(layer);
             const rendered = getStageLayerRenderedSize(layer);
             const descriptor = getResizeHandleDescriptor(scaleHandle.dataset.dir || 'se');
             const centerX = layer.x + (rendered.width * 0.5);
@@ -1858,12 +2073,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             };
             const anchorOffset = rotatePoint(anchorLocal.x, anchorLocal.y, Number(layer.rotation) || 0);
             dragState = {
-                mode: 'layer-scale',
+                mode: cropModeActive ? 'layer-crop' : 'layer-scale',
                 dir: scaleHandle.dataset.dir || 'se',
                 pointerId: event.pointerId,
                 layerId: layer.id,
-                sourceWidth: source.width,
-                sourceHeight: source.height,
+                sourceWidth: cropModeActive ? baseSource.width : source.width,
+                sourceHeight: cropModeActive ? baseSource.height : source.height,
                 centerX,
                 centerY,
                 rotation: Number(layer.rotation) || 0,
@@ -1878,7 +2093,10 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 startHalfWidth: rendered.width * 0.5,
                 startHalfHeight: rendered.height * 0.5,
                 anchorWorldX: centerX + anchorOffset.x,
-                anchorWorldY: centerY + anchorOffset.y
+                anchorWorldY: centerY + anchorOffset.y,
+                startCrop: { ...crop },
+                flipX: !!layer.flipX,
+                flipY: !!layer.flipY
             };
             refs.stageWrap.classList.add('is-dragging');
             refs.stageWrap.setPointerCapture?.(event.pointerId);
@@ -1985,7 +2203,9 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 startLayerY: sessionLayer.y
             };
         } else {
-            beginPanDrag(event, sessionDocument);
+            sessionDocument = currentDocument;
+            scheduleStagePaint();
+            event.preventDefault();
             return;
         }
 
@@ -2158,6 +2378,58 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 }
                 syncLayerControlInputs(layer);
             }
+        } else if (dragState.mode === 'layer-crop') {
+            const layer = sessionDocument.layers.find((entry) => entry.id === dragState.layerId) || null;
+            if (layer) {
+                const local = rotateToLocal(
+                    world.x - dragState.centerX,
+                    world.y - dragState.centerY,
+                    dragState.rotation
+                );
+                const nextCrop = { ...(dragState.startCrop || { left: 0, top: 0, right: 0, bottom: 0 }) };
+                if (dragState.activeX !== 0) {
+                    const startAnchorX = dragState.anchorNormX * dragState.startHalfWidth;
+                    const desiredWidthWorld = Math.abs(local.x - startAnchorX);
+                    const activeField = getHorizontalCropField(dragState.activeX < 0 ? 'left' : 'right', dragState.flipX);
+                    const fixedField = getHorizontalCropField(dragState.activeX < 0 ? 'right' : 'left', dragState.flipX);
+                    const fixedCrop = Math.max(0, Number(nextCrop[fixedField]) || 0);
+                    const maxVisibleWidth = Math.max(1, dragState.sourceWidth - fixedCrop);
+                    const desiredVisibleWidth = clamp(desiredWidthWorld / Math.max(dragState.startScaleX, COMPOSITE_MIN_SCALE), 1, maxVisibleWidth);
+                    nextCrop[activeField] = Math.max(0, Math.min(
+                        dragState.sourceWidth - fixedCrop - 1,
+                        Math.round(dragState.sourceWidth - fixedCrop - desiredVisibleWidth)
+                    ));
+                }
+                if (dragState.activeY !== 0) {
+                    const startAnchorY = dragState.anchorNormY * dragState.startHalfHeight;
+                    const desiredHeightWorld = Math.abs(local.y - startAnchorY);
+                    const activeField = getVerticalCropField(dragState.activeY < 0 ? 'top' : 'bottom', dragState.flipY);
+                    const fixedField = getVerticalCropField(dragState.activeY < 0 ? 'bottom' : 'top', dragState.flipY);
+                    const fixedCrop = Math.max(0, Number(nextCrop[fixedField]) || 0);
+                    const maxVisibleHeight = Math.max(1, dragState.sourceHeight - fixedCrop);
+                    const desiredVisibleHeight = clamp(desiredHeightWorld / Math.max(dragState.startScaleY, COMPOSITE_MIN_SCALE), 1, maxVisibleHeight);
+                    nextCrop[activeField] = Math.max(0, Math.min(
+                        dragState.sourceHeight - fixedCrop - 1,
+                        Math.round(dragState.sourceHeight - fixedCrop - desiredVisibleHeight)
+                    ));
+                }
+
+                const nextVisibleWidth = Math.max(1, dragState.sourceWidth - nextCrop.left - nextCrop.right);
+                const nextVisibleHeight = Math.max(1, dragState.sourceHeight - nextCrop.top - nextCrop.bottom);
+                const nextHalfWidth = (nextVisibleWidth * dragState.startScaleX) * 0.5;
+                const nextHalfHeight = (nextVisibleHeight * dragState.startScaleY) * 0.5;
+                const centerOffset = rotatePoint(
+                    dragState.anchorNormX * nextHalfWidth,
+                    dragState.anchorNormY * nextHalfHeight,
+                    dragState.rotation
+                );
+                const nextCenterX = dragState.anchorWorldX - centerOffset.x;
+                const nextCenterY = dragState.anchorWorldY - centerOffset.y;
+                layer.x = nextCenterX - nextHalfWidth;
+                layer.y = nextCenterY - nextHalfHeight;
+                layer.crop = nextCrop;
+                syncLayerControlInputs(layer);
+            }
         } else if (dragState.mode === 'selection-move') {
             const deltaX = world.x - dragState.startWorldX;
             const deltaY = world.y - dragState.startWorldY;
@@ -2248,6 +2520,29 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     scale: nextLayer.scale,
                     scaleX: nextLayer.scaleX,
                     scaleY: nextLayer.scaleY
+                });
+            }
+        } else if (completedDrag.mode === 'layer-crop') {
+            const previousLayer = previousDocument.layers.find((entry) => entry.id === completedDrag.layerId) || null;
+            const nextLayer = nextDocument.layers.find((entry) => entry.id === completedDrag.layerId) || null;
+            const previousCrop = previousLayer?.crop || { left: 0, top: 0, right: 0, bottom: 0 };
+            const nextCrop = nextLayer?.crop || { left: 0, top: 0, right: 0, bottom: 0 };
+            if (
+                nextLayer
+                && previousLayer
+                && (
+                    nextLayer.x !== previousLayer.x
+                    || nextLayer.y !== previousLayer.y
+                    || nextCrop.left !== previousCrop.left
+                    || nextCrop.top !== previousCrop.top
+                    || nextCrop.right !== previousCrop.right
+                    || nextCrop.bottom !== previousCrop.bottom
+                )
+            ) {
+                actions.updateCompositeLayerFields?.(completedDrag.layerId, {
+                    x: nextLayer.x,
+                    y: nextLayer.y,
+                    crop: { ...nextCrop }
                 });
             }
         } else if (completedDrag.mode === 'selection-move' || completedDrag.mode === 'selection-scale') {
@@ -2348,6 +2643,92 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             selectedLayerIds.clear();
             return;
         }
+        if (action === 'open-replace-overlay') {
+            openReplaceOverlay();
+            return;
+        }
+        if (action === 'close-replace-overlay') {
+            closeReplaceOverlay();
+            clearReplacementTarget();
+            updatePickerModeUI(currentDocument);
+            return;
+        }
+        if (action === 'replace-with-editor-project') {
+            const replacementTarget = getReplacementTargetLayer(currentDocument);
+            if (!replacementTarget) {
+                setStatus('Select one Composite layer before using Replace With.', 'warning');
+                return;
+            }
+            closeReplaceOverlay();
+            await openProjectPicker({ replaceLayerId: replacementTarget.id });
+            return;
+        }
+        if (action === 'replace-with-images') {
+            const replacementTarget = getReplacementTargetLayer(currentDocument);
+            if (!replacementTarget) {
+                setStatus('Select one Composite layer before using Replace With.', 'warning');
+                return;
+            }
+            closeReplaceOverlay();
+            refs.imageInput.multiple = false;
+            refs.imageInput.click();
+            return;
+        }
+        if (action === 'enter-layer-crop-mode') {
+            const layer = currentDocument.layers.find((entry) => entry.id === node.dataset.layerId) || null;
+            if (!layer || layer.locked || !isCompositeLayerCropCapable(layer)) return;
+            activeCropLayerId = layer.id;
+            render(currentDocument).catch(() => {});
+            setStatus(`Crop mode armed for "${layer.name || 'Layer'}". Drag the blue handles on the stage to trim the image.`, 'info');
+            return;
+        }
+        if (action === 'exit-layer-crop-mode') {
+            const layer = currentDocument.layers.find((entry) => entry.id === node.dataset.layerId) || null;
+            if (layer && activeCropLayerId === layer.id) {
+                activeCropLayerId = null;
+                render(currentDocument).catch(() => {});
+                setStatus(`Crop mode closed for "${layer.name || 'Layer'}".`, 'info');
+            }
+            return;
+        }
+        if (action === 'reset-layer-crop') {
+            const layer = currentDocument.layers.find((entry) => entry.id === node.dataset.layerId) || null;
+            if (!layer || layer.locked || !isCompositeLayerCropCapable(layer)) return;
+            const currentCrop = getStageLayerCrop(layer);
+            if (!(currentCrop.left || currentCrop.top || currentCrop.right || currentCrop.bottom)) return;
+            const visibleSize = getStageLayerSourceDimensions(layer);
+            const baseSize = getStageLayerBaseSourceDimensions(layer);
+            const scaleX = getLayerScaleValue(layer, 'x');
+            const scaleY = getLayerScaleValue(layer, 'y');
+            const currentCenterX = layer.x + ((visibleSize.width * scaleX) * 0.5);
+            const currentCenterY = layer.y + ((visibleSize.height * scaleY) * 0.5);
+            const displayLeftCrop = (layer.flipX ? currentCrop.right : currentCrop.left) * scaleX;
+            const displayRightCrop = (layer.flipX ? currentCrop.left : currentCrop.right) * scaleX;
+            const displayTopCrop = (layer.flipY ? currentCrop.bottom : currentCrop.top) * scaleY;
+            const displayBottomCrop = (layer.flipY ? currentCrop.top : currentCrop.bottom) * scaleY;
+            const centerShift = rotatePoint(
+                (displayRightCrop - displayLeftCrop) * 0.5,
+                (displayBottomCrop - displayTopCrop) * 0.5,
+                Number(layer.rotation) || 0
+            );
+            const fullWidth = baseSize.width * scaleX;
+            const fullHeight = baseSize.height * scaleY;
+            const nextCenterX = currentCenterX + centerShift.x;
+            const nextCenterY = currentCenterY + centerShift.y;
+            const nextX = nextCenterX - (fullWidth * 0.5);
+            const nextY = nextCenterY - (fullHeight * 0.5);
+            actions.updateCompositeLayerFields?.(layer.id, {
+                x: nextX,
+                y: nextY,
+                crop: {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0
+                }
+            });
+            return;
+        }
         if (action === 'toggle-layer-flip') {
             const axis = node.dataset.axis;
             const layer = currentDocument.layers.find((l) => l.id === node.dataset.layerId);
@@ -2440,6 +2821,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         }
         if (action === 'close-picker') {
             refs.pickerOverlay.classList.remove('is-open');
+            clearReplacementTarget();
+            updatePickerModeUI(currentDocument);
             return;
         }
         if (action === 'refresh-picker') {
@@ -2449,8 +2832,13 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         if (action === 'toggle-picker-item') {
             const id = node.dataset.libraryId;
             if (!id) return;
-            if (selectedPickerIds.has(id)) selectedPickerIds.delete(id);
-            else selectedPickerIds.add(id);
+            if (getReplacementTargetLayer(currentDocument)) {
+                selectedPickerIds = selectedPickerIds.has(id) ? new Set() : new Set([id]);
+            } else if (selectedPickerIds.has(id)) {
+                selectedPickerIds.delete(id);
+            } else {
+                selectedPickerIds.add(id);
+            }
             renderPicker();
             return;
         }
@@ -2735,6 +3123,12 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         const files = [...(event.target.files || [])];
         event.target.value = '';
         if (!files.length) return;
+        const replacementTarget = getReplacementTargetLayer(currentDocument);
+        if (replacementTarget) {
+            clearReplacementTarget();
+            await actions.replaceCompositeLayerWithImageFiles?.(replacementTarget.id, files);
+            return;
+        }
         await actions.addCompositeImageFiles?.(files);
     });
 
@@ -2766,6 +3160,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             dragState = null;
             panelInputActive = false;
             panelPointerIds.clear();
+            clearReplacementTarget();
             if (panelInputRefreshTimer) {
                 clearTimeout(panelInputRefreshTimer);
                 panelInputRefreshTimer = null;
@@ -2778,6 +3173,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             }
             root.style.display = 'none';
             refs.pickerOverlay.classList.remove('is-open');
+            refs.replaceOverlay.classList.remove('is-open');
             refs.stageWrap.classList.remove('is-dragging');
             logWorkspace('info', 'Composite workspace hidden.', {
                 dedupeKey: 'composite-workspace-hidden',
@@ -2787,14 +3183,19 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         async render(document) {
             await render(document);
         },
-        openImagePicker() {
+        openImagePicker(options = {}) {
+            replacementTargetLayerId = options.replaceLayerId || null;
+            refs.imageInput.multiple = !replacementTargetLayerId;
             refs.imageInput.click();
         },
         openStatePicker() {
             refs.stateInput.click();
         },
-        async openProjectPicker() {
-            await openProjectPicker();
+        async openProjectPicker(options = {}) {
+            await openProjectPicker(options);
+        },
+        openReplaceMenuForSelection() {
+            return openReplaceOverlay();
         },
         getViewportMetrics() {
             return getViewportMetrics();

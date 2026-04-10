@@ -298,6 +298,7 @@ button {
 .mode-button.is-active,
 .workspace-tab.is-active,
 .toolbar-button.is-active,
+.mini-button.is-active,
 .primary-button {
     background: var(--line);
     color: var(--bg);
@@ -557,6 +558,92 @@ button {
     z-index: 3;
 }
 
+.editor-text-overlay-shell {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.editor-text-overlay {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: top left;
+    pointer-events: auto;
+}
+
+.editor-text-overlay-body {
+    position: absolute;
+    inset: 0;
+    border: 1px solid rgba(255, 214, 102, 0.95);
+    background: rgba(255, 214, 102, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.42);
+    cursor: move;
+}
+
+.editor-text-overlay-rotate-line {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 1px;
+    height: 18px;
+    transform: translate(-50%, -100%);
+    background: rgba(255, 214, 102, 0.92);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.editor-text-overlay-rotate-handle {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    width: 12px;
+    height: 12px;
+    transform: translate(-50%, calc(-100% - 18px));
+    border-radius: 50%;
+    background: #ffe699;
+    border: 1px solid rgba(0, 0, 0, 0.72);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
+    cursor: grab;
+}
+
+.editor-text-overlay-handle {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    background: #ffe699;
+    border: 1px solid rgba(0, 0, 0, 0.72);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+
+.editor-text-overlay-handle.is-nw {
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%);
+    cursor: nwse-resize;
+}
+
+.editor-text-overlay-handle.is-ne {
+    right: 0;
+    top: 0;
+    transform: translate(50%, -50%);
+    cursor: nesw-resize;
+}
+
+.editor-text-overlay-handle.is-se {
+    right: 0;
+    bottom: 0;
+    transform: translate(50%, 50%);
+    cursor: nwse-resize;
+}
+
+.editor-text-overlay-handle.is-sw {
+    left: 0;
+    bottom: 0;
+    transform: translate(-50%, 50%);
+    cursor: nesw-resize;
+}
+
 .panel-section+.panel-section,
 .scope-card+.scope-card,
 .mask-editor,
@@ -698,6 +785,22 @@ input[type='color'] {
     width: 44px;
     height: 30px;
     padding: 2px;
+}
+
+.editor-textarea {
+    min-height: 108px;
+    resize: vertical;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--text);
+    padding: 8px;
+    font: 400 12px/1.45 var(--mono);
+}
+
+.text-grid {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .check-row,

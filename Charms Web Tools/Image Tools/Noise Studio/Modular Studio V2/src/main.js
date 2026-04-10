@@ -6,6 +6,7 @@ import { downloadState, readJsonFile, serializeState, validateImportPayload } fr
 import { createProjectAdapterRegistry } from './io/projectAdapters.js';
 import { didSaveFile, saveBlobLocally, saveJsonLocally, wasSaveCancelled } from './io/localSave.js';
 import { NoiseStudioEngine } from './engine/pipeline.js';
+import { getCropTransformMetrics } from './engine/cropTransformShared.js';
 import { StitchEngine } from './stitch/engine.js';
 import { analyzePreparedStitchInputs } from './stitch/analysis.js';
 import {
@@ -62,6 +63,18 @@ import { detectGraphicsCapabilities } from './graphics/capabilities.js';
 import { createBootstrapMetrics } from './perf/bootstrapMetrics.js';
 import { createBootShell } from './ui/bootShell.js';
 import { computeAnalysisVisualsJs, computeDiffPreviewJs, extractPaletteFromFileJs } from './editor/backgroundCompute.js';
+import {
+    applyEditorBaseAspectPreset as applyEditorBaseAspectPresetHelper,
+    createDefaultEditorBase,
+    createEditorBaseSurface,
+    getEditorCanvasLabel,
+    getEditorCanvasResolution,
+    hasEditorSourceImage,
+    isDefaultEditorBase,
+    normalizeEditorBase,
+    normalizeEditorSource
+} from './editor/baseCanvas.js';
+import { getEditorTextBounds, normalizeEditorTextParams } from './editor/textLayerShared.js';
 import { extractPaletteFromImageSource } from './editor/palette.js';
 import { APP_ASSET_VERSION, withAssetVersion } from './appAssetVersion.js';
 import { createDefaultAppSettings } from './settings/defaults.js';
@@ -291,7 +304,8 @@ async function registerLibraryTags(tags) {
 }
 
 function getSuggestedProjectName(documentState, nameOverride = null) {
-    return stripProjectExtension(nameOverride || documentState.source?.name || 'Untitled') || 'Untitled';
+    const fallbackName = nameOverride || getEditorCanvasLabel(documentState) || 'Editor Canvas';
+    return stripProjectExtension(fallbackName) || 'Editor Canvas';
 }
 
 function getSuggestedCompositeProjectName(documentState, nameOverride = null) {
@@ -734,10 +748,11 @@ async function buildWorkerSingleFileRequest(file, options = {}) {
 
 function createStudioPreviewSnapshot(studioEngine, documentState, dataUrl) {
     if (!dataUrl) return null;
+    const baseResolution = getEditorCanvasResolution(documentState);
     return {
         imageData: dataUrl,
-        width: Number(studioEngine?.runtime?.renderWidth || documentState.source?.width || 0),
-        height: Number(studioEngine?.runtime?.renderHeight || documentState.source?.height || 0),
+        width: Number(studioEngine?.runtime?.renderWidth || baseResolution.width || 0),
+        height: Number(studioEngine?.runtime?.renderHeight || baseResolution.height || 0),
         updatedAt: Date.now()
     };
 }
@@ -1076,6 +1091,36 @@ function clearStudioEngineImage(studioEngine) {
         gl.clearColor(0, 0, 0, 0);
         gl.clear(gl.COLOR_BUFFER_BIT);
     }
+}
+
+async function syncStudioEngineToDocument(studioEngine, documentState, options = {}) {
+    if (!studioEngine) return null;
+    const normalizedSource = normalizeEditorSource(documentState?.source);
+    const resolvedSettings = options.settings
+        || appStore?.getState?.().settings
+        || activeSettings;
+    const normalizedDocument = applyEditorSettingsToDocument({
+        ...(documentState || {}),
+        source: normalizedSource,
+        base: normalizeEditorBase(documentState?.base, normalizedSource)
+    }, resolvedSettings);
+    let sourceImage = options.sourceImage || null;
+    if (!sourceImage && normalizedSource.imageData) {
+        sourceImage = await loadImageFromDataUrl(normalizedSource.imageData);
+    }
+    const surface = createEditorBaseSurface(normalizedDocument, sourceImage);
+    await studioEngine.loadImage(surface, {
+        ...normalizedSource,
+        width: surface.width,
+        height: surface.height,
+        canvasWidth: surface.width,
+        canvasHeight: surface.height
+    });
+    return {
+        document: normalizedDocument,
+        surface,
+        sourceImage
+    };
 }
 
 function bytesToHex(bytes) {
@@ -1519,7 +1564,7 @@ function createRandomPaletteColor() {
     return hslToHex(hue, saturation, lightness);
 }
 
-const STUDIO_VIEWS = new Set(['edit', 'layer', 'pipeline', 'scopes']);
+const STUDIO_VIEWS = new Set(['edit', 'base', 'layer', 'pipeline', 'scopes']);
 
 function normalizePanelView(_mode, view, hasSelection = false) {
     if (STUDIO_VIEWS.has(view)) return view;
@@ -1577,7 +1622,8 @@ function createInitialState(settings = createDefaultAppSettings()) {
             kind: 'document',
             mode: 'studio',
             workspace: { studioView: 'edit', batchOpen: false },
-            source: { name: '', type: '', imageData: null, width: 0, height: 0 },
+            source: normalizeEditorSource(),
+            base: createDefaultEditorBase(),
             palette: ['#111111', '#f5f7fa', '#ff8a00', '#00d1ff'],
             layerStack: [],
             selection: { layerInstanceId: null },
@@ -1632,6 +1678,46 @@ function reindexStack(registry, layerStack) {
         const siblings = normalized.filter((item) => item.layerId === instance.layerId);
         return relabelInstance(instance, registry, siblings);
     });
+}
+
+function computeEditorResolutionThroughStack(documentState, stopInstanceId = null) {
+    const baseResolution = getEditorCanvasResolution(documentState);
+    let width = Math.max(1, Number(baseResolution.width) || 1);
+    let height = Math.max(1, Number(baseResolution.height) || 1);
+
+    for (const stackItem of documentState?.layerStack || []) {
+        if (stackItem.visible !== false && stackItem.enabled !== false) {
+            if (stackItem.layerId === 'scale') {
+                const factor = Math.max(0.1, parseFloat(stackItem.params?.scaleMultiplier || 1));
+                width = Math.max(1, Math.round(width * factor));
+                height = Math.max(1, Math.round(height * factor));
+            } else if (stackItem.layerId === 'expander') {
+                const padding = Math.max(0, Math.round(Number(stackItem.params?.expanderPadding || 0)));
+                width += padding * 2;
+                height += padding * 2;
+            } else if (stackItem.layerId === 'cropTransform') {
+                const cropMetrics = getCropTransformMetrics(stackItem.params, width, height);
+                width = cropMetrics.outputWidth;
+                height = cropMetrics.outputHeight;
+            }
+        }
+        if (stopInstanceId && stackItem.instanceId === stopInstanceId) {
+            break;
+        }
+    }
+
+    return { width, height };
+}
+
+function centerTextLayerParams(documentState, params = {}, stopInstanceId = null) {
+    const normalized = normalizeEditorTextParams(params);
+    const bounds = getEditorTextBounds(normalized);
+    const resolution = computeEditorResolutionThroughStack(documentState, stopInstanceId);
+    return {
+        ...normalized,
+        textX: Math.round((resolution.width - bounds.width) * 0.5),
+        textY: Math.round((resolution.height - bounds.height) * 0.5)
+    };
 }
 
 function coerceValue(existing, rawValue) {
@@ -2466,6 +2552,8 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         }),
         onMetrics: ({ fps }) => {
+            // Keep preview-space overlays in the same coordinate system the engine just rendered.
+            view?.syncEditorPreviewOverlays?.();
             const state = store.getState();
             if (!state.document.batch.isPlaying) return;
             store.setState((current) => ({
@@ -2564,36 +2652,72 @@ window.addEventListener('DOMContentLoaded', async () => {
         return null;
     }
 
-    async function syncImageSource(file, dataUrl) {
-        await engine.loadImageFromFile(file, { imageData: dataUrl });
-        updateDocument((document) => ({
-            ...document,
-            source: {
-                name: file.name,
-                type: file.type,
-                imageData: dataUrl,
-                width: engine.runtime.sourceWidth,
-                height: engine.runtime.sourceHeight
-            }
-        }));
+    async function syncImageSource(file, dataUrl, options = {}) {
+        const sourceImage = options.sourceImage || await loadImageFromDataUrl(dataUrl);
+        const nextSource = normalizeEditorSource({
+            name: file.name,
+            type: file.type,
+            imageData: dataUrl,
+            width: sourceImage.width,
+            height: sourceImage.height
+        });
+        const current = store.getState().document;
+        const nextBase = normalizeEditorBase(options.base || current.base, nextSource);
+        const nextDocument = applyEditorSettingsToDocument({
+            ...current,
+            source: nextSource,
+            base: nextBase
+        }, store.getState().settings);
+        await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
+        updateDocument(() => nextDocument, { render: false });
+        engine.requestRender(nextDocument);
+        return nextDocument;
     }
 
     async function loadBatchImage(file, index) {
         await engine.loadImageFromFile(file, {});
-        updateDocument((document) => ({
-            ...document,
-            source: {
-                name: file.name,
-                type: file.type,
-                imageData: null,
+        const nextSource = normalizeEditorSource({
+            name: file.name,
+            type: file.type,
+            imageData: null,
+            width: engine.runtime.sourceWidth,
+            height: engine.runtime.sourceHeight
+        });
+        const current = store.getState().document;
+        const nextDocument = applyEditorSettingsToDocument({
+            ...current,
+            source: nextSource,
+            base: normalizeEditorBase({
+                ...current.base,
                 width: engine.runtime.sourceWidth,
                 height: engine.runtime.sourceHeight
-            },
+            }, nextSource),
             batch: {
-                ...document.batch,
+                ...current.batch,
                 currentIndex: index
             }
-        }));
+        }, store.getState().settings);
+        updateDocument(() => nextDocument, { render: false });
+        engine.requestRender(nextDocument);
+    }
+
+    async function commitEditorBaseDocument(nextDocument, options = {}) {
+        try {
+            const normalizedDocument = applyEditorSettingsToDocument(nextDocument, store.getState().settings);
+            await syncStudioEngineToDocument(engine, normalizedDocument, {
+                sourceImage: options.sourceImage || null
+            });
+            updateDocument(() => normalizedDocument, { render: false });
+            if (options.clearLibraryOrigin !== false) {
+                clearActiveLibraryOrigin('studio');
+            }
+            engine.requestRender(normalizedDocument);
+            return normalizedDocument;
+        } catch (error) {
+            logProcess('error', 'editor.base', error?.message || 'Could not update the Editor base canvas.');
+            setNotice(error?.message || 'Could not update the Editor base canvas.', 'error', 7000);
+            return null;
+        }
     }
 
     function stopPlayback() {
@@ -2709,10 +2833,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     async function restoreActiveStudioRender() {
         const liveDocument = store.getState().document;
-        const liveSource = liveDocument?.source;
-        if (liveSource?.imageData) {
-            const liveImage = await loadImageFromDataUrl(liveSource.imageData);
-            await engine.loadImage(liveImage, liveSource);
+        if (liveDocument) {
+            await syncStudioEngineToDocument(engine, liveDocument);
             engine.requestRender(liveDocument);
             return true;
         }
@@ -2937,20 +3059,17 @@ window.addEventListener('DOMContentLoaded', async () => {
 
                     try {
                         const validated = studioAdapter.validatePayload(existingPayload);
-                        if (!validated?.source?.imageData) {
-                            throw new Error('The saved Editor project is missing its embedded source image.');
-                        }
-
                         const tempDoc = {
                             ...store.getState().document,
                             ...validated,
                             layerStack: validated.layerStack,
-                            source: validated.source
+                            source: normalizeEditorSource(validated.source),
+                            base: normalizeEditorBase(validated.base, validated.source)
                         };
-                        const image = await loadImageFromDataUrl(validated.source.imageData);
-                        await engine.loadImage(image, validated.source);
+                        await syncStudioEngineToDocument(engine, tempDoc);
                         const capture = await captureStudioDocumentSnapshot(engine, tempDoc, validated);
                         const nextPayload = capture.payload || buildLibraryPayload(tempDoc, capture.preview || null);
+                        const baseResolution = getEditorCanvasResolution(nextPayload);
                         const nextRecord = buildLibraryProjectRecord({
                             id: projectRecord.id,
                             timestamp: projectRecord.timestamp || Date.now(),
@@ -2960,12 +3079,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                             tags: normalizeLibraryTags(projectRecord.tags || extractLibraryProjectMeta(existingPayload).tags || []),
                             projectType: 'studio',
                             hoverSource: projectRecord.hoverSource || nextPayload.source,
-                            sourceWidth: Number(projectRecord.sourceWidth || nextPayload.source?.width || 0),
-                            sourceHeight: Number(projectRecord.sourceHeight || nextPayload.source?.height || 0),
-                            sourceArea: Number(projectRecord.sourceAreaOverride || ((nextPayload.source?.width || 0) * (nextPayload.source?.height || 0)) || 0),
+                            sourceWidth: Number(projectRecord.sourceWidth || baseResolution.width || 0),
+                            sourceHeight: Number(projectRecord.sourceHeight || baseResolution.height || 0),
+                            sourceArea: Number(projectRecord.sourceAreaOverride || ((baseResolution.width || 0) * (baseResolution.height || 0)) || 0),
                             sourceCount: Number(projectRecord.sourceCount || (nextPayload.source?.imageData ? 1 : 0) || 0),
-                            renderWidth: Number(capture.preview?.width || projectRecord.renderWidth || nextPayload.source?.width || 0),
-                            renderHeight: Number(capture.preview?.height || projectRecord.renderHeight || nextPayload.source?.height || 0)
+                            renderWidth: Number(capture.preview?.width || projectRecord.renderWidth || baseResolution.width || 0),
+                            renderHeight: Number(capture.preview?.height || projectRecord.renderHeight || baseResolution.height || 0)
                         });
                         await saveToLibraryDB(nextRecord);
                         updatedCount += 1;
@@ -3220,6 +3339,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 || payload?.preview?.width
                 || sourceMeta?.renderWidth
                 || record?.renderWidth
+                || payload?.base?.width
                 || payload?.source?.width
                 || record?.sourceWidth
                 || 1
@@ -3232,6 +3352,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 || payload?.preview?.height
                 || sourceMeta?.renderHeight
                 || record?.renderHeight
+                || payload?.base?.height
                 || payload?.source?.height
                 || record?.sourceHeight
                 || 1
@@ -3320,7 +3441,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             kind: 'document',
             mode: 'studio',
             workspace: normalizeWorkspace('studio', runtimePayload.workspace || baseDocument.workspace, !!selection.layerInstanceId),
-            source: runtimePayload.source || baseDocument.source,
+            source: Object.prototype.hasOwnProperty.call(runtimePayload || {}, 'source')
+                ? normalizeEditorSource(runtimePayload.source)
+                : normalizeEditorSource(baseDocument.source),
+            base: normalizeEditorBase(runtimePayload.base, runtimePayload.source),
             palette: runtimePayload.palette || baseDocument.palette,
             layerStack,
             selection,
@@ -3340,6 +3464,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             width: Math.max(1, Number(imageAsset.width) || 1),
             height: Math.max(1, Number(imageAsset.height) || 1),
             name: String(imageAsset.name || layer?.name || 'Image'),
+            type: String(imageAsset.mimeType || 'image/png'),
             imageData: String(imageAsset.imageData || '')
         };
         return applyEditorSettingsToDocument({
@@ -3352,6 +3477,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                 batchOpen: false
             }, false),
             source,
+            base: normalizeEditorBase({
+                width: source.width,
+                height: source.height
+            }, source),
             palette: [],
             layerStack: [],
             selection: { layerInstanceId: null },
@@ -3381,6 +3510,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const capture = await captureCompositeEditorLayerDocument(rawPayload);
         const payload = capture.payload || rawPayload;
         const editorDocument = buildEditorDocumentFromPayload(payload);
+        const baseResolution = getEditorCanvasResolution(payload);
         const projectData = buildLibraryProjectRecord({
             id: existingRecord?.id || createLibraryProjectId(),
             timestamp: Date.now(),
@@ -3395,12 +3525,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             tags: normalizeLibraryTags(options.tags || existingRecord?.tags || []),
             projectType: 'studio',
             hoverSource: payload.source,
-            sourceWidth: Number(payload.source?.width || 0),
-            sourceHeight: Number(payload.source?.height || 0),
-            sourceArea: Number(payload.source?.width || 0) * Number(payload.source?.height || 0),
+            sourceWidth: Number(baseResolution.width || 0),
+            sourceHeight: Number(baseResolution.height || 0),
+            sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
             sourceCount: payload.source?.imageData ? 1 : 0,
-            renderWidth: Number(capture.preview?.width || payload.preview?.width || payload.source?.width || 0),
-            renderHeight: Number(capture.preview?.height || payload.preview?.height || payload.source?.height || 0)
+            renderWidth: Number(capture.preview?.width || payload.preview?.width || baseResolution.width || 0),
+            renderHeight: Number(capture.preview?.height || payload.preview?.height || baseResolution.height || 0)
         });
         await saveToLibraryDB(projectData);
         await upsertDerivedStudioAsset(projectData);
@@ -3473,12 +3603,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     async function captureCompositeEditorLayerDocument(rawPayload) {
         const preparedPayload = await syncEmbeddedEditorPayloadImageDimensions(rawPayload);
         const editorDocument = buildEditorDocumentFromPayload(preparedPayload);
-        if (!editorDocument.source?.imageData) {
-            throw new Error('Editor-backed Composite layers require an embedded source image.');
-        }
         const hiddenEngine = await ensureCompositeEditorRenderEngineReady();
-        const image = await loadImageFromDataUrl(editorDocument.source.imageData);
-        await hiddenEngine.loadImage(image, editorDocument.source);
+        await syncStudioEngineToDocument(hiddenEngine, editorDocument);
         const capture = await captureStudioDocumentSnapshot(hiddenEngine, editorDocument, preparedPayload);
         const payload = await syncEmbeddedEditorPayloadImageDimensions(capture.payload || preparedPayload);
         return {
@@ -3577,11 +3703,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
 
         const editorDocument = buildEditorDocumentFromPayload(selectedLayer.embeddedEditorDocument);
-        if (!editorDocument.source?.imageData) {
-            throw new Error('The selected Composite layer is missing its embedded Editor source image.');
-        }
-        const image = await loadImageFromDataUrl(editorDocument.source.imageData);
-        await engine.loadImage(image, editorDocument.source);
+        await syncStudioEngineToDocument(engine, editorDocument);
         stopPlayback();
         paletteExtractionImage = null;
         paletteExtractionOwner = null;
@@ -3652,6 +3774,89 @@ window.addEventListener('DOMContentLoaded', async () => {
                 imageData: String(item?.imageData || ''),
                 width,
                 height
+            }
+        };
+    }
+
+    function getCompositeReplacementBaseLayer(currentLayer) {
+        const normalizedLayer = normalizeCompositeDocument({
+            layers: currentLayer ? [currentLayer] : [],
+            selection: {
+                layerId: currentLayer?.id || null
+            }
+        }).layers[0] || null;
+        if (!normalizedLayer) {
+            throw new Error('That Composite layer could not be found.');
+        }
+        return normalizedLayer;
+    }
+
+    function buildCompositeReplacementLayer(currentLayer, replacement = {}) {
+        const baseLayer = getCompositeReplacementBaseLayer(currentLayer);
+        const nextKind = String(replacement.kind || 'image').toLowerCase() === 'editor-project' ? 'editor-project' : 'image';
+        const baseDimensions = getCompositeLayerDimensions(baseLayer);
+        const baseScaleX = Math.max(0.000001, Number(baseLayer.scaleX || baseLayer.scale || 1) || 1);
+        const baseScaleY = Math.max(0.000001, Number(baseLayer.scaleY || baseLayer.scale || 1) || 1);
+        const baseRenderedWidth = Math.max(1, baseDimensions.width * baseScaleX);
+        const baseRenderedHeight = Math.max(1, baseDimensions.height * baseScaleY);
+        const baseCenterX = Number(baseLayer.x || 0) + (baseRenderedWidth * 0.5);
+        const baseCenterY = Number(baseLayer.y || 0) + (baseRenderedHeight * 0.5);
+        const replacementProbeLayer = {
+            kind: nextKind,
+            source: replacement.source || null,
+            embeddedEditorDocument: nextKind === 'editor-project' ? replacement.embeddedEditorDocument || null : null,
+            imageAsset: nextKind === 'image' ? replacement.imageAsset || null : null,
+            crop: {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0
+            }
+        };
+        const replacementDimensions = getCompositeLayerDimensions(replacementProbeLayer);
+        const fitScale = Math.max(
+            0.000001,
+            Math.min(
+                baseRenderedWidth / Math.max(1, replacementDimensions.width),
+                baseRenderedHeight / Math.max(1, replacementDimensions.height)
+            )
+        );
+        const nextRenderedWidth = replacementDimensions.width * fitScale;
+        const nextRenderedHeight = replacementDimensions.height * fitScale;
+        return {
+            id: baseLayer.id,
+            kind: nextKind,
+            name: String(replacement.name || baseLayer.name || (nextKind === 'editor-project' ? 'Editor Project' : 'Image')),
+            visible: baseLayer.visible !== false,
+            locked: !!baseLayer.locked,
+            z: baseLayer.z,
+            x: baseCenterX - (nextRenderedWidth * 0.5),
+            y: baseCenterY - (nextRenderedHeight * 0.5),
+            scale: fitScale,
+            scaleX: fitScale,
+            scaleY: fitScale,
+            resizeMode: baseLayer.resizeMode,
+            rotation: baseLayer.rotation,
+            flipX: !!baseLayer.flipX,
+            flipY: !!baseLayer.flipY,
+            opacity: baseLayer.opacity,
+            blendMode: baseLayer.blendMode,
+            source: replacement.source || {
+                originalLibraryId: null,
+                originalLibraryName: null,
+                originalProjectType: null
+            },
+            embeddedEditorDocument: nextKind === 'editor-project' ? replacement.embeddedEditorDocument || null : null,
+            imageAsset: nextKind === 'image' ? replacement.imageAsset || null : null,
+            textAsset: null,
+            squareAsset: null,
+            circleAsset: null,
+            triangleAsset: null,
+            crop: {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0
             }
         };
     }
@@ -3900,13 +4105,8 @@ window.addEventListener('DOMContentLoaded', async () => {
             clearCompositeBridgeState();
             return false;
         }
-        if (!state.document.source?.imageData) {
-            clearCompositeBridgeState();
-            return false;
-        }
         if (!engine.hasImage()) {
-            const image = await loadImageFromDataUrl(state.document.source.imageData);
-            await engine.loadImage(image, state.document.source);
+            await syncStudioEngineToDocument(engine, state.document);
         }
         const capture = await captureStudioDocumentSnapshot(engine, state.document);
         const renderSize = resolveCompositeEditorLayerRenderSize({
@@ -5100,6 +5300,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         openCompositeProjectPicker() {
             return view?.openCompositeProjectPicker?.();
         },
+        openCompositeReplaceMenu() {
+            return view?.openCompositeReplaceMenu?.();
+        },
         async openCompositeLayerInEditor(layerId = null) {
             return openCompositeLayerInEditorFlow(layerId);
         },
@@ -5575,6 +5778,101 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return [];
             }
         },
+        async replaceCompositeLayerWithEditorProject(layerId = null, libraryId = null) {
+            if (!layerId || !libraryId) return null;
+            await showWorkspaceProgress('composite', {
+                title: 'Replacing Layer',
+                message: 'Loading the selected Editor project for replacement...',
+                progress: 0.12
+            });
+            try {
+                const compositeState = normalizeCompositeDocument(store.getState().compositeDocument);
+                const currentLayer = compositeState.layers.find((layer) => layer.id === layerId) || null;
+                if (!currentLayer) {
+                    throw new Error('Select one Composite layer before replacing it.');
+                }
+                if (currentLayer.locked) {
+                    throw new Error('Unlock the selected Composite layer before replacing it.');
+                }
+                const record = await getFromLibraryDB(libraryId).catch(() => null);
+                if (!record || getLibraryProjectType(record) !== 'studio') {
+                    throw new Error('That saved Editor project could not be loaded for replacement.');
+                }
+                setWorkspaceProgress('composite', {
+                    active: true,
+                    title: 'Replacing Layer',
+                    message: `Capturing "${record.name || 'Editor Project'}" for replacement...`,
+                    progress: 0.42
+                });
+                const initialPayload = await syncEmbeddedEditorPayloadImageDimensions(
+                    cloneSerializable(stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(record.payload)))
+                );
+                if (!initialPayload?.preview?.imageData && record?.blob instanceof Blob) {
+                    try {
+                        initialPayload.preview = {
+                            imageData: await blobToDataUrl(record.blob),
+                            width: Number(record.renderWidth || initialPayload.source?.width || 0),
+                            height: Number(record.renderHeight || initialPayload.source?.height || 0),
+                            updatedAt: Number(record.timestamp || Date.now())
+                        };
+                    } catch (_error) {
+                        initialPayload.preview = initialPayload.preview || null;
+                    }
+                }
+                if (!initialPayload?.preview?.imageData && initialPayload?.source?.imageData) {
+                    initialPayload.preview = {
+                        imageData: String(initialPayload.source.imageData),
+                        width: Number(initialPayload.source.width || 0),
+                        height: Number(initialPayload.source.height || 0),
+                        updatedAt: Number(record.timestamp || Date.now())
+                    };
+                }
+                let authoritativePayload = initialPayload;
+                let authoritativePreview = initialPayload?.preview || null;
+                try {
+                    const capture = await captureCompositeEditorLayerDocument(initialPayload);
+                    authoritativePayload = capture.payload || initialPayload;
+                    authoritativePreview = capture.preview || authoritativePayload?.preview || initialPayload?.preview || null;
+                } catch (error) {
+                    logProcess('warning', 'composite.layers', error?.message || `Could not fully refresh "${record.name || 'that Editor project'}" before replacing the layer. Using saved preview data instead.`);
+                }
+                const renderSize = resolveCompositeEditorLayerRenderSize({
+                    payload: authoritativePayload,
+                    preview: authoritativePreview,
+                    record
+                });
+                const nextLayer = buildCompositeReplacementLayer(currentLayer, {
+                    kind: 'editor-project',
+                    name: stripProjectExtension(record.name || authoritativePayload.source?.name || 'Editor Project') || 'Editor Project',
+                    source: {
+                        originalLibraryId: record.id || null,
+                        originalLibraryName: record.name || null,
+                        originalProjectType: 'studio',
+                        renderWidth: renderSize.width,
+                        renderHeight: renderSize.height
+                    },
+                    embeddedEditorDocument: authoritativePayload
+                });
+                updateCompositeDocument((documentState) => ({
+                    ...normalizeCompositeDocument(documentState),
+                    layers: normalizeCompositeDocument(documentState).layers.map((layer) => layer.id === layerId ? nextLayer : layer),
+                    selection: { layerId }
+                }), {
+                    renderComposite: true,
+                    compositeAutosave: true,
+                    compositeAutosaveReason: 'Queued Composite autosave after replacing a layer with an Editor project.'
+                });
+                clearWorkspaceProgress('composite');
+                logProcess('success', 'composite.layers', `Replaced "${currentLayer.name || 'Layer'}" with Editor project "${record.name || 'Editor Project'}".`);
+                setNotice(`Replaced "${currentLayer.name || 'Layer'}" with "${record.name || 'Editor Project'}".`, 'success', 5200);
+                return nextLayer;
+            } catch (error) {
+                clearWorkspaceProgress('composite');
+                logProcess('error', 'composite.layers', error?.message || 'Could not replace that Composite layer with the selected Editor project.');
+                setNotice(error?.message || 'Could not replace that Composite layer with the selected Editor project.', 'error', 7000);
+                return null;
+            }
+        },
         async addCompositeImageFiles(files = []) {
             const sourceFiles = (files || []).filter((file) => isLikelyImageFile(file));
             if (!sourceFiles.length) {
@@ -5664,6 +5962,94 @@ window.addEventListener('DOMContentLoaded', async () => {
                 logProcess('error', 'composite.layers', error?.message || 'Could not add the selected images to Composite.');
                 setNotice(error?.message || 'Could not add the selected images to Composite.', 'error', 7000);
                 return [];
+            }
+        },
+        async replaceCompositeLayerWithImageFiles(layerId = null, files = []) {
+            if (!layerId) return null;
+            const sourceFiles = (files || []).filter((file) => isLikelyImageFile(file));
+            if (!sourceFiles.length) {
+                setNotice('Choose an image file to replace the selected Composite layer.', 'warning', 5000);
+                return null;
+            }
+            await showWorkspaceProgress('composite', {
+                title: 'Replacing Layer',
+                message: 'Embedding the selected image for replacement...',
+                progress: 0.12
+            });
+            try {
+                const compositeState = normalizeCompositeDocument(store.getState().compositeDocument);
+                const currentLayer = compositeState.layers.find((layer) => layer.id === layerId) || null;
+                if (!currentLayer) {
+                    throw new Error('Select one Composite layer before replacing it.');
+                }
+                if (currentLayer.locked) {
+                    throw new Error('Unlock the selected Composite layer before replacing it.');
+                }
+                const replacementFile = sourceFiles[0];
+                const prepared = backgroundTasks
+                    ? await backgroundTasks.runTask('composite', 'prepare-image-files', { files: [replacementFile] }, {
+                        createRequest: () => buildWorkerFileListRequest([replacementFile]),
+                        priority: 'user-visible',
+                        processId: 'composite.layers',
+                        scope: 'section:composite',
+                        onProgress(progress) {
+                            setWorkspaceProgress('composite', {
+                                active: true,
+                                title: 'Replacing Layer',
+                                message: progress?.message || 'Embedding the selected image for replacement...',
+                                progress: 0.2 + ((Number(progress?.progress) || 0) * 0.56)
+                            });
+                        }
+                    })
+                    : await prepareCompositeImageFilesFallback([replacementFile], {
+                        onProgress(progress) {
+                            setWorkspaceProgress('composite', {
+                                active: true,
+                                title: 'Replacing Layer',
+                                message: progress?.message || 'Embedding the selected image for replacement...',
+                                progress: 0.2 + ((Number(progress?.progress) || 0) * 0.56)
+                            });
+                        }
+                    });
+                const preparedItem = Array.isArray(prepared?.items) ? prepared.items[0] || null : null;
+                if (!preparedItem) {
+                    throw new Error(prepared?.failures?.[0]?.reason || 'Could not read the selected image for replacement.');
+                }
+                const nextLayer = buildCompositeReplacementLayer(currentLayer, {
+                    kind: 'image',
+                    name: stripProjectExtension(preparedItem.name || 'Image') || 'Image',
+                    source: {
+                        originalLibraryId: null,
+                        originalLibraryName: null,
+                        originalProjectType: null
+                    },
+                    imageAsset: {
+                        name: preparedItem.name || 'Image',
+                        type: preparedItem.type || 'image/png',
+                        imageData: String(preparedItem.imageData || ''),
+                        width: Math.max(1, Number(preparedItem.width) || 1),
+                        height: Math.max(1, Number(preparedItem.height) || 1)
+                    }
+                });
+                updateCompositeDocument((documentState) => ({
+                    ...normalizeCompositeDocument(documentState),
+                    layers: normalizeCompositeDocument(documentState).layers.map((layer) => layer.id === layerId ? nextLayer : layer),
+                    selection: { layerId }
+                }), {
+                    renderComposite: true,
+                    compositeAutosave: true,
+                    compositeAutosaveReason: 'Queued Composite autosave after replacing a layer with an image.'
+                });
+                clearWorkspaceProgress('composite');
+                const extraNote = sourceFiles.length > 1 ? ' Used the first selected image only.' : '';
+                logProcess('success', 'composite.layers', `Replaced "${currentLayer.name || 'Layer'}" with image "${preparedItem.name || 'Image'}".${extraNote}`);
+                setNotice(`Replaced "${currentLayer.name || 'Layer'}" with "${preparedItem.name || 'Image'}".${extraNote}`, sourceFiles.length > 1 ? 'warning' : 'success', 5200);
+                return nextLayer;
+            } catch (error) {
+                clearWorkspaceProgress('composite');
+                logProcess('error', 'composite.layers', error?.message || 'Could not replace that Composite layer with the selected image.');
+                setNotice(error?.message || 'Could not replace that Composite layer with the selected image.', 'error', 7000);
+                return null;
             }
         },
         async openCompositeStateFile(file) {
@@ -5837,12 +6223,8 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!confirmed) return false;
             try {
                 const state = store.getState();
-                if (!state.document.source?.imageData) {
-                    throw new Error('The current Editor document does not include an embedded source image.');
-                }
                 if (!engine.hasImage()) {
-                    const image = await loadImageFromDataUrl(state.document.source.imageData);
-                    await engine.loadImage(image, state.document.source);
+                    await syncStudioEngineToDocument(engine, state.document);
                 }
                 const existingRecord = await getFromLibraryDB(bridge.originalLibraryId);
                 if (!existingRecord || getLibraryProjectType(existingRecord) !== 'studio') {
@@ -5853,6 +6235,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     payload: capture.payload,
                     preview: capture.preview
                 });
+                const baseResolution = getEditorCanvasResolution(capture.payload);
                 const projectData = buildLibraryProjectRecord({
                     id: existingRecord.id,
                     timestamp: Date.now(),
@@ -5862,12 +6245,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                     tags: normalizeLibraryTags(existingRecord.tags || []),
                     projectType: 'studio',
                     hoverSource: capture.payload.source,
-                    sourceWidth: Number(capture.payload.source?.width || 0),
-                    sourceHeight: Number(capture.payload.source?.height || 0),
-                    sourceArea: Number(capture.payload.source?.width || 0) * Number(capture.payload.source?.height || 0),
+                    sourceWidth: Number(baseResolution.width || 0),
+                    sourceHeight: Number(baseResolution.height || 0),
+                    sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
                     sourceCount: capture.payload.source?.imageData ? 1 : 0,
-                    renderWidth: Number(capture.preview?.width || capture.payload.source?.width || 0),
-                    renderHeight: Number(capture.preview?.height || capture.payload.source?.height || 0)
+                    renderWidth: Number(capture.preview?.width || baseResolution.width || 0),
+                    renderHeight: Number(capture.preview?.height || baseResolution.height || 0)
                 });
                 await saveToLibraryDB(projectData);
                 await upsertDerivedStudioAsset(projectData);
@@ -5913,6 +6296,77 @@ window.addEventListener('DOMContentLoaded', async () => {
                 workspace: normalizeWorkspace('studio', { ...document.workspace, studioView }, !!document.selection.layerInstanceId)
             }));
         },
+        async setEditorBaseDimensions(width, height) {
+            const current = store.getState().document;
+            const nextBase = normalizeEditorBase({
+                ...current.base,
+                width,
+                height
+            }, current.source);
+            await commitEditorBaseDocument({
+                ...current,
+                base: nextBase
+            });
+        },
+        async applyEditorBaseResolutionPreset(width, height) {
+            return actions.setEditorBaseDimensions(width, height);
+        },
+        async swapEditorBaseDimensions() {
+            const current = store.getState().document;
+            const base = normalizeEditorBase(current.base, current.source);
+            await commitEditorBaseDocument({
+                ...current,
+                base: normalizeEditorBase({
+                    ...base,
+                    width: base.height,
+                    height: base.width
+                }, current.source)
+            });
+        },
+        async applyEditorBaseAspectPreset(width, height) {
+            const current = store.getState().document;
+            const nextBase = applyEditorBaseAspectPresetHelper(current.base, width, height);
+            await commitEditorBaseDocument({
+                ...current,
+                base: nextBase
+            });
+        },
+        async setEditorBaseBackgroundMode(mode) {
+            const current = store.getState().document;
+            const nextBase = normalizeEditorBase({
+                ...current.base,
+                backgroundMode: mode === 'solid' ? 'solid' : 'transparent'
+            }, current.source);
+            await commitEditorBaseDocument({
+                ...current,
+                base: nextBase
+            });
+        },
+        async setEditorBaseBackgroundColor(color) {
+            const current = store.getState().document;
+            const nextBase = normalizeEditorBase({
+                ...current.base,
+                backgroundColor: color,
+                backgroundMode: current.base?.backgroundMode === 'solid' ? 'solid' : 'transparent'
+            }, current.source);
+            await commitEditorBaseDocument({
+                ...current,
+                base: nextBase
+            });
+        },
+        async removeEditorSourceImage() {
+            const current = store.getState().document;
+            if (!hasEditorSourceImage(current)) return false;
+            paletteExtractionImage = null;
+            paletteExtractionOwner = null;
+            const committed = await commitEditorBaseDocument({
+                ...current,
+                source: normalizeEditorSource()
+            });
+            if (!committed) return false;
+            setNotice('Removed the source image from the Editor canvas.', 'success', 4200);
+            return true;
+        },
         setTheme(enabled) {
             return actions.updateAppSetting('general.theme', enabled ? 'dark' : 'light');
         },
@@ -5938,6 +6392,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                     createLayerInstance(registry, layerId, document.layerStack),
                     store.getState().settings
                 );
+                if (layerId === 'textOverlay') {
+                    next.params = centerTextLayerParams(document, next.params);
+                }
                 const layerStack = reindexStack(registry, [...document.layerStack, next]);
                 return {
                     ...document,
@@ -6047,6 +6504,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                 layerStack: document.layerStack.map((instance) => instance.instanceId === instanceId ? { ...instance, params: { ...instance.params, caCenterX: 0.5, caCenterY: 0.5 } } : instance)
             }));
         },
+        centerTextLayer(instanceId) {
+            updateInstance(instanceId, (instance) => ({
+                ...instance,
+                params: centerTextLayerParams(store.getState().document, instance.params, instance.instanceId)
+            }));
+        },
         setZoomLock(enabled) {
             updateDocument((document) => ({
                 ...document,
@@ -6103,6 +6566,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             const uv = view.clientToImageUv(clientX, clientY);
             if (!uv) return null;
             return getLayerInputSample(instanceId, uv);
+        },
+        getLayerInputMetrics(instanceId) {
+            if (!instanceId) return null;
+            return engine.getLayerInputMetrics(store.getState().document, instanceId);
+        },
+        getLayerInputPreview(instanceId) {
+            if (!instanceId) return null;
+            return engine.getLayerInputPreviewSnapshot(store.getState().document, instanceId);
         },
         addBgPatcherPatchAtCenter(instanceId) {
             const state = store.getState();
@@ -7041,8 +7512,18 @@ window.addEventListener('DOMContentLoaded', async () => {
                         projectType: getLibraryProjectType(entry),
                         tags: normalizeLibraryTags(entry.tags || extractLibraryProjectMeta(entry.payload).tags || []),
                         hoverSource: normalizeLibraryHoverSource(entry.hoverSource || extractLibraryProjectMeta(entry.payload).hoverSource || entry.payload?.source || null),
-                        sourceWidth: Number(entry.sourceWidth || entry.hoverSource?.width || extractLibraryProjectMeta(entry.payload).hoverSource?.width || entry.payload?.source?.width || 0),
-                        sourceHeight: Number(entry.sourceHeight || entry.hoverSource?.height || extractLibraryProjectMeta(entry.payload).hoverSource?.height || entry.payload?.source?.height || 0),
+                        sourceWidth: Number(entry.sourceWidth
+                            || entry.hoverSource?.width
+                            || extractLibraryProjectMeta(entry.payload).hoverSource?.width
+                            || (getLibraryProjectType(entry) === 'studio' ? getEditorCanvasResolution(entry.payload).width : 0)
+                            || entry.payload?.source?.width
+                            || 0),
+                        sourceHeight: Number(entry.sourceHeight
+                            || entry.hoverSource?.height
+                            || extractLibraryProjectMeta(entry.payload).hoverSource?.height
+                            || (getLibraryProjectType(entry) === 'studio' ? getEditorCanvasResolution(entry.payload).height : 0)
+                            || entry.payload?.source?.height
+                            || 0),
                         sourceAreaOverride: Number(entry.sourceAreaOverride || extractLibraryProjectMeta(entry.payload).sourceArea || 0),
                         sourceCount: Number(
                             entry.sourceCount
@@ -7446,17 +7927,21 @@ window.addEventListener('DOMContentLoaded', async () => {
             stopPlayback();
             paletteExtractionImage = null;
             paletteExtractionOwner = null;
-            updateDocument((document) => applyEditorSettingsToDocument({
-                ...document,
-                source: { width: 0, height: 0, name: '', imageData: null },
+            const currentDocument = store.getState().document;
+            const nextDocument = applyEditorSettingsToDocument({
+                ...currentDocument,
+                source: normalizeEditorSource(),
+                base: createDefaultEditorBase(),
                 layerStack: [],
                 palette: [],
                 selection: { layerInstanceId: null },
-                workspace: { ...document.workspace, batchOpen: false },
+                workspace: { ...currentDocument.workspace, batchOpen: false, studioView: 'edit' },
                 batch: createEmptyBatchState()
-            }, store.getState().settings), { render: false });
+            }, store.getState().settings);
+            await syncStudioEngineToDocument(engine, nextDocument);
+            updateDocument(() => nextDocument, { render: false });
             clearActiveLibraryOrigin('studio');
-            engine.requestRender(store.getState().document);
+            engine.requestRender(nextDocument);
             logProcess('success', 'editor.files', 'Started a new Editor project.');
             setNotice('Started a new project.', 'success');
         },
@@ -7473,6 +7958,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 stopPlayback();
                 paletteExtractionImage = null;
                 paletteExtractionOwner = null;
+                const currentDocument = store.getState().document;
+                const shouldAskAboutCanvasOverride = !hasEditorSourceImage(currentDocument)
+                    && !isDefaultEditorBase(currentDocument.base);
                 logProcess('info', 'editor.files', `Reading file bytes for "${file.name}".`, {
                     dedupeKey: `editor-load-image-read:${file.name}`,
                     dedupeWindowMs: 120
@@ -7481,19 +7969,46 @@ window.addEventListener('DOMContentLoaded', async () => {
                 setEditorProgress({
                     active: true,
                     title: 'Loading Image',
-                    message: `Decoding "${file.name}" and building the Editor source...`,
+                    message: `Decoding "${file.name}" and preparing the Editor canvas...`,
                     progress: 0.42
                 });
-                await syncImageSource(file, dataUrl);
-                updateDocument((document) => ({
-                    ...document,
-                    view: { ...document.view, zoom: 1 },
-                    workspace: { ...document.workspace, batchOpen: false },
+                const sourceImage = await loadImageFromDataUrl(dataUrl);
+                const nextSource = normalizeEditorSource({
+                    name: file.name,
+                    type: file.type,
+                    imageData: dataUrl,
+                    width: sourceImage.width,
+                    height: sourceImage.height
+                });
+                let nextBase = normalizeEditorBase({
+                    ...currentDocument.base,
+                    width: sourceImage.width,
+                    height: sourceImage.height
+                }, nextSource);
+                if (shouldAskAboutCanvasOverride) {
+                    const useImageResolution = await requestAppConfirmDialog(view, {
+                        title: 'Canvas Resolution',
+                        text: `The current Base canvas is ${currentDocument.base?.width || 0} x ${currentDocument.base?.height || 0}. Use "${file.name}" at ${sourceImage.width} x ${sourceImage.height} instead?`,
+                        confirmLabel: 'Use Image Resolution',
+                        cancelLabel: 'Keep Current Canvas'
+                    });
+                    if (!useImageResolution) {
+                        nextBase = normalizeEditorBase(currentDocument.base, nextSource);
+                    }
+                }
+                const nextDocument = applyEditorSettingsToDocument({
+                    ...currentDocument,
+                    source: nextSource,
+                    base: nextBase,
+                    view: { ...currentDocument.view, zoom: 1 },
+                    workspace: { ...currentDocument.workspace, batchOpen: false },
                     batch: createEmptyBatchState()
-                }), { render: false });
+                }, store.getState().settings);
+                await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
+                updateDocument(() => nextDocument, { render: false });
 
                 clearActiveLibraryOrigin('studio');
-                engine.requestRender(store.getState().document);
+                engine.requestRender(nextDocument);
                 if (store.getState().settings.editor.autoExtractPaletteOnLoad) {
                     logProcess('info', 'settings.editor', `Auto-extracting a palette from "${file.name}" because Editor auto palette extraction is enabled.`, {
                         dedupeKey: `auto-palette:${file.name}`,
@@ -7566,90 +8081,76 @@ window.addEventListener('DOMContentLoaded', async () => {
                     : { layerInstanceId: layerStack[0]?.instanceId || null };
                 const state = store.getState();
                 const shouldLoadImage = !!state.ui.loadImageOnOpen;
-                const embeddedSource = payload.source?.imageData ? payload.source : null;
+                const embeddedSource = payload.source?.imageData ? normalizeEditorSource(payload.source) : null;
                 const payloadWithoutPreview = stripStudioPreview(payload);
-                const preservedSource = state.document.source;
-                store.setState((current) => ({
-                    ...current,
-                    document: applyEditorSettingsToDocument({
-                        ...current.document,
-                        ...payloadWithoutPreview,
-                        version: 'mns/v2',
-                        kind: 'document',
-                        mode: 'studio',
-                        workspace: normalizeWorkspace('studio', payloadWithoutPreview.workspace || current.document.workspace, !!selection.layerInstanceId),
-                        source: preservedSource,
-                        palette: payloadWithoutPreview.palette || current.document.palette,
-                        layerStack: layerStack.map((instance) => applyEditorSettingsToLayerInstance(instance, store.getState().settings)),
-                        selection,
-                        view: normalizeViewState({ ...current.document.view, ...(payloadWithoutPreview.view || {}) }),
-                        export: { ...current.document.export, ...(payloadWithoutPreview.export || {}) },
-                        batch: createEmptyBatchState()
-                    }, store.getState().settings)
-                }), { render: engine.hasImage() && !(shouldLoadImage && embeddedSource) });
+                const preservedSource = normalizeEditorSource(state.document.source);
+                const hasExplicitSourceField = Object.prototype.hasOwnProperty.call(payloadWithoutPreview || {}, 'source');
+                const nextSource = embeddedSource
+                    ? (shouldLoadImage ? embeddedSource : preservedSource)
+                    : hasExplicitSourceField
+                        ? normalizeEditorSource(payloadWithoutPreview.source)
+                        : preservedSource;
+                const nextDocument = applyEditorSettingsToDocument({
+                    ...state.document,
+                    ...payloadWithoutPreview,
+                    version: 'mns/v2',
+                    kind: 'document',
+                    mode: 'studio',
+                    workspace: normalizeWorkspace('studio', payloadWithoutPreview.workspace || state.document.workspace, !!selection.layerInstanceId),
+                    source: nextSource,
+                    base: normalizeEditorBase(payloadWithoutPreview.base, embeddedSource || nextSource),
+                    palette: payloadWithoutPreview.palette || state.document.palette,
+                    layerStack: layerStack.map((instance) => applyEditorSettingsToLayerInstance(instance, store.getState().settings)),
+                    selection,
+                    view: normalizeViewState({ ...state.document.view, ...(payloadWithoutPreview.view || {}) }),
+                    export: { ...state.document.export, ...(payloadWithoutPreview.export || {}) },
+                    batch: createEmptyBatchState()
+                }, store.getState().settings);
                 clearActiveLibraryOrigin('studio');
+                let sourceImage = null;
+                if (shouldLoadImage && embeddedSource) {
+                    setEditorProgress({
+                        active: true,
+                        title: 'Loading State',
+                        message: `Restoring the embedded source image from "${file.name}"...`,
+                        progress: 0.54
+                    });
+                    logProcess('info', 'editor.files', `Restoring the embedded source image from "${file.name}".`, {
+                        dedupeKey: `editor-state-embedded-source:${file.name}`,
+                        dedupeWindowMs: 120
+                    });
+                    sourceImage = await loadImageFromDataUrl(embeddedSource.imageData);
+                }
+                await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
+                updateDocument(() => nextDocument, { render: false });
+                engine.requestRender(nextDocument);
 
                 if (shouldLoadImage && embeddedSource) {
-                    try {
-                        setEditorProgress({
-                            active: true,
-                            title: 'Loading State',
-                            message: `Restoring the embedded source image from "${file.name}"...`,
-                            progress: 0.54
-                        });
-                        logProcess('info', 'editor.files', `Restoring the embedded source image from "${file.name}".`, {
-                            dedupeKey: `editor-state-embedded-source:${file.name}`,
-                            dedupeWindowMs: 120
-                        });
-                        const image = await loadImageFromDataUrl(embeddedSource.imageData);
-                        await engine.loadImage(image, embeddedSource);
-                        updateDocument((document) => ({ ...document, source: embeddedSource }), { render: false });
-                        engine.requestRender(store.getState().document);
-                        setEditorProgress({
-                            active: true,
-                            title: 'Loading State',
-                            message: `Saving "${file.name}" into the Library...`,
-                            progress: 0.84
-                        });
-                        await actions.saveProjectToLibrary(stripProjectExtension(file.name), {
-                            preferExisting: true,
-                            projectType: 'studio',
-                            suppressWorkspaceOverlay: true
-                        });
-                        logProcess(droppedLayerCount ? 'warning' : 'success', 'editor.files', droppedLayerCount
-                            ? `Loaded state file "${file.name}" and dropped ${droppedLayerCount} unsupported layer${droppedLayerCount === 1 ? '' : 's'}.`
-                            : `Loaded state file "${file.name}" with its embedded image.`);
-                        setNotice(
-                            droppedLayerCount
-                                ? `State loaded: ${file.name}. Removed ${droppedLayerCount} unsupported layer${droppedLayerCount === 1 ? '' : 's'}.`
-                                : `State loaded: ${file.name}`,
-                            droppedLayerCount ? 'warning' : 'success'
-                        );
-                        clearWorkspaceProgress('studio');
-                    } catch (error) {
-                        clearWorkspaceProgress('studio');
-                        logProcess('warning', 'editor.files', `Loaded state file "${file.name}", but the embedded image could not be restored: ${error.message}`);
-                        setNotice(`State loaded, but the embedded image could not be restored: ${error.message}`, 'warning', 7000);
-                    }
-                    return;
+                    setEditorProgress({
+                        active: true,
+                        title: 'Loading State',
+                        message: `Saving "${file.name}" into the Library...`,
+                        progress: 0.84
+                    });
+                    await actions.saveProjectToLibrary(stripProjectExtension(file.name), {
+                        preferExisting: true,
+                        projectType: 'studio',
+                        suppressWorkspaceOverlay: true
+                    });
                 }
-
-                if (shouldLoadImage && !embeddedSource) {
-                    clearWorkspaceProgress('studio');
-                    logProcess('warning', 'editor.files', `Loaded state file "${file.name}", but it did not include an embedded image.`);
-                    setNotice('State loaded, but the file did not contain an embedded image.', 'warning', 7000);
-                    return;
-                }
-
                 clearWorkspaceProgress('studio');
                 logProcess(droppedLayerCount ? 'warning' : 'success', 'editor.files', droppedLayerCount
                     ? `Loaded state file "${file.name}" and dropped ${droppedLayerCount} unsupported layer${droppedLayerCount === 1 ? '' : 's'}.`
-                    : `Loaded state file "${file.name}".`);
+                    : shouldLoadImage && embeddedSource
+                        ? `Loaded state file "${file.name}" with its embedded image.`
+                        : `Loaded state file "${file.name}".`);
                 setNotice(
-                    droppedLayerCount
+                    shouldLoadImage && !embeddedSource
+                        ? `State loaded: ${file.name}. No embedded source image was included.${droppedLayerCount ? ` Removed ${droppedLayerCount} unsupported layer${droppedLayerCount === 1 ? '' : 's'}.` : ''}`
+                        : droppedLayerCount
                         ? `State loaded: ${file.name}. Removed ${droppedLayerCount} unsupported layer${droppedLayerCount === 1 ? '' : 's'}.`
                         : `State loaded: ${file.name}`,
-                    droppedLayerCount ? 'warning' : 'success'
+                    (droppedLayerCount || (shouldLoadImage && !embeddedSource)) ? 'warning' : 'success'
                 );
             } catch (error) {
                 clearWorkspaceProgress('studio');
@@ -7667,7 +8168,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 message: 'Preparing the Editor state JSON...',
                 progress: 0.1
             });
-            if (state.document.source?.imageData && engine.hasImage()) {
+            if (engine.hasImage()) {
                 try {
                     logProcess('active', 'editor.export', 'Capturing the current Editor render for state JSON save.');
                     setEditorProgress({
@@ -7728,31 +8229,23 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
 
             let libraryProject = null;
-            if (state.document.source?.imageData) {
-                setEditorProgress({
-                    active: true,
-                    title: 'Saving State',
-                    message: 'Updating the linked Library project...',
-                    progress: 0.96
-                });
-                libraryProject = await actions.saveProjectToLibrary(
-                    stripProjectExtension(saveResult.fileName || state.document.source.name || 'noise-studio-state'),
-                    {
-                        preferExisting: true,
-                        promptless: true,
-                        projectType: 'studio',
-                        suppressWorkspaceOverlay: true,
-                        suppressNotice: true
-                    }
-                );
-            }
+            setEditorProgress({
+                active: true,
+                title: 'Saving State',
+                message: 'Updating the linked Library project...',
+                progress: 0.96
+            });
+            libraryProject = await actions.saveProjectToLibrary(
+                stripProjectExtension(saveResult.fileName || state.document.source.name || getSuggestedProjectName(state.document) || 'noise-studio-state'),
+                {
+                    preferExisting: true,
+                    promptless: true,
+                    projectType: 'studio',
+                    suppressWorkspaceOverlay: true,
+                    suppressNotice: true
+                }
+            );
 
-            if (!state.document.source?.imageData) {
-                clearWorkspaceProgress('studio');
-                logProcess('warning', 'editor.export', 'Saved state JSON without an embeddable source image or rendered preview.');
-                setNotice('State saved, but no embeddable source image was available.', 'warning', 7000);
-                return;
-            }
             if (!preview) {
                 clearWorkspaceProgress('studio');
                 if (libraryProject) {
@@ -7782,17 +8275,17 @@ window.addEventListener('DOMContentLoaded', async () => {
             store.setState((state) => ({ ...state, ui: { ...state.ui, saveToLibrary: value } }), { render: false });
         },
         async exportCurrent() {
-            if (!engine.hasImage()) return setNotice('Load an image before exporting.', 'warning');
+            if (!engine.hasImage()) return setNotice('The Editor canvas is not ready yet.', 'warning');
             const state = store.getState();
             await showWorkspaceProgress('studio', {
                 title: 'Exporting PNG',
-                message: 'Rendering the current Editor image to PNG...',
+                message: 'Rendering the current Editor canvas to PNG...',
                 progress: 0.16
             });
-            logProcess('active', 'editor.export', 'Rendering the current Editor image to PNG.');
+            logProcess('active', 'editor.export', 'Rendering the current Editor canvas to PNG.');
             try {
                 const blob = await engine.exportPngBlob(state.document);
-                const baseName = (state.document.source.name || 'noise-studio').replace(/\.[^/.]+$/, '');
+                const baseName = stripProjectExtension(state.document.source.name || getSuggestedProjectName(state.document) || 'editor-canvas');
                 setEditorProgress({
                     active: true,
                     title: 'Exporting PNG',
@@ -7997,7 +8490,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
         },
         async openCompare() {
-            if (!engine.hasImage()) return setNotice('Load an image before comparing.', 'warning');
+            if (!engine.hasImage()) return setNotice('The Editor canvas is not ready yet.', 'warning');
             store.setState((state) => ({ ...state, ui: { ...state.ui, compareOpen: true } }), { render: false });
             requestAnimationFrame(() => engine.openCompare(store.getState().document, view.getRenderRefs()));
         },
@@ -8126,7 +8619,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             }
             stopPlayback();
             const originalIndex = state.document.batch.currentIndex;
-            const originalSource = state.document.source;
+            const originalDocument = state.document;
             for (let index = 0; index < batchFiles.length; index += 1) {
                 const file = batchFiles[index];
                 setNotice(`Exporting ${index + 1}/${batchFiles.length}: ${file.name}`, 'info', 0);
@@ -8156,14 +8649,14 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
             }
             if (state.document.batch.imageFiles[originalIndex]) {
-                await loadBatchImage(state.document.batch.imageFiles[originalIndex], originalIndex);
-                updateDocument((document) => ({ ...document, source: originalSource }), { render: false });
+                await syncStudioEngineToDocument(engine, originalDocument);
+                updateDocument(() => originalDocument, { render: false });
+                engine.requestRender(originalDocument);
             }
             setNotice('Batch export complete.', 'success');
         },
         async processLibraryPayloads(payloadsText, filenames, onProgress = null) {
             const state = store.getState();
-            const originalSource = state.document.source;
             const existingProjects = await getAllLibraryProjectRecords();
             const knownFingerprints = new Set(
                 existingProjects.map((entry) => `${getLibraryProjectType(entry)}:${makeProjectFingerprint(entry.payload)}`)
@@ -8234,15 +8727,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 await maybeYieldToUi(i, 1);
             }
 
-            if (originalSource && originalSource.imageData) {
-                try {
-                    const originalImage = await loadImageFromDataUrl(originalSource.imageData);
-                    await engine.loadImage(originalImage, originalSource);
-                } catch(e) {}
-            }
-            if (store.getState().document.source?.imageData) {
-                engine.requestRender(store.getState().document);
-            }
+            try {
+                await restoreActiveStudioRender();
+            } catch (_error) {}
 
             onProgress?.({ phase: 'complete', total: payloadsText.length });
             if (importedTags.length) {
@@ -9510,12 +9997,14 @@ window.addEventListener('DOMContentLoaded', async () => {
                 return state.document;
             },
             isEmpty(document) {
-                return !document?.source?.imageData && !(document?.layerStack || []).length;
+                return !hasEditorSourceImage(document)
+                    && !(document?.layerStack || []).length
+                    && isDefaultEditorBase(document?.base);
             },
             canSave(document) {
-                return !!document?.source?.imageData;
+                return true;
             },
-            emptyNotice: 'Load an image in the Editor before saving to the Library.',
+            emptyNotice: 'Set up the Base canvas, add layers, or load an image in the Editor before saving to the Library.',
             suggestName(document, nameOverride = null) {
                 return getSuggestedProjectName(document, nameOverride);
             },
@@ -9532,50 +10021,49 @@ window.addEventListener('DOMContentLoaded', async () => {
             },
             async captureDocument(document, payload = null) {
                 const basePayload = payload || buildLibraryPayload(document);
-                if (!basePayload.source?.imageData) {
-                    throw new Error('Load an image in the Editor before saving to the Library.');
+                if (!engine.hasImage()) {
+                    await syncStudioEngineToDocument(engine, document);
                 }
                 const capture = await captureStudioDocumentSnapshot(engine, document, basePayload);
                 const finalPayload = capture.payload;
+                const baseResolution = getEditorCanvasResolution(finalPayload);
                 return {
                     payload: finalPayload,
                     blob: capture.blob,
                     summary: {
                         hoverSource: finalPayload.source,
-                        sourceWidth: Number(finalPayload.source?.width || 0),
-                        sourceHeight: Number(finalPayload.source?.height || 0),
-                        sourceArea: Number(finalPayload.source?.width || 0) * Number(finalPayload.source?.height || 0),
+                        sourceWidth: Number(baseResolution.width || 0),
+                        sourceHeight: Number(baseResolution.height || 0),
+                        sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
                         sourceCount: finalPayload.source?.imageData ? 1 : 0,
-                        renderWidth: Number(engine.runtime.renderWidth || finalPayload.source?.width || 0),
-                        renderHeight: Number(engine.runtime.renderHeight || finalPayload.source?.height || 0)
+                        renderWidth: Number(engine.runtime.renderWidth || baseResolution.width || 0),
+                        renderHeight: Number(engine.runtime.renderHeight || baseResolution.height || 0)
                     }
                 };
             },
             async prepareImportedProject(rawPayload) {
                 const validated = this.validatePayload(rawPayload);
-                if (!validated.source?.imageData) {
-                    throw new Error('Studio Library imports must include an embedded source image.');
-                }
                 const tempDoc = {
                     ...store.getState().document,
                     ...validated,
                     layerStack: validated.layerStack,
-                    source: validated.source
+                    source: normalizeEditorSource(validated.source),
+                    base: normalizeEditorBase(validated.base, validated.source)
                 };
-                const image = await loadImageFromDataUrl(validated.source.imageData);
-                await engine.loadImage(image, validated.source);
+                await syncStudioEngineToDocument(engine, tempDoc);
                 const capture = await captureStudioDocumentSnapshot(engine, tempDoc, validated);
+                const baseResolution = getEditorCanvasResolution(capture.payload);
                 return {
                     payload: capture.payload,
                     blob: capture.blob,
                     summary: {
                         hoverSource: capture.payload.source,
-                        sourceWidth: Number(capture.payload.source?.width || 0),
-                        sourceHeight: Number(capture.payload.source?.height || 0),
-                        sourceArea: Number(capture.payload.source?.width || 0) * Number(capture.payload.source?.height || 0),
+                        sourceWidth: Number(baseResolution.width || 0),
+                        sourceHeight: Number(baseResolution.height || 0),
+                        sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
                         sourceCount: capture.payload.source?.imageData ? 1 : 0,
-                        renderWidth: Number(engine.runtime.renderWidth || capture.payload.source?.width || 0),
-                        renderHeight: Number(engine.runtime.renderHeight || capture.payload.source?.height || 0)
+                        renderWidth: Number(engine.runtime.renderWidth || baseResolution.width || 0),
+                        renderHeight: Number(engine.runtime.renderHeight || baseResolution.height || 0)
                     }
                 };
             },
@@ -9584,18 +10072,21 @@ window.addEventListener('DOMContentLoaded', async () => {
                 paletteExtractionImage = null;
                 paletteExtractionOwner = null;
                 const validated = this.validatePayload(rawPayload);
-                if (validated.source?.imageData) {
-                    const image = await loadImageFromDataUrl(validated.source.imageData);
-                    await engine.loadImage(image, validated.source);
-                }
                 const runtimePayload = stripStudioPreview(validated);
-                updateDocument((document) => applyEditorSettingsToDocument({
-                    ...document,
+                const baseDocument = store.getState().document;
+                const nextDocument = applyEditorSettingsToDocument({
+                    ...baseDocument,
                     ...runtimePayload,
                     layerStack: runtimePayload.layerStack,
-                    source: runtimePayload.source || document.source,
-                    workspace: normalizeWorkspace('studio', runtimePayload.workspace || document.workspace, !!runtimePayload.selection?.layerInstanceId)
-                }, store.getState().settings), { render: true });
+                    source: Object.prototype.hasOwnProperty.call(runtimePayload || {}, 'source')
+                        ? normalizeEditorSource(runtimePayload.source)
+                        : normalizeEditorSource(baseDocument.source),
+                    base: normalizeEditorBase(runtimePayload.base, runtimePayload.source),
+                    workspace: normalizeWorkspace('studio', runtimePayload.workspace || baseDocument.workspace, !!runtimePayload.selection?.layerInstanceId)
+                }, store.getState().settings);
+                await syncStudioEngineToDocument(engine, nextDocument);
+                updateDocument(() => nextDocument, { render: false });
+                engine.requestRender(nextDocument);
                 setActiveLibraryOrigin('studio', libraryId, libraryName);
                 commitActiveSection('editor');
                 logProcess('success', 'library.projects', `Loaded "${libraryName || 'project'}" from the Library into Editor.`);
@@ -9892,6 +10383,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     setBootStage('editor engine init', 'Initializing the Editor render engine.');
     await engine.init(view.getRenderRefs().canvas);
     engine.attachRefs(view.getRenderRefs());
+    await syncStudioEngineToDocument(engine, store.getState().document);
     ensureCompositeEditorRenderEngineReady().catch((error) => {
         console.warn('Could not prewarm the hidden Composite Editor render engine.', error);
         compositeEditorRenderEngine = null;
@@ -9970,7 +10462,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     ? 'Load .glb models or add image planes to start building a 3D scene.'
                     : store.getState().ui.activeSection === 'logs'
                         ? 'Review live process cards here while the rest of the site works in the background.'
-                    : 'Load an image to start editing.',
+                    : 'Set the Base canvas, add layers, or load an image to start editing.',
         'info',
         6500
     );

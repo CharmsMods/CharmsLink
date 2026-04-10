@@ -139,6 +139,15 @@ export class NoiseStudioEngine {
             analysisPixelBuffer: null,
             analysisTempCanvas: null,
             analysisTempCtx: null,
+            inputSampleCanvas: null,
+            inputSampleCtx: null,
+            inputSampleTex: null,
+            inputSampleFbo: null,
+            inputSampleRawPixels: null,
+            inputSampleTopLeftPixels: null,
+            inputSampleWidth: 0,
+            inputSampleHeight: 0,
+            inputSampleCacheKey: '',
             baseImage: null,
             sourceWidth: 1,
             sourceHeight: 1,
@@ -200,6 +209,20 @@ export class NoiseStudioEngine {
         this.runtime.analysisTempCanvas.width = 256;
         this.runtime.analysisTempCanvas.height = 256;
         this.runtime.analysisTempCtx = this.runtime.analysisTempCanvas.getContext('2d', { willReadFrequently: true });
+        this.runtime.inputSampleCanvas = document.createElement('canvas');
+        this.runtime.inputSampleCanvas.width = 1;
+        this.runtime.inputSampleCanvas.height = 1;
+        this.runtime.inputSampleCtx = this.runtime.inputSampleCanvas.getContext('2d', { willReadFrequently: true });
+        this.runtime.inputSampleTex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, this.runtime.inputSampleTex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        this.runtime.inputSampleFbo = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.runtime.inputSampleFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.runtime.inputSampleTex, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
     async loadImageFromFile(file, sourceMeta = {}) {
@@ -412,7 +435,7 @@ export class NoiseStudioEngine {
             canvas.width = width;
             canvas.height = height;
         }
-        const ctx = canvas.getContext('2d', { alpha: false });
+        const ctx = canvas.getContext('2d');
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         drawImageContained(ctx, this.runtime.baseImage, canvas.width, canvas.height);
@@ -583,6 +606,25 @@ export class NoiseStudioEngine {
         return this.runtime.hasRenderableLayers ? this.refs.canvas : (this.refs.sourcePreviewCanvas || this.refs.canvas);
     }
 
+    getProcessedPreviewResolution() {
+        const { gl } = this.runtime;
+        return {
+            w: Math.max(1, Number(gl?.drawingBufferWidth) || Number(this.refs.canvas?.width) || Number(this.runtime.renderWidth) || 1),
+            h: Math.max(1, Number(gl?.drawingBufferHeight) || Number(this.refs.canvas?.height) || Number(this.runtime.renderHeight) || 1)
+        };
+    }
+
+    getActivePreviewResolution() {
+        if (this.runtime.hasRenderableLayers) {
+            return this.getProcessedPreviewResolution();
+        }
+        const canvas = this.refs.sourcePreviewCanvas || this.refs.canvas;
+        return {
+            w: Math.max(1, Number(canvas?.width) || 1),
+            h: Math.max(1, Number(canvas?.height) || 1)
+        };
+    }
+
     render(documentState, options = {}) {
         if (!this.runtime.baseImage) return;
         const isExport = !!options.isExport;
@@ -750,13 +792,14 @@ export class NoiseStudioEngine {
             this.refs.canvas.width = finalWidth;
             this.refs.canvas.height = finalHeight;
         }
+        const previewResolution = this.getProcessedPreviewResolution();
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        gl.viewport(0, 0, finalWidth, finalHeight);
+        gl.viewport(0, 0, previewResolution.w, previewResolution.h);
         gl.useProgram(this.runtime.programs.final);
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, currentTex);
         gl.uniform1i(gl.getUniformLocation(this.runtime.programs.final, 'u_tex'), 0);
-        gl.uniform2f(gl.getUniformLocation(this.runtime.programs.final, 'u_res'), finalWidth, finalHeight);
+        gl.uniform2f(gl.getUniformLocation(this.runtime.programs.final, 'u_res'), previewResolution.w, previewResolution.h);
         gl.drawArrays(gl.TRIANGLES, 0, 6);
         gl.flush();
 
@@ -771,7 +814,9 @@ export class NoiseStudioEngine {
             this.hooks.onMetrics?.({
                 fps: this.runtime.realtimeFps,
                 renderWidth: finalWidth,
-                renderHeight: finalHeight
+                renderHeight: finalHeight,
+                displayWidth: previewResolution.w,
+                displayHeight: previewResolution.h
             });
             if (documentState.layerStack.some((instance) => this.registry.byId[instance.layerId]?.animated && instance.enabled && instance.visible)) {
                 this.requestRender(documentState);
@@ -957,9 +1002,10 @@ export class NoiseStudioEngine {
     syncHoverPreview() {
         if (!this.refs.hoverPreviewCanvas || !this.runtime.baseImage || !this.refs.canvas) return;
         const canvas = this.refs.hoverPreviewCanvas;
-        if (canvas.width !== this.refs.canvas.width || canvas.height !== this.refs.canvas.height) {
-            canvas.width = this.refs.canvas.width;
-            canvas.height = this.refs.canvas.height;
+        const previewResolution = this.getProcessedPreviewResolution();
+        if (canvas.width !== previewResolution.w || canvas.height !== previewResolution.h) {
+            canvas.width = previewResolution.w;
+            canvas.height = previewResolution.h;
         }
         const ctx = canvas.getContext('2d');
         ctx.imageSmoothingEnabled = true;
@@ -1062,7 +1108,7 @@ export class NoiseStudioEngine {
             const exportCanvas = document.createElement('canvas');
             exportCanvas.width = this.runtime.sourceWidth;
             exportCanvas.height = this.runtime.sourceHeight;
-            const ctx = exportCanvas.getContext('2d', { alpha: false });
+            const ctx = exportCanvas.getContext('2d');
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(this.runtime.baseImage, 0, 0, exportCanvas.width, exportCanvas.height);
@@ -1094,7 +1140,7 @@ export class NoiseStudioEngine {
         originalCanvas.getContext('2d').drawImage(this.runtime.baseImage, 0, 0, originalCanvas.width, originalCanvas.height);
         processedCanvas.getContext('2d').drawImage(processedLayers ? this.getActiveDisplayCanvas() : this.runtime.baseImage, 0, 0, processedCanvas.width, processedCanvas.height);
         if (infoEl) {
-            infoEl.textContent = `Source ${this.runtime.sourceWidth} x ${this.runtime.sourceHeight} | Render ${this.runtime.renderWidth} x ${this.runtime.renderHeight}`;
+            infoEl.textContent = `Base ${this.runtime.sourceWidth} x ${this.runtime.sourceHeight} | Render ${this.runtime.renderWidth} x ${this.runtime.renderHeight}`;
         }
         if (processedLayers) this.render(documentState);
     }
@@ -1167,8 +1213,9 @@ export class NoiseStudioEngine {
         }
         const { gl } = this.runtime;
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-        const x = Math.max(0, Math.min(this.refs.canvas.width - 1, Math.floor(xRatio * this.refs.canvas.width)));
-        const y = Math.max(0, Math.min(this.refs.canvas.height - 1, Math.floor((1 - yRatio) * this.refs.canvas.height)));
+        const previewResolution = this.getProcessedPreviewResolution();
+        const x = Math.max(0, Math.min(previewResolution.w - 1, Math.floor(xRatio * previewResolution.w)));
+        const y = Math.max(0, Math.min(previewResolution.h - 1, Math.floor((1 - yRatio) * previewResolution.h)));
         const pixel = new Uint8Array(4);
         gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
         return {
@@ -1191,10 +1238,7 @@ export class NoiseStudioEngine {
             width,
             height,
             inputCanvasPlacement: { ...(context.inputCanvasPlacement || { x: 0, y: 0, w: width, h: height }) },
-            finalResolution: {
-                w: Math.max(1, this.runtime.renderWidth || this.refs.canvas?.width || width),
-                h: Math.max(1, this.runtime.renderHeight || this.refs.canvas?.height || height)
-            }
+            finalResolution: this.getProcessedPreviewResolution()
         };
     }
 
@@ -1218,6 +1262,101 @@ export class NoiseStudioEngine {
         };
     }
 
+    ensureInputSampleBuffers(width, height) {
+        const safeWidth = Math.max(1, Number(width) || 1);
+        const safeHeight = Math.max(1, Number(height) || 1);
+        const { gl } = this.runtime;
+        if (!gl || !this.runtime.inputSampleTex || !this.runtime.inputSampleFbo) return null;
+        if (this.runtime.inputSampleWidth === safeWidth && this.runtime.inputSampleHeight === safeHeight && this.runtime.inputSampleRawPixels && this.runtime.inputSampleTopLeftPixels) {
+            return this.runtime;
+        }
+        this.runtime.inputSampleWidth = safeWidth;
+        this.runtime.inputSampleHeight = safeHeight;
+        this.runtime.inputSampleCacheKey = '';
+        this.runtime.inputSampleRawPixels = new Uint8Array(safeWidth * safeHeight * 4);
+        this.runtime.inputSampleTopLeftPixels = new Uint8ClampedArray(safeWidth * safeHeight * 4);
+        this.runtime.inputSampleCanvas.width = safeWidth;
+        this.runtime.inputSampleCanvas.height = safeHeight;
+        gl.bindTexture(gl.TEXTURE_2D, this.runtime.inputSampleTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, safeWidth, safeHeight, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.runtime.inputSampleFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.runtime.inputSampleTex, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        return this.runtime;
+    }
+
+    refreshInputSampleSnapshot(texture, width, height, cacheKey) {
+        const runtime = this.ensureInputSampleBuffers(width, height);
+        const { gl } = this.runtime;
+        if (!runtime || !gl || !texture) return null;
+        if (this.runtime.inputSampleCacheKey === cacheKey) {
+            return {
+                width: this.runtime.inputSampleWidth,
+                height: this.runtime.inputSampleHeight,
+                pixels: this.runtime.inputSampleTopLeftPixels,
+                canvas: this.runtime.inputSampleCanvas
+            };
+        }
+
+        gl.viewport(0, 0, this.runtime.inputSampleWidth, this.runtime.inputSampleHeight);
+        renderPreviewTexture(gl, this.runtime, texture, this.runtime.inputSampleFbo, 0);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.runtime.inputSampleFbo);
+        gl.readPixels(0, 0, this.runtime.inputSampleWidth, this.runtime.inputSampleHeight, gl.RGBA, gl.UNSIGNED_BYTE, this.runtime.inputSampleRawPixels);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+        const rowSize = this.runtime.inputSampleWidth * 4;
+        for (let y = 0; y < this.runtime.inputSampleHeight; y += 1) {
+            const src = (this.runtime.inputSampleHeight - 1 - y) * rowSize;
+            const dst = y * rowSize;
+            this.runtime.inputSampleTopLeftPixels.set(
+                this.runtime.inputSampleRawPixels.subarray(src, src + rowSize),
+                dst
+            );
+        }
+
+        const imageData = new ImageData(this.runtime.inputSampleTopLeftPixels, this.runtime.inputSampleWidth, this.runtime.inputSampleHeight);
+        this.runtime.inputSampleCtx.putImageData(imageData, 0, 0);
+        this.runtime.inputSampleCacheKey = cacheKey;
+
+        return {
+            width: this.runtime.inputSampleWidth,
+            height: this.runtime.inputSampleHeight,
+            pixels: this.runtime.inputSampleTopLeftPixels,
+            canvas: this.runtime.inputSampleCanvas
+        };
+    }
+
+    getLayerInputPreviewSnapshot(documentState, instanceId = null) {
+        const selectedContext = this.runtime.selectedLayerContext;
+        const context = selectedContext && (!instanceId || selectedContext.instance?.instanceId === instanceId)
+            ? {
+                ...selectedContext,
+                finalResolution: this.getProcessedPreviewResolution()
+            }
+            : this.getLayerInputSampleContext(documentState, instanceId);
+        if (!context?.inputTex || !context?.resolution) return null;
+
+        const width = Math.max(1, context.resolution.w || 1);
+        const height = Math.max(1, context.resolution.h || 1);
+        const cacheKey = [
+            selectedContext && context === selectedContext ? 'selected' : 'resolved',
+            String(context.instance?.instanceId || instanceId || ''),
+            String(this.runtime.frameRenderCount || 0),
+            `${width}x${height}`
+        ].join(':');
+        const snapshot = this.refreshInputSampleSnapshot(context.inputTex, width, height, cacheKey);
+        if (!snapshot) return null;
+
+        return {
+            ...snapshot,
+            inputCanvasPlacement: { ...(context.inputCanvasPlacement || { x: 0, y: 0, w: width, h: height }) },
+            finalResolution: {
+                w: Math.max(1, context.finalResolution?.w || this.runtime.renderWidth || width),
+                h: Math.max(1, context.finalResolution?.h || this.runtime.renderHeight || height)
+            }
+        };
+    }
+
     getLayerInputSampleContext(documentState, instanceId) {
         if (!this.runtime.baseImage || !instanceId) return null;
         const targetIndex = documentState?.layerStack?.findIndex((instance) => instance.instanceId === instanceId) ?? -1;
@@ -1227,10 +1366,11 @@ export class NoiseStudioEngine {
         this.runtime.hasRenderableLayers = hasRenderableLayers(this.registry, documentState);
         if (!this.runtime.hasRenderableLayers) return null;
 
-        const finalResolution = {
+        const nominalFinalResolution = {
             w: Math.max(1, this.runtime.renderWidth || 1),
             h: Math.max(1, this.runtime.renderHeight || 1)
         };
+        const finalResolution = this.getProcessedPreviewResolution();
         const finalSourcePlacement = this.runtime.sourcePlacement ? { ...this.runtime.sourcePlacement } : null;
         const { gl } = this.runtime;
 
@@ -1278,8 +1418,8 @@ export class NoiseStudioEngine {
         }
 
         if (!targetContext) {
-            this.runtime.renderWidth = finalResolution.w;
-            this.runtime.renderHeight = finalResolution.h;
+            this.runtime.renderWidth = nominalFinalResolution.w;
+            this.runtime.renderHeight = nominalFinalResolution.h;
             if (finalSourcePlacement) this.runtime.sourcePlacement = finalSourcePlacement;
             return null;
         }
@@ -1324,8 +1464,8 @@ export class NoiseStudioEngine {
             stageResolution = { w: resolution.w, h: resolution.h };
         }
 
-        this.runtime.renderWidth = finalResolution.w;
-        this.runtime.renderHeight = finalResolution.h;
+        this.runtime.renderWidth = nominalFinalResolution.w;
+        this.runtime.renderHeight = nominalFinalResolution.h;
         if (finalSourcePlacement) this.runtime.sourcePlacement = finalSourcePlacement;
 
         return {
@@ -1336,18 +1476,17 @@ export class NoiseStudioEngine {
     }
 
     pickLayerInputAtUv(documentState, instanceId, u, v) {
-        const context = this.getLayerInputSampleContext(documentState, instanceId);
-        if (!context?.inputTex || !context?.resolution) return null;
-
-        const width = Math.max(1, context.resolution.w || 1);
-        const height = Math.max(1, context.resolution.h || 1);
+        const snapshot = this.getLayerInputPreviewSnapshot(documentState, instanceId);
+        if (!snapshot?.pixels) return null;
+        const width = Math.max(1, snapshot.width || 1);
+        const height = Math.max(1, snapshot.height || 1);
         const normalizedU = Math.max(0, Math.min(1, Number(u) || 0));
         const normalizedV = Math.max(0, Math.min(1, Number(v) || 0));
-        const finalWidth = Math.max(1, context.finalResolution?.w || width);
-        const finalHeight = Math.max(1, context.finalResolution?.h || height);
+        const finalWidth = Math.max(1, snapshot.finalResolution?.w || width);
+        const finalHeight = Math.max(1, snapshot.finalResolution?.h || height);
         const previewX = normalizedU * finalWidth;
         const previewY = normalizedV * finalHeight;
-        const placement = context.inputCanvasPlacement || { x: 0, y: 0, w: width, h: height };
+        const placement = snapshot.inputCanvasPlacement || { x: 0, y: 0, w: width, h: height };
 
         if (
             placement.w <= 0
@@ -1364,20 +1503,12 @@ export class NoiseStudioEngine {
         const localV = (previewY - placement.y) / placement.h;
         const x = Math.max(0, Math.min(width - 1, Math.floor(localU * width)));
         const y = Math.max(0, Math.min(height - 1, Math.floor(localV * height)));
-        const pixelObj = new Float32Array(4);
-        const pool = this.ensurePool(width, height);
-        const { gl } = this.runtime;
-
-        gl.viewport(0, 0, width, height);
-        renderPreviewTexture(gl, this.runtime, context.inputTex, pool.preview.fbo, 0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, pool.preview.fbo);
-        gl.readPixels(x, Math.max(0, height - 1 - y), 1, 1, gl.RGBA, gl.FLOAT, pixelObj);
-
+        const offset = ((y * width) + x) * 4;
         const pixel = [
-            Math.round(Math.max(0, Math.min(1, pixelObj[0])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[1])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[2])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[3])) * 255)
+            snapshot.pixels[offset] || 0,
+            snapshot.pixels[offset + 1] || 0,
+            snapshot.pixels[offset + 2] || 0,
+            snapshot.pixels[offset + 3] || 0
         ];
 
         return {
@@ -1394,8 +1525,6 @@ export class NoiseStudioEngine {
     }
 
     pickSelectedLayerInputAtUv(instanceIdOrU, maybeU, maybeV) {
-        const context = this.runtime.selectedLayerContext;
-        if (!context?.inputTex || !context?.resolution || !context?.pool) return null;
         let instanceId = null;
         let u = instanceIdOrU;
         let v = maybeU;
@@ -1405,21 +1534,20 @@ export class NoiseStudioEngine {
             u = maybeU;
             v = maybeV;
         }
-        if (instanceId && context.instance?.instanceId !== instanceId) return null;
-
-        const { gl } = this.runtime;
-        const width = Math.max(1, context.resolution.w || 1);
-        const height = Math.max(1, context.resolution.h || 1);
+        const snapshot = this.getLayerInputPreviewSnapshot(null, instanceId);
+        if (!snapshot?.pixels) return null;
+        const width = Math.max(1, snapshot.width || 1);
+        const height = Math.max(1, snapshot.height || 1);
         const normalizedU = Math.max(0, Math.min(1, Number(u) || 0));
         const normalizedV = Math.max(0, Math.min(1, Number(v) || 0));
-        const inputCanvasPlacement = context.inputCanvasPlacement || {
+        const inputCanvasPlacement = snapshot.inputCanvasPlacement || {
             x: 0,
             y: 0,
             w: width,
             h: height
         };
-        const finalWidth = Math.max(1, this.runtime.renderWidth || this.refs.canvas?.width || width);
-        const finalHeight = Math.max(1, this.runtime.renderHeight || this.refs.canvas?.height || height);
+        const finalWidth = Math.max(1, snapshot.finalResolution?.w || this.runtime.renderWidth || this.refs.canvas?.width || width);
+        const finalHeight = Math.max(1, snapshot.finalResolution?.h || this.runtime.renderHeight || this.refs.canvas?.height || height);
         const previewX = normalizedU * finalWidth;
         const previewY = normalizedV * finalHeight;
 
@@ -1438,19 +1566,12 @@ export class NoiseStudioEngine {
         const localV = (previewY - inputCanvasPlacement.y) / inputCanvasPlacement.h;
         const x = Math.max(0, Math.min(width - 1, Math.floor(localU * width)));
         const y = Math.max(0, Math.min(height - 1, Math.floor(localV * height)));
-        const pixelObj = new Float32Array(4);
-        const pool = this.ensurePool(width, height);
-
-        gl.viewport(0, 0, width, height);
-        renderPreviewTexture(gl, this.runtime, context.inputTex, pool.preview.fbo, 0);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, pool.preview.fbo);
-        gl.readPixels(x, Math.max(0, height - 1 - y), 1, 1, gl.RGBA, gl.FLOAT, pixelObj);
-        
+        const offset = ((y * width) + x) * 4;
         const pixel = [
-            Math.round(Math.max(0, Math.min(1, pixelObj[0])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[1])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[2])) * 255),
-            Math.round(Math.max(0, Math.min(1, pixelObj[3])) * 255)
+            snapshot.pixels[offset] || 0,
+            snapshot.pixels[offset + 1] || 0,
+            snapshot.pixels[offset + 2] || 0,
+            snapshot.pixels[offset + 3] || 0
         ];
 
         return {

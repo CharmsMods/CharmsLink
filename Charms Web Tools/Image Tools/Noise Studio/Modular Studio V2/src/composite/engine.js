@@ -2,6 +2,8 @@ import {
     COMPOSITE_MAX_ZOOM,
     COMPOSITE_MIN_ZOOM,
     getActiveCompositeLayers,
+    getCompositeLayerCrop,
+    getCompositeLayerSourceDimensions,
     getCompositeLayerSourceImage,
     normalizeCompositeDocument
 } from './document.js';
@@ -105,7 +107,7 @@ export class CompositeEngine {
         await Promise.all(normalized.layers.map((layer) => this.ensureLayerAsset(layer).catch(() => null)));
     }
 
-    getLayerDimensions(layer) {
+    getLayerSourceDimensions(layer) {
         const runtimeAsset = this.layerAssets.get(layer?.id);
         if (runtimeAsset?.width && runtimeAsset?.height) {
             return {
@@ -113,10 +115,15 @@ export class CompositeEngine {
                 height: Math.max(1, Number(runtimeAsset.height) || 1)
             };
         }
-        const source = getCompositeLayerSourceImage(layer);
+        return getCompositeLayerSourceDimensions(layer);
+    }
+
+    getLayerDimensions(layer) {
+        const source = this.getLayerSourceDimensions(layer);
+        const crop = getCompositeLayerCrop(layer, source);
         return {
-            width: Math.max(1, Number(source.width) || 1),
-            height: Math.max(1, Number(source.height) || 1)
+            width: Math.max(1, Number(source.width) - Number(crop?.left || 0) - Number(crop?.right || 0)),
+            height: Math.max(1, Number(source.height) - Number(crop?.top || 0) - Number(crop?.bottom || 0))
         };
     }
 
@@ -253,12 +260,22 @@ export class CompositeEngine {
         for (const layer of layers) {
             const asset = this.layerAssets.get(layer.id);
             if (!asset?.image) continue;
+            const sourceDimensions = this.getLayerSourceDimensions(layer);
+            const crop = getCompositeLayerCrop(layer, sourceDimensions) || { left: 0, top: 0, right: 0, bottom: 0 };
+            const visibleSourceWidth = Math.max(1, Number(sourceDimensions.width) - crop.left - crop.right);
+            const visibleSourceHeight = Math.max(1, Number(sourceDimensions.height) - crop.top - crop.bottom);
+            const bitmapScaleX = (Number(asset.image.width) || visibleSourceWidth) / Math.max(1, Number(sourceDimensions.width) || 1);
+            const bitmapScaleY = (Number(asset.image.height) || visibleSourceHeight) / Math.max(1, Number(sourceDimensions.height) || 1);
+            const sourceRectX = crop.left * bitmapScaleX;
+            const sourceRectY = crop.top * bitmapScaleY;
+            const sourceRectWidth = visibleSourceWidth * bitmapScaleX;
+            const sourceRectHeight = visibleSourceHeight * bitmapScaleY;
             ctx.save();
             ctx.translate((targetCanvas.width * 0.5) + viewport.panX, (targetCanvas.height * 0.5) + viewport.panY);
             ctx.scale(viewport.scale, viewport.scale);
             ctx.translate(-viewport.centerWorld.x, -viewport.centerWorld.y);
-            const width = asset.width * (Number(layer.scaleX) || Number(layer.scale) || 1);
-            const height = asset.height * (Number(layer.scaleY) || Number(layer.scale) || 1);
+            const width = visibleSourceWidth * (Number(layer.scaleX) || Number(layer.scale) || 1);
+            const height = visibleSourceHeight * (Number(layer.scaleY) || Number(layer.scale) || 1);
             ctx.translate(layer.x + (width * 0.5), layer.y + (height * 0.5));
             ctx.rotate(layer.rotation || 0);
             ctx.scale(layer.flipX ? -1 : 1, layer.flipY ? -1 : 1);
@@ -272,7 +289,17 @@ export class CompositeEngine {
                 : layer.blendMode === 'screen' ? 'screen'
                 : layer.blendMode === 'overlay' ? 'overlay'
                 : 'source-over';
-            ctx.drawImage(asset.image, -(width * 0.5), -(height * 0.5), width, height);
+            ctx.drawImage(
+                asset.image,
+                sourceRectX,
+                sourceRectY,
+                sourceRectWidth,
+                sourceRectHeight,
+                -(width * 0.5),
+                -(height * 0.5),
+                width,
+                height
+            );
             ctx.restore();
         }
         return {

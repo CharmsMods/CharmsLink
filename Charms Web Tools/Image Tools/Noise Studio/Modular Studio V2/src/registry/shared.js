@@ -14,7 +14,8 @@ const CONTROL_TYPES = new Set([
     'conditionalGroup',
     'colorWheel3Way',
     'bgPatcherEditor',
-    'expanderEditor'
+    'expanderEditor',
+    'textLayerEditor'
 ]);
 
 function ensureUnique(set, value, label) {
@@ -50,7 +51,7 @@ export function collectDefaultParams(layer) {
             params[control.key] = control.default ?? (control.type === 'checkbox' ? false : control.type === 'color' ? '#000000' : control.min ?? 0);
             return;
         }
-        if ((control.type === 'bgPatcherEditor' || control.type === 'expanderEditor') && control.defaults) {
+        if ((control.type === 'bgPatcherEditor' || control.type === 'expanderEditor' || control.type === 'textLayerEditor') && control.defaults) {
             Object.entries(control.defaults).forEach(([key, value]) => {
                 params[key] = structuredClone(value);
             });

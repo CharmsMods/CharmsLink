@@ -58,6 +58,16 @@ Validating "composite 1" and opening it in Composite", after that it just doenst
 perhaps having both, where images under a certain resolution are GPU rendered and settings above a resoltion, are CPU rendered, with or without web workers depending on research and how things actually work. there could also be a manual toggle for the user to choose between these 2 options overriding the automatic detection.
   current pass note: current Composite export is still CPU 2D canvas in both paths, but the app now does the research-backed part of this safely: `Settings > Composite` shows worker readiness plus probed WebGL limits (`MAX_TEXTURE_SIZE`, viewport limits, GPU-safe edge), manual backend override still exists, and `Auto` is now size-aware instead of blindly preferring the worker. smaller exports stay on the main thread, larger exports route to the background worker, and the export log explains which path was chosen. the future "real GPU/WebGL renderer for smaller exports" part is still not implemented because that renderer split does not exist in the current Composite architecture yet.
 
-## Still Open / Still Needs Work
+## Still Open / Still Needs Work / Ideas
 
-- no open Composite items are listed here right now. add new issues below this section as they show up in live testing.
+- Allow the user to crop images using handles
+  current pass note: image and editor-project Composite layers now support a dedicated crop mode that reuses the on-canvas selection handles for non-destructive cropping, including rotated/flipped layers, plus reset/exit controls in the Transform panel.
+
+
+fonts on text settings is a text box instead of what it should be as a drop down box with options
+current pass note: the Composite text `Font Family` control now uses the shared editor font dropdown options instead of a freeform text field.
+
+
+
+the user should be able to click on a object/layer on the canvas, and the click "Replace With" and that will open up a popup menu that ties into the existing buttons that either add a normal image to the canvas, or a editor project to the canvas, and instead of just adding one of either, whatever is selected will replace the selected object/layer on the canvas, with the same properties, position, rotation, scale, opacity, blend mode, etc. but with the new image or editor project. this means FIRST, the issue where clicking on a part of the canvas that doenst have anything on it, doesnt deselect everything. just for clarification, if something on the canvas is selected, and the user clicks on either add editor project or add normal image, this wont go into replacement mode, replacement mode only happens when the user clicks on a new button called "Replace With" that should only appear when something is selected.
+current pass note: Composite now shows a conditional `Replace With` toolbar action when a layer is selected. that opens a dedicated replacement chooser which routes into the existing Editor-project picker or image picker in explicit replacement mode only, while normal `Add Editor Project` / `Add Images` still keep their old additive behavior. replacement keeps the selected layer slot and preserves generic transform/appearance fields like position, rotation, scale, opacity, and blend mode. empty left-click on unused stage space now clears the selection cleanly instead of falling into an implicit pan start.

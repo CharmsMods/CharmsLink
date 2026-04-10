@@ -198,6 +198,36 @@
       "extraPrograms": []
     },
     {
+      "layerId": "textOverlay",
+      "label": "Text Overlay",
+      "technicalLabel": "Text Overlay",
+      "group": "base",
+      "description": "Adds editable text on top of the current image with direct preview dragging and resize handles.",
+      "executor": "manual",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "textOverlayEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "textLayerEditor",
+          "defaults": {
+            "textContent": "Text",
+            "textFontFamily": "Arial",
+            "textFontSize": 96,
+            "textColor": "#ffffff",
+            "textOpacity": 1,
+            "textRotation": 0,
+            "textX": 0,
+            "textY": 0
+          }
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
       "layerId": "noise",
       "label": "Noise",
       "technicalLabel": "Noise",
