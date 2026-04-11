@@ -31,9 +31,8 @@ const GROUP_LABELS = {
 const STUDIO_TABS = [
     { id: 'edit', label: 'Layers' },
     { id: 'base', label: 'Canvas' },
-    { id: 'info', label: 'Info' },
     { id: 'layer', label: 'Selected' },
-    { id: 'pipeline', label: 'Stack' },
+    { id: 'pipeline', label: 'Pipeline' },
     { id: 'scopes', label: 'Scopes' }
 ];
 
@@ -701,12 +700,19 @@ function renderBasePanel(state) {
     const source = normalizeEditorSource(state.document.source);
     const hasSourceImage = hasEditorSourceImage(state.document);
 
+    const canvas = getEditorCanvasResolution(state.document);
+    const renderResolution = computeResolutionThroughInstance(state);
+    const zoom = Number(state.document.view.zoom || 1);
+    const renderMatchesCanvas = renderResolution.width === canvas.width && renderResolution.height === canvas.height;
+
     return `
         <div class="panel-section controls-section">
             <div class="custom-layer-editor">
                 <section class="custom-group">
-                    <div class="panel-heading">Canvas</div>
-                    <div class="info-banner is-data"><span>Current Canvas</span><strong>${base.width} x ${base.height}</strong></div>
+                    <div class="panel-heading">Canvas Info</div>
+                    <div class="info-banner is-data"><span>Name</span><strong id="previewTitle">${escapeHtml(getEditorCanvasLabel(state.document))}</strong></div>
+                    <div class="info-banner is-data"><span>Base Resolution</span><strong>${canvas.width} x ${canvas.height}</strong></div>
+                    ${renderMatchesCanvas ? '' : `<div class="info-banner is-data"><span>Render Resolution</span><strong>${renderResolution.width} x ${renderResolution.height}</strong></div>`}
                     <div class="info-banner">Use Crop / Rotate / Flip and Resolution Scale layers to change framing or output size.</div>
                 </section>
                 <section class="custom-group">
@@ -741,26 +747,6 @@ function renderBasePanel(state) {
                             <button type="button" class="mini-button" data-action="trigger-image-input">Load Image</button>
                         </div>
                     `}
-                </section>
-            </div>
-        </div>
-    `;
-}
-
-function renderInfoPanel(state) {
-    const canvas = getEditorCanvasResolution(state.document);
-    const renderResolution = computeResolutionThroughInstance(state);
-    const zoom = Number(state.document.view.zoom || 1);
-    const renderMatchesCanvas = renderResolution.width === canvas.width && renderResolution.height === canvas.height;
-
-    return `
-        <div class="panel-section controls-section">
-            <div class="custom-layer-editor">
-                <section class="custom-group">
-                    <div class="panel-heading">Canvas</div>
-                    <div class="info-banner is-data"><span>Name</span><strong id="previewTitle">${escapeHtml(getEditorCanvasLabel(state.document))}</strong></div>
-                    <div class="info-banner is-data"><span>Base Resolution</span><strong>${canvas.width} x ${canvas.height}</strong></div>
-                    ${renderMatchesCanvas ? '' : `<div class="info-banner is-data"><span>Render Resolution</span><strong>${renderResolution.width} x ${renderResolution.height}</strong></div>`}
                 </section>
                 <section class="custom-group">
                     <div class="panel-heading">Preview Options</div>
@@ -817,7 +803,6 @@ function renderSidebar(state, registry) {
 
     if (currentView === 'pipeline') body = renderPipeline(state, registry);
     else if (currentView === 'base') body = renderBasePanel(state);
-    else if (currentView === 'info') body = renderInfoPanel(state);
     else if (currentView === 'scopes') body = renderScopes(state, registry);
     else if (currentView === 'layer') body = renderLayerPanel(state, registry);
     else body = renderGroups(state, registry);
@@ -927,20 +912,31 @@ function renderStudioToolbar(state) {
     return `
         <header class="toolbar">
             <div class="toolbar-cluster">
-                <button type="button" class="toolbar-button" data-action="trigger-image-input">Load Image</button>
-                <button type="button" class="toolbar-button" data-action="new-project">New Project</button>
-                <button type="button" class="toolbar-button" data-action="export-current">Export PNG</button>
-                <button type="button" class="toolbar-button" data-action="batch-open">Batch Process</button>
+                <div class="toolbar-dropdown" tabindex="0">
+                    <button type="button" class="toolbar-button">Project &#9662;</button>
+                    <div class="toolbar-dropdown-menu">
+                        <button type="button" class="toolbar-button" data-action="new-project">New Project</button>
+                        <button type="button" class="toolbar-button" data-action="open-state">Load Project JSON</button>
+                        <button type="button" class="toolbar-button" data-action="save-state">Save JSON</button>
+                        <button type="button" class="toolbar-button" data-action="save-to-library">Save to Library</button>
+                        ${showUpdateOriginal ? '<button type="button" class="toolbar-button" data-action="composite-update-original-editor">Update Original Editor Project</button>' : ''}
+                    </div>
+                </div>
+                <div class="toolbar-dropdown" tabindex="0">
+                    <button type="button" class="toolbar-button">Image & Export &#9662;</button>
+                    <div class="toolbar-dropdown-menu">
+                        <button type="button" class="toolbar-button" data-action="trigger-image-input">Load Image</button>
+                        <label class="tiny-toggle toolbar-toggle">
+                            <input id="loadImageToggle" type="checkbox" ${state.ui.loadImageOnOpen ? 'checked' : ''}>
+                            <span style="font-size: 11px; padding: 4px; display: inline-flex; align-items: center; width: 100%;">Load Image On Open</span>
+                        </label>
+                        <hr>
+                        <button type="button" class="toolbar-button" data-action="export-current">Export PNG</button>
+                        <button type="button" class="toolbar-button" data-action="batch-open">Batch Process</button>
+                    </div>
+                </div>
             </div>
             <div class="toolbar-cluster toolbar-state-actions">
-                <button type="button" class="toolbar-button" data-action="open-state">Load</button>
-                <label class="tiny-toggle toolbar-toggle">
-                    <input id="loadImageToggle" type="checkbox" ${state.ui.loadImageOnOpen ? 'checked' : ''}>
-                    <span>Load Image</span>
-                </label>
-                <button type="button" class="toolbar-button" data-action="save-state">Save</button>
-                <button type="button" class="toolbar-button" data-action="save-to-library">Save to Library</button>
-                ${showUpdateOriginal ? '<button type="button" class="toolbar-button" data-action="composite-update-original-editor">Update Original Editor Project</button>' : ''}
             </div>
         </header>
     `;
@@ -1017,10 +1013,10 @@ function renderSectionTabs(state, headerStatus = null) {
                 <button type="button" class="mode-button ${activeSection === 'settings' ? 'is-active' : ''}" data-action="set-app-section" data-section="settings">Settings</button>
                 <button type="button" class="mode-button ${activeSection === 'logs' ? 'is-active' : ''}" data-action="set-app-section" data-section="logs">Logs</button>
             </div>
-            <div class="section-header-status ${statusText ? `is-${statusTone}` : 'is-empty'}" aria-live="polite" title="${escapeHtml(statusText)}">
-                ${statusText ? `<span>${escapeHtml(statusText)}</span>` : ''}
-            </div>
         </nav>
+        <div class="section-header-status ${statusText ? `is-${statusTone}` : 'is-empty'}" aria-live="polite" title="${escapeHtml(statusText)}">
+            ${statusText ? `<span>${escapeHtml(statusText)}</span>` : ''}
+        </div>
     `;
 }
 

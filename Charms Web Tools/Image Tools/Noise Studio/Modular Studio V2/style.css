@@ -232,13 +232,21 @@ button {
     flex-wrap: wrap;
 }
 
-.section-switcher {
+#sectionTabsSlot {
     display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+}
+
+.section-switcher {
+    display: inline-flex;
     align-items: center;
     gap: 8px;
     padding: 8px 10px;
     justify-content: space-between;
     flex-wrap: wrap;
+    width: fit-content;
 }
 
 .section-switcher-buttons {
@@ -366,6 +374,48 @@ button {
     color: var(--text);
 }
 
+.toolbar-dropdown {
+    position: relative;
+    display: inline-block;
+    outline: none;
+}
+.toolbar-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: var(--studio-neu-surface);
+    border: none;
+    border-radius: 14px;
+    box-shadow: var(--studio-neu-shadow-card, 0 8px 24px rgba(0,0,0,0.25));
+    padding: 8px;
+    min-width: 180px;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-8px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    white-space: nowrap;
+}
+.toolbar-dropdown:hover .toolbar-dropdown-menu,
+.toolbar-dropdown:focus-within .toolbar-dropdown-menu {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+.toolbar-dropdown-menu .toolbar-button {
+    width: 100%;
+    text-align: left;
+    justify-content: flex-start;
+}
+.toolbar-dropdown-menu hr {
+    border: none;
+    border-top: 1px solid var(--line);
+    margin: 4px 0;
+}
+
 .section-header-status {
     margin-left: auto;
     min-height: 28px;
@@ -441,8 +491,10 @@ button {
 }
 
 .workspace-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
     border-bottom: 1px solid var(--line);
 }
 
@@ -1206,8 +1258,9 @@ code {
 }
 
 .app-shell[data-active-section='editor'] .workspace-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
     gap: 8px;
     padding: 0;
     border: none;
@@ -1946,29 +1999,29 @@ code {
     box-shadow: none;
 }
 
-.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status {
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot .section-header-status {
     background: transparent;
     border: 0;
     box-shadow: none;
     color: var(--studio-neu-muted);
 }
 
-.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status span {
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot .section-header-status span {
     border: none;
     background: var(--studio-neu-surface);
     color: var(--studio-neu-muted);
     box-shadow: var(--studio-neu-shadow-inset-soft);
 }
 
-.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status.is-success span {
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot .section-header-status.is-success span {
     color: var(--studio-success);
 }
 
-.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status.is-warning span {
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot .section-header-status.is-warning span {
     color: var(--studio-warning);
 }
 
-.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status.is-error span {
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot .section-header-status.is-error span {
     color: var(--studio-danger);
 }
 
@@ -4102,9 +4155,7 @@ code {
         border-radius: 18px;
     }
 
-    .workspace-tabs {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+
 
     .toolbar {
         align-items: stretch;

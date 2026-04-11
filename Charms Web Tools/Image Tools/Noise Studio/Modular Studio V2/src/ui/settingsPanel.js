@@ -493,7 +493,6 @@ export function createSettingsPanel(root, { actions } = {}) {
                 color: var(--studio-neu-text);
                 font-family: inherit;
             }
-            .settings-rail,
             .settings-header,
             .settings-card,
             .settings-feedback {
@@ -502,7 +501,6 @@ export function createSettingsPanel(root, { actions } = {}) {
                 color: var(--studio-neu-text);
                 box-shadow: var(--studio-neu-shadow-card);
             }
-            .settings-rail,
             .settings-header,
             .settings-card {
                 border-radius: 22px;
