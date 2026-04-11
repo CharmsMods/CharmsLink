@@ -493,7 +493,6 @@ export function createSettingsPanel(root, { actions } = {}) {
                 color: var(--studio-neu-text);
                 font-family: inherit;
             }
-            .settings-header,
             .settings-card,
             .settings-feedback {
                 border: none;
@@ -501,7 +500,6 @@ export function createSettingsPanel(root, { actions } = {}) {
                 color: var(--studio-neu-text);
                 box-shadow: var(--studio-neu-shadow-card);
             }
-            .settings-header,
             .settings-card {
                 border-radius: 22px;
             }
@@ -598,7 +596,7 @@ export function createSettingsPanel(root, { actions } = {}) {
                 padding: 4px 4px 4px 0;
             }
             .settings-header {
-                padding: 18px 24px;
+                padding: 4px 12px 0;
                 display: flex;
                 align-items: center;
                 justify-content: flex-end;

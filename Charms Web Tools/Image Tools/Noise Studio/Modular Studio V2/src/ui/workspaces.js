@@ -1005,13 +1005,13 @@ function renderSectionTabs(state, headerStatus = null) {
     return `
         <nav class="section-switcher">
             <div class="section-switcher-buttons">
+                <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
                 <button type="button" class="mode-button ${activeSection === 'editor' ? 'is-active' : ''}" data-action="set-app-section" data-section="editor">Editor</button>
                 <button type="button" class="mode-button ${activeSection === 'composite' ? 'is-active' : ''}" data-action="set-app-section" data-section="composite">Composite</button>
-                <button type="button" class="mode-button ${activeSection === 'library' ? 'is-active' : ''}" data-action="set-app-section" data-section="library">Library</button>
-                <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
                 <button type="button" class="mode-button ${activeSection === '3d' ? 'is-active' : ''}" data-action="set-app-section" data-section="3d">3D</button>
-                <button type="button" class="mode-button ${activeSection === 'settings' ? 'is-active' : ''}" data-action="set-app-section" data-section="settings">Settings</button>
+                <button type="button" class="mode-button ${activeSection === 'stitch' ? 'is-active' : ''}" data-action="set-app-section" data-section="stitch">Stitch</button>
                 <button type="button" class="mode-button ${activeSection === 'logs' ? 'is-active' : ''}" data-action="set-app-section" data-section="logs">Logs</button>
+                <button type="button" class="mode-button ${activeSection === 'settings' ? 'is-active' : ''}" data-action="set-app-section" data-section="settings">Settings</button>
             </div>
         </nav>
         <div class="section-header-status ${statusText ? `is-${statusTone}` : 'is-empty'}" aria-live="polite" title="${escapeHtml(statusText)}">
