@@ -1,3 +1,5 @@
+import { createDefaultPersonalizationSettings } from './personalization.js';
+
 export const SETTINGS_SCHEMA_VERSION = 1;
 export const SETTINGS_STORAGE_KEY = 'noise-studio:app-settings:v1';
 
@@ -111,6 +113,7 @@ export function createDefaultAppSettings() {
             levelFilter: 'all',
             compactMessages: true
         },
+        personalization: createDefaultPersonalizationSettings(),
         diagnostics: {
             detectedCpuCores: 0,
             workerCapabilities: {},

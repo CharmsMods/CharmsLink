@@ -120,3 +120,13 @@ Bar codes
 explore to see whether a translucent frosted glass effective material can be made for the 3D tab for materials is possible with the current glass settings, or if updates would need to be made to add that capability and ensure it works like it should with the path tracing
 
 whole site background UI background image behind everything, with some UI elements being slightly see-through for the picture, not a darkening see through type, but a frosted glass look
+
+
+library loading and switching between tabs optimization, its somewhat slow sometimes while the site is doing things in the background
+
+
+add a tiling layer to the editor tab
+
+
+
+add the ability to warp text on the editor tab, and blend them with whatever is behind them

@@ -78,6 +78,7 @@ import { getEditorTextBounds, normalizeEditorTextParams } from './editor/textLay
 import { extractPaletteFromImageSource } from './editor/palette.js';
 import { APP_ASSET_VERSION, withAssetVersion } from './appAssetVersion.js';
 import { createDefaultAppSettings } from './settings/defaults.js';
+import { applyPersonalizationTheme, createDefaultPersonalizationSettings } from './settings/personalization.js';
 import { applyCompositeSettingsToDocument, applyEditorSettingsToDocument, applyEditorSettingsToLayerInstance, applyStitchSettingsToDocument, applyThemeToStitchDocument, applyThreeDSettingsToDocument, createSettingsDrivenCompositeDocument, createSettingsDrivenStitchDocument, createSettingsDrivenThreeDDocument } from './settings/apply.js';
 import { loadPersistedAppSettings, persistAppSettings, buildSettingsExportPayload, parseImportedSettingsPayload } from './settings/persistence.js';
 import { normalizeAppSettings, normalizeSettingsCategory } from './settings/schema.js';
@@ -792,19 +793,25 @@ async function captureStudioDocumentSnapshot(studioEngine, documentState, payloa
     };
 }
 
-async function captureCompositeDocumentSnapshot(documentState) {
+async function captureCompositeDocumentSnapshot(documentState, options = {}) {
     const normalized = normalizeCompositeDocument(documentState);
+    const previewOptions = options?.previewOptions && typeof options.previewOptions === 'object'
+        ? options.previewOptions
+        : {};
+    const exportOptions = options?.exportOptions && typeof options.exportOptions === 'object'
+        ? options.exportOptions
+        : {};
     let blob = null;
     let preview = normalized.preview || null;
 
     try {
-        blob = await renderCompositePngBlob(normalized);
+        blob = await renderCompositePngBlob(normalized, exportOptions);
     } catch (_error) {
         blob = null;
     }
 
     try {
-        preview = await renderCompositePreview(normalized) || preview;
+        preview = await renderCompositePreview(normalized, previewOptions) || preview;
     } catch (_error) {
         preview = preview || null;
     }
@@ -1564,7 +1571,7 @@ function createRandomPaletteColor() {
     return hslToHex(hue, saturation, lightness);
 }
 
-const STUDIO_VIEWS = new Set(['edit', 'base', 'layer', 'pipeline', 'scopes']);
+const STUDIO_VIEWS = new Set(['edit', 'base', 'info', 'layer', 'pipeline', 'scopes']);
 
 function normalizePanelView(_mode, view, hasSelection = false) {
     if (STUDIO_VIEWS.has(view)) return view;
@@ -1854,8 +1861,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         'app.navigation': 'Navigation',
         'app.notice': 'Notices',
         'settings.general': 'Settings',
+        'settings.personalization': 'Personalization',
         'settings.library': 'Library Settings',
         'settings.editor': 'Editor Settings',
+        'settings.composite': 'Composite Settings',
         'settings.stitch': 'Stitch Settings',
         'settings.3d': '3D Settings',
         'settings.logs': 'Logs Settings',
@@ -1892,6 +1901,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     let stitchEngine = null;
     let compositeAutosaveTimer = null;
     let compositeAutosaveInFlight = false;
+    let compositeAutosaveDocumentVersion = 0;
 
     let noticeTimer = null;
     let playbackTimer = null;
@@ -2094,6 +2104,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                 : 0
         });
         document.documentElement.dataset.theme = nextSettings.general.theme === 'dark' ? 'dark' : 'light';
+        applyPersonalizationTheme(nextSettings, {
+            root: document.documentElement,
+            appShell: document.querySelector('.app-shell')
+        });
         syncLogHousekeeping();
     }
 
@@ -2594,6 +2608,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         const next = normalizeCompositeDocument(mutator(previous));
         store.setState((state) => ({ ...state, compositeDocument: next }), meta);
         if (meta?.compositeAutosave === true) {
+            compositeAutosaveDocumentVersion += 1;
             scheduleCompositeAutosave(meta.compositeAutosaveReason || 'Queued Composite autosave after a committed change.');
         }
     }
@@ -3400,6 +3415,81 @@ window.addEventListener('DOMContentLoaded', async () => {
         compositeAutosaveTimer = null;
     }
 
+    function mergePersistedGeneratedCompositeDocument(currentDocument, persistedDocument) {
+        const liveDocument = normalizeCompositeDocument(currentDocument);
+        const savedDocument = normalizeCompositeDocument(persistedDocument);
+        const savedGeneratedLayersById = new Map(
+            savedDocument.layers
+                .filter((layer) => isGeneratedCompositeEditorLayer(layer))
+                .map((layer) => [layer.id, layer])
+        );
+        if (!savedGeneratedLayersById.size) {
+            return {
+                document: liveDocument,
+                mergedCount: 0
+            };
+        }
+
+        let mergedCount = 0;
+        const nextLayers = liveDocument.layers.map((layer) => {
+            const savedLayer = savedGeneratedLayersById.get(layer.id);
+            if (!savedLayer || !isGeneratedCompositeEditorLayer(layer)) {
+                return layer;
+            }
+            mergedCount += 1;
+            const currentSource = layer.source && typeof layer.source === 'object'
+                ? layer.source
+                : {};
+            const savedSource = savedLayer.source && typeof savedLayer.source === 'object'
+                ? savedLayer.source
+                : {};
+            return {
+                ...layer,
+                embeddedEditorDocument: savedLayer.embeddedEditorDocument || layer.embeddedEditorDocument,
+                source: {
+                    ...currentSource,
+                    originalLibraryId: savedSource.originalLibraryId || currentSource.originalLibraryId || null,
+                    originalLibraryName: savedSource.originalLibraryName || currentSource.originalLibraryName || '',
+                    originalProjectType: savedSource.originalProjectType || currentSource.originalProjectType || 'studio',
+                    generatedFromCompositeImage: savedSource.generatedFromCompositeImage === true || currentSource.generatedFromCompositeImage === true,
+                    renderWidth: Math.max(1, Number(savedSource.renderWidth || currentSource.renderWidth || 1)),
+                    renderHeight: Math.max(1, Number(savedSource.renderHeight || currentSource.renderHeight || 1))
+                }
+            };
+        });
+
+        return {
+            document: mergedCount
+                ? normalizeCompositeDocument({
+                    ...liveDocument,
+                    layers: nextLayers
+                })
+                : liveDocument,
+            mergedCount
+        };
+    }
+
+    function getCompositeAutosaveCaptureOptions() {
+        const forceBackend = canUseCompositeWorkerRendering() ? 'worker' : null;
+        const sharedOptions = {
+            priority: 'background',
+            scope: 'background:composite-autosave'
+        };
+        return {
+            exportOptions: {
+                ...sharedOptions,
+                processId: 'composite.autosave.export',
+                ...(forceBackend ? { forceBackend } : {})
+            },
+            previewOptions: {
+                ...sharedOptions,
+                processId: 'composite.autosave.preview',
+                replaceKey: 'composite-autosave-preview',
+                ...(forceBackend ? { forceBackend } : {})
+            }
+        };
+    }
+
     async function ensureCompositeEditorRenderEngineReady() {
         if (!compositeEditorRenderEngine) {
             compositeEditorRenderEngine = new NoiseStudioEngine(registry, {
@@ -3582,7 +3672,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             : normalized;
 
         if (savedCount && options.updateStore) {
-            updateCompositeDocument(() => nextDocument, {
+            updateCompositeDocument((currentDocument) => mergePersistedGeneratedCompositeDocument(currentDocument, nextDocument).document, {
                 renderComposite: false,
                 skipCompositeAutosave: true
             });
@@ -4063,6 +4153,13 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     async function flushCompositeAutosave(options = {}) {
         clearCompositeAutosaveTimer();
+        const scheduledVersion = compositeAutosaveDocumentVersion;
+        await nextPaint();
+        if (scheduledVersion !== compositeAutosaveDocumentVersion) {
+            scheduleCompositeAutosave('Deferred Composite autosave because a newer change landed as save was starting.');
+            return null;
+        }
+
         const activeOrigin = getActiveLibraryOrigin('composite');
         const normalized = normalizeCompositeDocument(store.getState().compositeDocument);
         if (!activeOrigin?.id || !normalized.layers.length || compositeAutosaveInFlight) {
@@ -4070,6 +4167,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
 
         compositeAutosaveInFlight = true;
+        const saveVersion = compositeAutosaveDocumentVersion;
         try {
             logProcess('active', 'composite.autosave', options.reason || `Autosaving "${activeOrigin.name || 'Composite Project'}" to the Library...`);
             const saved = await actions.saveProjectToLibrary(
@@ -4079,7 +4177,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                     preferExisting: true,
                     promptless: true,
                     suppressWorkspaceOverlay: true,
-                    suppressNotice: true
+                    suppressNotice: true,
+                    captureOptions: getCompositeAutosaveCaptureOptions()
                 }
             );
             if (saved) {
@@ -4091,6 +4190,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             return null;
         } finally {
             compositeAutosaveInFlight = false;
+            if (compositeAutosaveDocumentVersion !== saveVersion) {
+                scheduleCompositeAutosave('Queued follow-up Composite autosave after newer changes landed during save.');
+            }
         }
     }
 
@@ -4736,6 +4838,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
     function getSettingsProcessIdForPath(path = '') {
         const normalized = String(path || '');
+        if (normalized === 'personalization' || normalized.startsWith('personalization.')) return 'settings.personalization';
         if (normalized.startsWith('library.')) return 'settings.library';
         if (normalized.startsWith('editor.')) return 'settings.editor';
         if (normalized.startsWith('composite.')) return 'settings.composite';
@@ -4928,6 +5031,36 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (normalizedCategory === 'library') {
                 view?.refreshLibrary?.();
             }
+            return true;
+        },
+        async resetPersonalizationPalette(theme) {
+            const paletteKey = String(theme || '').trim().toLowerCase() === 'dark' ? 'dark' : 'light';
+            const defaults = createDefaultPersonalizationSettings();
+            updateSettingsState((current) => ({
+                ...current,
+                personalization: {
+                    ...(current.personalization || defaults),
+                    [paletteKey]: { ...defaults[paletteKey] }
+                }
+            }));
+            logProcess('success', 'settings.personalization', `Reset the ${paletteKey} palette to defaults.`);
+            return true;
+        },
+        async copyPersonalizationPalette(sourceTheme, targetTheme) {
+            const source = String(sourceTheme || '').trim().toLowerCase() === 'dark' ? 'dark' : 'light';
+            const target = String(targetTheme || '').trim().toLowerCase() === 'dark' ? 'dark' : 'light';
+            if (source === target) return false;
+            updateSettingsState((current) => {
+                const personalization = current?.personalization || createDefaultPersonalizationSettings();
+                return {
+                    ...current,
+                    personalization: {
+                        ...personalization,
+                        [target]: { ...(personalization[source] || {}) }
+                    }
+                };
+            });
+            logProcess('success', 'settings.personalization', `Copied the ${source} palette to ${target}.`);
             return true;
         },
         async resetAllSettings() {
@@ -7290,6 +7423,9 @@ window.addEventListener('DOMContentLoaded', async () => {
             const promptless = !!options.promptless;
             const suppressNotice = !!options.suppressNotice;
             const suppressWorkspaceOverlay = !!options.suppressWorkspaceOverlay;
+            const captureOptions = options.captureOptions && typeof options.captureOptions === 'object'
+                ? options.captureOptions
+                : null;
             const updateActiveOriginSilently = (id, name) => {
                 setActiveLibraryOrigin(projectType, id, name);
             };
@@ -7426,7 +7562,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     dedupeWindowMs: 120
                 });
                 const existingRecord = saveId ? await getFromLibraryDB(saveId).catch(() => null) : null;
-                const capture = await adapter.captureDocument(currentDocument, payloadParams);
+                const capture = await adapter.captureDocument(currentDocument, payloadParams, captureOptions);
                 let captureBlob = capture?.blob || null;
                 let capturePayload = capture?.payload || payloadParams;
                 if (!captureBlob && String(capture?.payload?.preview?.imageData || '').startsWith('data:')) {
@@ -10117,9 +10253,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const normalized = stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload));
                 return normalizeCompositeDocument(validateImportPayload(normalized, 'composite-document'));
             },
-            async captureDocument(document) {
+            async captureDocument(document, _payload = null, options = null) {
                 const normalized = normalizeCompositeDocument(document);
-                const capture = await captureCompositeDocumentSnapshot(normalized);
+                const capture = await captureCompositeDocumentSnapshot(normalized, options || undefined);
                 return {
                     payload: capture.payload || buildCompositeLibraryPayload(normalized),
                     blob: capture.blob || null,

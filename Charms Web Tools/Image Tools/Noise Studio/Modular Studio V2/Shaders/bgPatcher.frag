@@ -14,6 +14,7 @@ uniform float u_smoothing;
 uniform float u_defringe;
 uniform float u_edgeShift;
 uniform int u_showMask;
+uniform int u_keepSelectedRange;
 uniform int u_aaEnabled;
 uniform float u_antialias;
 uniform int u_numProtected;
@@ -27,26 +28,30 @@ uniform vec4 u_patchRects[32];
 uniform vec3 u_patchColors[32];
 uniform vec2 u_resolution;
 
-float getMask(vec2 uv) {
-    vec4 sampleColor = texture(u_tex, uv);
-    float dist = distance(sampleColor.rgb, u_targetColor);
-    float foreground = smoothstep(u_tolerance, u_tolerance + u_smoothing + 0.001, dist);
-    float mask = 1.0 - foreground;
-
-    if (u_numProtected > 0) {
-        for (int index = 0; index < 8; index += 1) {
-            if (index >= u_numProtected) break;
-            float protectedDistance = distance(sampleColor.rgb, u_protectedColors[index]);
-            float protectedTolerance = max(u_protectedTolerances[index], 0.01);
-            float protectedMask = smoothstep(protectedTolerance, protectedTolerance + 0.05, protectedDistance);
-            mask = min(mask, protectedMask);
-        }
-    }
+float getSelectionMask(vec2 uv, vec3 sampleRgb) {
+    float dist = distance(sampleRgb, u_targetColor);
+    float selection = 1.0 - smoothstep(u_tolerance, u_tolerance + u_smoothing + 0.001, dist);
 
     if (u_useFloodMask == 1) {
         float floodValue = texture(u_floodMask, vec2(uv.x, 1.0 - uv.y)).r;
         if (floodValue < 0.5) {
-            mask = 0.0;
+            selection = 0.0;
+        }
+    }
+
+    return clamp(selection, 0.0, 1.0);
+}
+
+float applyRemovalOverrides(vec2 uv, vec3 sampleRgb, float removalMask) {
+    float mask = removalMask;
+
+    if (u_numProtected > 0) {
+        for (int index = 0; index < 8; index += 1) {
+            if (index >= u_numProtected) break;
+            float protectedDistance = distance(sampleRgb, u_protectedColors[index]);
+            float protectedTolerance = max(u_protectedTolerances[index], 0.01);
+            float protectedMask = smoothstep(protectedTolerance, protectedTolerance + 0.05, protectedDistance);
+            mask = min(mask, protectedMask);
         }
     }
 
@@ -57,6 +62,13 @@ float getMask(vec2 uv) {
     }
 
     return clamp(mask, 0.0, 1.0);
+}
+
+float getMask(vec2 uv) {
+    vec3 sampleRgb = texture(u_tex, uv).rgb;
+    float selectionMask = getSelectionMask(uv, sampleRgb);
+    float removalMask = u_keepSelectedRange == 1 ? (1.0 - selectionMask) : selectionMask;
+    return applyRemovalOverrides(uv, sampleRgb, removalMask);
 }
 
 void main() {
@@ -111,8 +123,9 @@ void main() {
     float dist = distance(color.rgb, u_targetColor);
     float newAlpha = mix(color.a, u_targetAlpha, mask);
     float removedAlpha = max(color.a - newAlpha, 0.0);
+    float effectiveDefringe = u_keepSelectedRange == 1 ? 0.0 : u_defringe;
     vec3 defringedColor = clamp(
-        (color.rgb - u_targetColor * removedAlpha * u_defringe) / max(1.0 - removedAlpha * u_defringe, 0.0001),
+        (color.rgb - u_targetColor * removedAlpha * effectiveDefringe) / max(1.0 - removedAlpha * effectiveDefringe, 0.0001),
         0.0,
         1.0
     );
@@ -144,7 +157,7 @@ void main() {
                         float sampleNewAlpha = mix(sampleColor.a, u_targetAlpha, sampleMask);
                         float sampleRemovedAlpha = max(sampleColor.a - sampleNewAlpha, 0.0);
                         vec3 sampleDefringed = clamp(
-                            (sampleColor.rgb - u_targetColor * sampleRemovedAlpha * u_defringe) / max(1.0 - sampleRemovedAlpha * u_defringe, 0.0001),
+                            (sampleColor.rgb - u_targetColor * sampleRemovedAlpha * effectiveDefringe) / max(1.0 - sampleRemovedAlpha * effectiveDefringe, 0.0001),
                             0.0,
                             1.0
                         );

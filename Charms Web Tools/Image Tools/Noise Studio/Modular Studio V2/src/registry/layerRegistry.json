@@ -60,6 +60,7 @@
             "bgPatcherTargetColor": "#000000",
             "bgPatcherOpacity": 0,
             "bgPatcherFloodFill": false,
+            "bgPatcherKeepSelectedRange": false,
             "bgPatcherTolerance": 10,
             "bgPatcherSmoothing": 10,
             "bgPatcherEdgeShift": 0,

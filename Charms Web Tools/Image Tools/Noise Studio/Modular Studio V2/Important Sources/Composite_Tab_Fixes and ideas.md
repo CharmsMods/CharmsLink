@@ -71,3 +71,10 @@ current pass note: the Composite text `Font Family` control now uses the shared 
 
 the user should be able to click on a object/layer on the canvas, and the click "Replace With" and that will open up a popup menu that ties into the existing buttons that either add a normal image to the canvas, or a editor project to the canvas, and instead of just adding one of either, whatever is selected will replace the selected object/layer on the canvas, with the same properties, position, rotation, scale, opacity, blend mode, etc. but with the new image or editor project. this means FIRST, the issue where clicking on a part of the canvas that doenst have anything on it, doesnt deselect everything. just for clarification, if something on the canvas is selected, and the user clicks on either add editor project or add normal image, this wont go into replacement mode, replacement mode only happens when the user clicks on a new button called "Replace With" that should only appear when something is selected.
 current pass note: Composite now shows a conditional `Replace With` toolbar action when a layer is selected. that opens a dedicated replacement chooser which routes into the existing Editor-project picker or image picker in explicit replacement mode only, while normal `Add Editor Project` / `Add Images` still keep their old additive behavior. replacement keeps the selected layer slot and preserves generic transform/appearance fields like position, rotation, scale, opacity, and blend mode. empty left-click on unused stage space now clears the selection cleanly instead of falling into an implicit pan start.
+
+
+
+add a snapping toggle, either snapping to grid, or snapping to other objects, including the edges, center and other snap points like corners and such
+
+
+the logic for saving the site after no changes for 10 seconds, is ok, but when the site saves, it hitches the UI some, and if something is changed right as the tab tries to save, sometimes that change just suddenly reverts. so look into why this is happening, and ways to fix it, and if web workers are involved in this, and if not should they be?

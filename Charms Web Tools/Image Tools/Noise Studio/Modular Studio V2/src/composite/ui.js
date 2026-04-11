@@ -234,10 +234,10 @@ function renderResizeModeChooser(config = {}) {
 }
 
 const SIDEBAR_TABS = [
-    { id: 'layers', label: 'Layers', description: 'Stack order, visibility, locking, and layer ingest.' },
-    { id: 'transform', label: 'Transform', description: 'Position, scale, rotation, and opacity for the selected layer.' },
-    { id: 'blend', label: 'Blend', description: 'Blend modes plus viewport and checker controls.' },
-    { id: 'export', label: 'Export', description: 'Configure custom bounds and resolution for export.' }
+    { id: 'layers', label: 'Layers' },
+    { id: 'transform', label: 'Selected' },
+    { id: 'blend', label: 'View' },
+    { id: 'export', label: 'Export' }
 ];
 
 const BLEND_MODE_OPTIONS = [
@@ -282,33 +282,345 @@ function mapLayerKindLabel(layer) {
 export function createCompositeWorkspace(root, { actions, logger = null }) {
     root.innerHTML = `
         <style data-composite-style>
-            .composite-shell{--comp-border:#b8b2a3;--comp-border-soft:rgba(184,178,163,.24);--comp-accent:rgba(184,178,163,.14);--comp-muted:#b8b2a3;position:relative;width:100%;height:100%;min-width:0;min-height:0;display:grid;grid-template-columns:minmax(248px,312px) minmax(0,1fr);gap:8px;padding:8px;background:#000;color:#fff;font-size:11px;line-height:1.3;overflow:hidden}
+            .composite-shell{
+                --comp-text:var(--studio-neu-text);
+                --comp-muted:var(--studio-neu-muted);
+                --comp-surface:var(--studio-neu-surface);
+                --comp-surface-soft:var(--studio-neu-surface-soft);
+                --comp-checker-a:rgba(0,0,0,.06);
+                --comp-checker-b:rgba(0,0,0,.04);
+                --comp-checker-base:#f7f7f7;
+                position:relative;
+                width:100%;
+                height:100%;
+                min-width:0;
+                min-height:0;
+                display:grid;
+                grid-template-columns:minmax(248px,312px) minmax(0,1fr);
+                gap:16px;
+                padding:4px;
+                background:transparent;
+                color:var(--comp-text);
+                font-size:11px;
+                line-height:1.3;
+                overflow:visible
+            }
+            :root[data-theme="dark"] .composite-shell{
+                --comp-checker-a:rgba(255,255,255,.08);
+                --comp-checker-b:rgba(255,255,255,.06);
+                --comp-checker-base:#101010
+            }
             .composite-shell button,.composite-shell input,.composite-shell select,.composite-shell textarea{font-size:11px!important}
-            .composite-shell .mini-button,.composite-shell .toolbar-button,.composite-shell input[type="number"],.composite-shell select,.composite-text-input,.composite-textarea{min-height:22px;padding:2px 7px!important;border-radius:4px;border:1px solid var(--comp-border);background:#000;color:#fff;box-shadow:none}
-            .composite-sidebar,.composite-stage-card,.composite-picker-panel{min-width:0;min-height:0;border:1px solid var(--comp-border);background:#000;overflow:hidden}
-            .composite-sidebar{display:flex;flex-direction:column}
-            .composite-sidebar-tabs{display:flex;gap:4px;flex-wrap:wrap;padding:6px;border-bottom:1px solid var(--comp-border);background:#050505}
-            .composite-sidebar-tab{min-height:20px;padding:0 7px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--comp-muted);cursor:pointer}
-            .composite-sidebar-tab.is-active,.composite-sidebar-tab:hover{background:var(--comp-accent);border-color:var(--comp-border);color:#fff}
-            .composite-panel{display:none;height:100%;min-height:0;flex-direction:column}
+            .composite-picker-panel,.composite-choice-panel{
+                min-width:0;
+                min-height:0;
+                border:none;
+                border-radius:24px;
+                background:var(--comp-surface);
+                box-shadow:var(--studio-neu-shadow-card);
+                color:var(--comp-text);
+                overflow:hidden
+            }
+            .composite-sidebar,.composite-stage-card{
+                min-width:0;
+                min-height:0;
+                border:none;
+                background:transparent;
+                box-shadow:none;
+                color:var(--comp-text);
+                overflow:visible
+            }
+            .composite-sidebar{
+                display:flex;
+                flex-direction:column;
+                gap:14px;
+                padding:4px 6px 4px 4px
+            }
+            .composite-sidebar-tabs{
+                display:grid;
+                grid-template-columns:repeat(2,minmax(0,1fr));
+                gap:8px;
+                padding:0;
+                border:none;
+                border-radius:0;
+                background:transparent;
+                box-shadow:none
+            }
+            .composite-shell .mini-button,
+            .composite-shell .toolbar-button,
+            .composite-shell .primary-button,
+            .composite-shell .secondary-button,
+            .composite-sidebar-tab,
+            .composite-mode-button{
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+                min-height:28px;
+                padding:5px 10px!important;
+                border:none;
+                border-radius:999px;
+                background:var(--studio-neu-button-fill);
+                color:var(--comp-text);
+                box-shadow:var(--studio-neu-shadow-button);
+                font-weight:600;
+                letter-spacing:.01em;
+                transition:transform .18s ease,box-shadow .18s ease,background .18s ease,color .18s ease,opacity .18s ease
+            }
+            .composite-mode-button{
+                border-radius:18px;
+                justify-content:flex-start;
+                text-align:left
+            }
+            .composite-shell .mini-button:hover:not(:disabled),
+            .composite-shell .toolbar-button:hover:not(:disabled),
+            .composite-shell .primary-button:hover:not(:disabled),
+            .composite-shell .secondary-button:hover:not(:disabled),
+            .composite-sidebar-tab:hover:not(:disabled),
+            .composite-mode-button:hover:not(:disabled){
+                background:var(--studio-neu-button-fill-hover);
+                box-shadow:var(--studio-neu-shadow-button-soft);
+                transform:translateY(-1px)
+            }
+            .composite-shell .mini-button:active:not(:disabled),
+            .composite-shell .toolbar-button:active:not(:disabled),
+            .composite-shell .toolbar-button.is-active,
+            .composite-shell .primary-button,
+            .composite-shell .secondary-button.is-active,
+            .composite-sidebar-tab:active:not(:disabled),
+            .composite-sidebar-tab.is-active,
+            .composite-mode-button:active:not(:disabled),
+            .composite-mode-button.is-active{
+                background:var(--studio-neu-button-fill-active);
+                box-shadow:var(--studio-neu-shadow-button-pressed);
+                color:var(--comp-text);
+                transform:translateY(0)
+            }
+            .composite-shell .mini-button.is-active:hover:not(:disabled),
+            .composite-shell .toolbar-button.is-active:hover:not(:disabled),
+            .composite-shell .primary-button:hover:not(:disabled),
+            .composite-shell .secondary-button.is-active:hover:not(:disabled),
+            .composite-sidebar-tab.is-active:hover:not(:disabled),
+            .composite-mode-button.is-active:hover:not(:disabled){
+                background:var(--studio-neu-button-fill-active);
+                box-shadow:var(--studio-neu-shadow-button-pressed);
+                transform:translateY(0)
+            }
+            .composite-shell .primary-button{color:var(--studio-accent)}
+            .composite-shell .mini-button:disabled,
+            .composite-shell .toolbar-button:disabled,
+            .composite-shell .primary-button:disabled,
+            .composite-shell .secondary-button:disabled,
+            .composite-sidebar-tab:disabled,
+            .composite-mode-button:disabled{
+                opacity:.52;
+                box-shadow:none;
+                cursor:not-allowed
+            }
+            .composite-shell input[type="number"],
+            .composite-shell select,
+            .composite-text-input,
+            .composite-textarea{
+                min-height:28px;
+                padding:5px 9px!important;
+                border:none;
+                border-radius:14px;
+                background:var(--comp-surface);
+                color:var(--comp-text);
+                box-shadow:var(--studio-neu-shadow-inset-soft)
+            }
+            .composite-shell input[type="checkbox"]{accent-color:var(--studio-accent)}
+            .composite-shell input[type="range"]{
+                --composite-range-progress:0%;
+                --composite-range-fill:linear-gradient(180deg,color-mix(in srgb, var(--studio-accent) 70%, white 30%) 0%,var(--studio-accent) 100%);
+                --composite-range-rest:linear-gradient(180deg,color-mix(in srgb, var(--comp-surface-soft) 90%, white 10%) 0%,color-mix(in srgb, var(--comp-surface) 86%, black 14%) 100%);
+                -webkit-appearance:none;
+                appearance:none;
+                width:100%;
+                height:26px;
+                margin:0;
+                padding:0;
+                border:none;
+                background:transparent;
+                cursor:pointer;
+                accent-color:var(--studio-accent)
+            }
+            .composite-shell input[type="range"]::-webkit-slider-runnable-track{
+                height:10px;
+                border:none;
+                border-radius:999px;
+                background:
+                    linear-gradient(180deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,0) 100%),
+                    var(--composite-range-fill) 0 0 / var(--composite-range-progress) 100% no-repeat,
+                    var(--composite-range-rest);
+                box-shadow:var(--studio-neu-shadow-inset)
+            }
+            .composite-shell input[type="range"]::-webkit-slider-thumb{
+                -webkit-appearance:none;
+                appearance:none;
+                width:20px;
+                height:20px;
+                margin-top:-5px;
+                border:none;
+                border-radius:999px;
+                background:var(--studio-neu-button-fill);
+                box-shadow:var(--studio-neu-shadow-button)
+            }
+            .composite-shell input[type="range"]:hover::-webkit-slider-thumb{
+                background:var(--studio-neu-button-fill-hover);
+                box-shadow:var(--studio-neu-shadow-button-soft)
+            }
+            .composite-shell input[type="range"]:active::-webkit-slider-thumb{
+                background:var(--studio-neu-button-fill-active);
+                box-shadow:var(--studio-neu-shadow-button-pressed)
+            }
+            .composite-shell input[type="range"]::-moz-range-track{
+                height:10px;
+                border:none;
+                border-radius:999px;
+                background:var(--composite-range-rest);
+                box-shadow:var(--studio-neu-shadow-inset)
+            }
+            .composite-shell input[type="range"]::-moz-range-progress{
+                height:10px;
+                border:none;
+                border-radius:999px;
+                background:var(--composite-range-fill);
+                box-shadow:inset 0 1px 0 rgba(255,255,255,.18)
+            }
+            .composite-shell input[type="range"]::-moz-range-thumb{
+                width:20px;
+                height:20px;
+                border:none;
+                border-radius:999px;
+                background:var(--studio-neu-button-fill);
+                box-shadow:var(--studio-neu-shadow-button)
+            }
+            .composite-shell input[type="range"]:hover::-moz-range-thumb{
+                background:var(--studio-neu-button-fill-hover);
+                box-shadow:var(--studio-neu-shadow-button-soft)
+            }
+            .composite-shell input[type="range"]:active::-moz-range-thumb{
+                background:var(--studio-neu-button-fill-active);
+                box-shadow:var(--studio-neu-shadow-button-pressed)
+            }
+            .composite-sidebar-tab{
+                min-width:0;
+                width:100%
+            }
+            .composite-panel{display:none;height:100%;min-height:0;flex-direction:column;overflow:visible}
             .composite-panel.is-active{display:flex}
-            .composite-panel-head{padding:8px 9px 7px;border-bottom:1px solid var(--comp-border);background:#050505}
-            .composite-panel-head span{display:block;margin-top:2px;color:var(--comp-muted);font-size:10px}
-            .composite-panel-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px;display:flex;flex-direction:column;gap:8px}
-            .composite-stage-card{display:flex;flex-direction:column}
-            .composite-stage-topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--comp-border);background:#050505}
-            .composite-stage-title .eyebrow{margin:0 0 2px;color:var(--comp-muted);font-size:10px;letter-spacing:.04em;text-transform:uppercase}
-            .composite-stage-title h2{margin:0;font-size:12px;line-height:1.2}
-            .composite-stage-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--comp-muted);font-size:10px}
-            .composite-stage-wrap{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden;background:#000;touch-action:none;cursor:grab}
+            .composite-panel-head{
+                padding:2px 2px 0;
+                border:none;
+                background:transparent
+            }
+            .composite-panel-head strong,.composite-picker-header h3{font-size:12px;line-height:1.2;color:var(--comp-text)}
+            .composite-panel-head span,.composite-card-main span,.composite-picker-copy span,.composite-mini-empty,.composite-help,.composite-stage-meta,.composite-picker-selection,.composite-setting,.composite-info-line{
+                color:var(--comp-muted);
+                font-size:10px
+            }
+            .composite-panel-body{
+                flex:1;
+                min-height:0;
+                overflow:auto;
+                overscroll-behavior:contain;
+                padding:4px 6px 6px 4px;
+                display:flex;
+                flex-direction:column;
+                gap:12px;
+                scrollbar-gutter:stable;
+                scrollbar-width:thin;
+                scrollbar-color:color-mix(in srgb, var(--comp-surface) 78%, black 22%) transparent
+            }
+            .composite-panel-body::-webkit-scrollbar,.composite-picker-grid::-webkit-scrollbar{width:12px;height:12px}
+            .composite-panel-body::-webkit-scrollbar-track,.composite-picker-grid::-webkit-scrollbar-track{
+                background:transparent;
+                border-radius:999px;
+                margin-block:10px
+            }
+            .composite-panel-body::-webkit-scrollbar-thumb,.composite-picker-grid::-webkit-scrollbar-thumb{
+                border:3px solid transparent;
+                border-radius:999px;
+                background:
+                    linear-gradient(180deg,
+                        color-mix(in srgb, var(--comp-surface-soft) 84%, white 16%) 0%,
+                        color-mix(in srgb, var(--comp-surface) 86%, black 14%) 100%);
+                background-clip:padding-box;
+                box-shadow:
+                    inset 1px 1px 1px rgba(255,255,255,.35),
+                    inset -1px -1px 1px rgba(0,0,0,.08)
+            }
+            .composite-panel-body::-webkit-scrollbar-thumb:hover,.composite-picker-grid::-webkit-scrollbar-thumb:hover{
+                background:
+                    linear-gradient(180deg,
+                        color-mix(in srgb, var(--comp-surface-soft) 70%, var(--studio-accent) 30%) 0%,
+                        color-mix(in srgb, var(--comp-surface) 72%, var(--studio-accent) 28%) 100%);
+                background-clip:padding-box
+            }
+            .composite-panel-body::-webkit-scrollbar-thumb:active,.composite-picker-grid::-webkit-scrollbar-thumb:active{
+                background:
+                    linear-gradient(180deg,
+                        color-mix(in srgb, var(--comp-surface) 62%, var(--studio-accent) 38%) 0%,
+                        color-mix(in srgb, var(--comp-surface) 58%, var(--studio-accent) 42%) 100%);
+                background-clip:padding-box
+            }
+            .composite-stage-card{
+                display:flex;
+                flex-direction:column;
+                gap:0;
+                padding:0
+            }
+            .composite-picker-header .eyebrow{
+                margin:0 0 2px;
+                color:var(--comp-muted);
+                font-size:10px;
+                letter-spacing:.04em;
+                text-transform:uppercase
+            }
+            .composite-stage-meta{display:flex;gap:8px;flex-wrap:wrap}
+            .composite-stage-wrap{
+                position:relative;
+                flex:1;
+                min-width:0;
+                min-height:0;
+                overflow:hidden;
+                border:none;
+                border-radius:24px;
+                background:var(--comp-surface-soft);
+                box-shadow:var(--studio-neu-shadow-inset);
+                touch-action:none;
+                cursor:grab
+            }
             .composite-stage-wrap.is-dragging{cursor:grabbing}
-            .composite-stage-wrap.is-checker{background:linear-gradient(45deg, rgba(255,255,255,.1) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.1) 75%, rgba(255,255,255,.1)),linear-gradient(45deg, rgba(255,255,255,.08) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.08) 75%, rgba(255,255,255,.08));background-size:24px 24px;background-position:0 0,12px 12px}
+            .composite-stage-wrap.is-checker{
+                background:
+                    linear-gradient(45deg,var(--comp-checker-a) 25%,transparent 25%,transparent 75%,var(--comp-checker-a) 75%,var(--comp-checker-a)),
+                    linear-gradient(45deg,var(--comp-checker-b) 25%,transparent 25%,transparent 75%,var(--comp-checker-b) 75%,var(--comp-checker-b));
+                background-color:var(--comp-checker-base);
+                background-size:16px 16px;
+                background-position:0 0,8px 8px
+            }
             .composite-dom-stage{position:absolute;overflow:visible;pointer-events:none}
             .composite-layer{position:absolute;pointer-events:auto;user-select:none;transform-origin:center center;overflow:hidden}
             .composite-layer-media{position:absolute;display:block;max-width:none;max-height:none;pointer-events:none;user-select:none}
-            .composite-empty{position:absolute;inset:12px;display:none;align-items:center;justify-content:center;flex-direction:column;gap:6px;text-align:center;pointer-events:none;color:var(--comp-muted);border:1px dashed var(--comp-border-soft);background:rgba(0,0,0,.74)}
+            .composite-empty{
+                position:absolute;
+                inset:16px;
+                display:none;
+                align-items:center;
+                justify-content:center;
+                flex-direction:column;
+                gap:6px;
+                text-align:center;
+                pointer-events:none;
+                color:var(--comp-muted);
+                border:none;
+                border-radius:22px;
+                background:color-mix(in srgb,var(--comp-surface-soft) 88%,transparent);
+                box-shadow:var(--studio-neu-shadow-inset-soft)
+            }
             .composite-empty.is-visible{display:flex}
-            .composite-export-bounds{position:absolute;border:1px solid #0bf;pointer-events:none;z-index:20;display:none;box-shadow:0 0 0 9999px rgba(0,0,0,0.5)}
+            .composite-export-bounds{position:absolute;border:1px solid #0bf;pointer-events:none;z-index:20;display:none;box-shadow:0 0 0 9999px rgba(0,0,0,.36)}
             .composite-export-bounds.is-visible{display:block}
             .composite-export-bounds.is-pick-layer,.composite-export-bounds.is-pick-layer *{pointer-events:none!important}
             .composite-export-bounds-handle{position:absolute;width:12px;height:12px;background:#0bf;border:1px solid #fff;pointer-events:auto;z-index:21}
@@ -321,10 +633,10 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-export-bounds-handle.w{top:50%;left:-6px;margin-top:-6px;cursor:ew-resize}
             .composite-export-bounds-handle.e{top:50%;right:-6px;margin-top:-6px;cursor:ew-resize}
             .composite-export-bounds-move{position:absolute;inset:0;cursor:move;pointer-events:auto}
-            .composite-selection-box{position:absolute;border:1px solid #f0c26d;pointer-events:none;z-index:18;display:none;box-shadow:0 0 0 1px rgba(240,194,109,.32)}
+            .composite-selection-box{position:absolute;border:1px solid #f0c26d;pointer-events:none;z-index:18;display:none;box-shadow:0 0 0 1px rgba(240,194,109,.24)}
             .composite-selection-box.is-visible{display:block}
-            .composite-selection-box[data-selection-mode="multi"]{border-style:dashed;box-shadow:0 0 0 1px rgba(240,194,109,.2)}
-            .composite-selection-box[data-interaction-mode="crop"]{border-color:#79d8ff;box-shadow:0 0 0 1px rgba(121,216,255,.24)}
+            .composite-selection-box[data-selection-mode="multi"]{border-style:dashed;box-shadow:0 0 0 1px rgba(240,194,109,.16)}
+            .composite-selection-box[data-interaction-mode="crop"]{border-color:#79d8ff;box-shadow:0 0 0 1px rgba(121,216,255,.22)}
             .composite-selection-box[data-interaction-mode="crop"] .composite-selection-handle{background:#79d8ff}
             .composite-selection-handle{position:absolute;width:12px;height:12px;background:#f0c26d;border:1px solid #fff;pointer-events:auto;z-index:19}
             .composite-selection-handle.nw{top:-6px;left:-6px;cursor:nwse-resize}
@@ -337,50 +649,159 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             .composite-selection-handle.e{top:50%;right:-6px;margin-top:-6px;cursor:ew-resize}
             .composite-marquee{position:absolute;border:1px dashed #79d8ff;background:rgba(44,153,255,.12);pointer-events:none;z-index:17;display:none}
             .composite-marquee.is-visible{display:block}
-            .composite-chip-bar{position:absolute;left:6px;bottom:6px;display:flex;gap:4px;flex-wrap:wrap;pointer-events:none;z-index:30}
-            .composite-chip{display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0 6px;border:1px solid var(--comp-border-soft);background:rgba(0,0,0,.92);color:#fff;font-size:10px}
-            .composite-stack,.composite-setting-stack,.composite-picker-grid{display:flex;flex-direction:column;gap:8px;min-width:0}
-            .composite-card,.composite-picker-item{border:1px solid var(--comp-border);background:#050505;min-width:0}
-            .composite-card.is-selected,.composite-picker-item.is-selected{background:var(--comp-accent);border-color:var(--comp-border)}
-            .composite-card-main{width:100%;border:none;background:none;color:inherit;text-align:left;padding:7px;display:flex;flex-direction:column;gap:4px;cursor:pointer}
-            .composite-card-main strong,.composite-picker-copy strong{font-size:11px;overflow-wrap:anywhere}
-            .composite-card-main span,.composite-picker-copy span,.composite-mini-empty,.composite-help{color:var(--comp-muted);font-size:10px}
+            .composite-chip-bar{position:absolute;left:8px;bottom:8px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none;z-index:30}
+            .composite-chip{
+                display:inline-flex;
+                align-items:center;
+                gap:4px;
+                min-height:22px;
+                padding:0 8px;
+                border:none;
+                border-radius:999px;
+                background:var(--studio-neu-button-fill);
+                color:var(--comp-text);
+                box-shadow:none;
+                font-size:10px
+            }
+            .composite-stack,.composite-setting-stack,.composite-picker-grid{display:flex;flex-direction:column;gap:12px;min-width:0}
+            .composite-card,.composite-picker-item,.composite-setting,.composite-select-wrap,.composite-toggle-row,.composite-info-card,.composite-mini-empty{
+                border:none;
+                border-radius:20px;
+                background:var(--comp-surface-soft);
+                min-width:0;
+                box-shadow:var(--studio-neu-shadow-inset-soft)
+            }
+            .composite-card,.composite-picker-item{padding:4px}
+            .composite-setting,.composite-select-wrap,.composite-toggle-row,.composite-info-card{padding:12px}
+            .composite-mini-empty{
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                min-height:72px;
+                padding:14px 16px;
+                text-align:center
+            }
+            .composite-card.is-selected,.composite-picker-item.is-selected{
+                background:var(--comp-surface-soft);
+                box-shadow:var(--studio-neu-shadow-inset), inset 0 0 0 1px color-mix(in srgb, var(--studio-accent) 16%, transparent)
+            }
+            .composite-card-main{
+                width:100%;
+                border:none;
+                background:none;
+                color:inherit;
+                text-align:left;
+                padding:10px 10px 8px;
+                display:flex;
+                flex-direction:column;
+                gap:4px;
+                cursor:pointer
+            }
+            .composite-card-main strong,.composite-picker-copy strong{font-size:11px;overflow-wrap:anywhere;color:var(--comp-text)}
             .composite-card-badges{display:flex;flex-wrap:wrap;gap:4px}
-            .composite-kind-badge{display:inline-flex;align-items:center;justify-content:center;min-height:18px;padding:0 5px;border:1px solid var(--comp-border-soft);background:rgba(184,178,163,.08);color:var(--comp-muted);font-size:9px;letter-spacing:.04em;text-transform:uppercase}
-            .composite-card-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(68px,1fr));gap:6px;padding:0 7px 7px}
-            .composite-mode-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:6px}
-            .composite-mode-button{min-height:26px;padding:6px;border:1px solid var(--comp-border);border-radius:4px;background:#000;color:var(--comp-muted);text-align:left;cursor:pointer}
-            .composite-mode-button.is-active{background:var(--comp-accent);color:#fff;border-color:var(--comp-border)}
-            .composite-mode-button:disabled{opacity:.45;cursor:not-allowed}
-            .composite-setting{display:flex;flex-direction:column;gap:6px;color:var(--comp-muted)}
+            .composite-kind-badge{
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+                min-height:auto;
+                padding:0;
+                border:none;
+                border-radius:0;
+                background:transparent;
+                color:var(--comp-muted);
+                box-shadow:none;
+                font-size:9px;
+                letter-spacing:.04em;
+                text-transform:uppercase
+            }
+            .composite-card-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;padding:0 8px 8px}
+            .composite-setting-stack > .composite-card-actions,
+            .composite-choice-panel > .composite-card-actions{
+                padding:10px;
+                border:none;
+                border-radius:20px;
+                background:var(--comp-surface-soft);
+                box-shadow:var(--studio-neu-shadow-inset-soft)
+            }
+            .composite-mode-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px}
+            .composite-setting{display:flex;flex-direction:column;gap:6px}
             .composite-setting-label{display:flex;align-items:center;justify-content:space-between;gap:8px}
-            .composite-setting-inputs{display:grid;grid-template-columns:minmax(0,1fr) 78px;gap:6px}
+            .composite-setting-inputs{display:grid;grid-template-columns:minmax(0,1fr) 82px;gap:10px}
             .composite-range,.composite-number,.composite-select{width:100%}
             .composite-text-input,.composite-textarea{width:100%}
-            .composite-textarea{resize:vertical;min-height:72px;padding-top:6px!important;padding-bottom:6px!important}
-            .composite-color-row{display:grid;grid-template-columns:52px minmax(0,1fr);gap:6px;align-items:center}
-            .composite-color-input{width:100%;height:28px;padding:0!important;border-radius:4px;border:1px solid var(--comp-border);background:#000}
-            .composite-select-wrap,.composite-toggle-row,.composite-info-card{border:1px solid var(--comp-border);background:#050505;padding:8px}
+            .composite-textarea{resize:vertical;min-height:72px;padding-top:8px!important;padding-bottom:8px!important}
+            .composite-color-row{display:grid;grid-template-columns:56px minmax(0,1fr);gap:10px;align-items:center}
+            .composite-color-input{
+                width:100%;
+                height:30px;
+                padding:0!important;
+                border:none;
+                border-radius:14px;
+                background:var(--studio-neu-button-fill);
+                box-shadow:var(--studio-neu-shadow-button-soft)
+            }
             .composite-toggle-row{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start}
-            .composite-toggle-row strong{display:block;color:#fff;font-size:10px}
+            .composite-toggle-row strong,.composite-info-line strong{display:block;color:var(--comp-text);font-size:10px}
             .composite-info-card{display:flex;flex-direction:column;gap:6px}
-            .composite-info-line{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--comp-muted);font-size:10px}
-            .composite-info-line strong{color:#fff}
-            .composite-picker-overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:12px;background:rgba(0,0,0,.78);z-index:30}
+            .composite-info-line{display:flex;align-items:center;justify-content:space-between;gap:8px}
+            .composite-picker-overlay{
+                position:absolute;
+                inset:0;
+                display:none;
+                align-items:center;
+                justify-content:center;
+                padding:16px;
+                background:color-mix(in srgb,var(--comp-surface) 64%,transparent);
+                z-index:30
+            }
             .composite-picker-overlay.is-open{display:flex}
-            .composite-picker-panel{width:min(1080px,100%);height:min(86vh,760px);display:flex;flex-direction:column;gap:8px;padding:10px}
-            .composite-choice-panel{width:min(420px,100%);display:flex;flex-direction:column;gap:10px;padding:12px}
-            .composite-picker-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
-            .composite-picker-header .eyebrow{margin:0 0 2px;color:var(--comp-muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em}
-            .composite-picker-header h3{margin:0;font-size:12px}
-            .composite-picker-grid{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
-            .composite-picker-item{display:flex;flex-direction:column;overflow:hidden}
-            .composite-picker-preview{aspect-ratio:4/3;background:#000;border-bottom:1px solid var(--comp-border);display:flex;align-items:center;justify-content:center}
+            .composite-picker-panel{
+                width:min(1080px,100%);
+                height:min(86vh,760px);
+                display:flex;
+                flex-direction:column;
+                gap:14px;
+                padding:16px
+            }
+            .composite-choice-panel{width:min(420px,100%);display:flex;flex-direction:column;gap:14px;padding:16px}
+            .composite-picker-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+            .composite-picker-grid{
+                flex:1;
+                min-height:0;
+                overflow:auto;
+                display:grid;
+                grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+                gap:14px;
+                scrollbar-gutter:stable;
+                scrollbar-width:thin;
+                scrollbar-color:color-mix(in srgb, var(--comp-surface) 78%, black 22%) transparent
+            }
+            .composite-picker-item{
+                display:flex;
+                flex-direction:column;
+                gap:8px;
+                padding:10px;
+                overflow:hidden
+            }
+            .composite-picker-preview{
+                aspect-ratio:4/3;
+                background:var(--comp-surface-soft);
+                border:none;
+                border-radius:20px;
+                box-shadow:var(--studio-neu-shadow-inset);
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                overflow:hidden
+            }
             .composite-picker-preview img{display:block;width:100%;height:100%;object-fit:contain}
-            .composite-picker-copy{padding:8px;display:flex;flex-direction:column;gap:4px}
+            .composite-picker-copy{padding:4px 4px 0;display:flex;flex-direction:column;gap:4px}
             .composite-picker-actions{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
-            .composite-picker-selection{color:var(--comp-muted);font-size:10px}
-            @media (max-width:980px){.composite-shell{grid-template-columns:1fr;grid-template-rows:minmax(220px,42vh) minmax(0,1fr)}.composite-picker-overlay{padding:8px}.composite-picker-panel{width:100%;height:100%}}
+            @media (max-width:980px){
+                .composite-shell{grid-template-columns:1fr;grid-template-rows:minmax(220px,42vh) minmax(0,1fr);gap:14px}
+                .composite-picker-overlay{padding:8px}
+                .composite-picker-panel{width:100%;height:100%}
+            }
         </style>
         <div class="composite-shell">
             <aside class="composite-sidebar">
@@ -389,19 +810,11 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 </div>
                 ${SIDEBAR_TABS.map((tab) => `
                     <section class="composite-panel" data-composite-panel="${tab.id}">
-                        <div class="composite-panel-head"><strong>${tab.label}</strong><span>${tab.description}</span></div>
                         <div class="composite-panel-body" data-composite-role="${tab.id}-panel"></div>
                     </section>
                 `).join('')}
             </aside>
             <section class="composite-stage-card">
-                <div class="composite-stage-topbar">
-                    <div class="composite-stage-title">
-                        <div class="eyebrow">Composite Preview</div>
-                        <h2 data-composite-role="title">Composite Workspace</h2>
-                    </div>
-                    <div class="composite-stage-meta" data-composite-role="meta"></div>
-                </div>
                 <div class="composite-stage-wrap is-checker" data-composite-role="stage-wrap">
                     <div class="composite-dom-stage" data-composite-role="dom-stage"></div>
                     <div class="composite-selection-box" data-composite-role="selection-box">
@@ -426,7 +839,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         <div class="composite-export-bounds-handle s" data-composite-action="bounds-resize" data-dir="s"></div>
                         <div class="composite-export-bounds-handle se" data-composite-action="bounds-resize" data-dir="se"></div>
                     </div>
-                    <div class="composite-empty is-visible" data-composite-role="empty-state"><strong>Add one or more layers</strong><span>Bring in saved Editor projects, local images, text, or simple shapes to start compositing.</span></div>
+                    <div class="composite-empty is-visible" data-composite-role="empty-state"><strong>Add layers</strong><span>Use the toolbar to start composing.</span></div>
                     <div class="composite-chip-bar">
                         <div class="composite-chip" data-composite-role="status">Composite workspace ready.</div>
                     </div>
@@ -435,7 +848,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             <div class="composite-picker-overlay" data-composite-role="picker-overlay">
                 <div class="composite-picker-panel">
                     <div class="composite-picker-header">
-                        <div><div class="eyebrow" data-composite-role="picker-eyebrow">Library Editor Projects</div><h3 data-composite-role="picker-title">Add Editor Projects To Composite</h3></div>
+                        <div><h3 data-composite-role="picker-title">Add Editor Projects To Composite</h3></div>
                         <button type="button" class="toolbar-button" data-composite-action="close-picker">Close</button>
                     </div>
                     <div class="composite-picker-actions">
@@ -449,7 +862,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 </div>
             </div>
             <div class="composite-picker-overlay" data-composite-role="replace-overlay">
-                <div class="composite-card composite-choice-panel">
+                <div class="composite-choice-panel">
                     <div class="composite-picker-header">
                         <div><div class="eyebrow">Composite Replacement</div><h3>Replace With</h3></div>
                         <button type="button" class="toolbar-button" data-composite-action="close-replace-overlay">Close</button>
@@ -474,8 +887,6 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         tabs: [...root.querySelectorAll('[data-composite-action="workspace-tab"]')],
         panels: [...root.querySelectorAll('[data-composite-panel]')],
         domStage: root.querySelector('[data-composite-role="dom-stage"]'),
-        title: root.querySelector('[data-composite-role="title"]'),
-        meta: root.querySelector('[data-composite-role="meta"]'),
         status: root.querySelector('[data-composite-role="status"]'),
         stageWrap: root.querySelector('[data-composite-role="stage-wrap"]'),
         emptyState: root.querySelector('[data-composite-role="empty-state"]'),
@@ -491,7 +902,6 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         pickerOverlay: root.querySelector('[data-composite-role="picker-overlay"]'),
         pickerGrid: root.querySelector('[data-composite-role="picker-grid"]'),
         pickerSelection: root.querySelector('[data-composite-role="picker-selection"]'),
-        pickerEyebrow: root.querySelector('[data-composite-role="picker-eyebrow"]'),
         pickerTitle: root.querySelector('[data-composite-role="picker-title"]'),
         pickerConfirm: root.querySelector('[data-composite-role="picker-confirm"]'),
         replaceOverlay: root.querySelector('[data-composite-role="replace-overlay"]'),
@@ -728,9 +1138,6 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
 
     function updatePickerModeUI(document = currentDocument) {
         const replacementTarget = getReplacementTargetLayer(document);
-        if (refs.pickerEyebrow) {
-            refs.pickerEyebrow.textContent = replacementTarget ? 'Replace Layer With Editor Project' : 'Library Editor Projects';
-        }
         if (refs.pickerTitle) {
             refs.pickerTitle.textContent = replacementTarget
                 ? `Replace "${replacementTarget.name || 'Layer'}" With Editor Project`
@@ -747,9 +1154,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         refs.replaceCopy.innerHTML = replacementTarget
             ? `
                 <div class="composite-info-line"><span>Selected Layer</span><strong>${escapeHtml(replacementTarget.name || 'Layer')}</strong></div>
-                <span class="composite-help">Choose whether this layer should be replaced with a saved Editor project or a normal embedded image. The replacement keeps the current layer slot and preserves transform-style properties like position, rotation, scale, opacity, and blend mode.</span>
             `
-            : '<span class="composite-help">Select one layer before opening Replace With.</span>';
+            : '<span class="composite-help">Select a layer first.</span>';
     }
 
     function closeReplaceOverlay() {
@@ -927,6 +1333,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         const nextValue = Number.isFinite(numericValue) ? String(numericValue) : String(value ?? '');
         setting.querySelectorAll('input.composite-range, input.composite-number').forEach((input) => {
             if (input !== target) input.value = nextValue;
+            syncRangeInputProgress(input);
         });
         setSettingMeta(setting, formatNumber(value));
     }
@@ -947,12 +1354,28 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         const height = Math.max(1, Math.round(Number(resolution?.height) || 1));
         root.querySelectorAll('[data-composite-action="update-export-resolution"][data-field="width"]').forEach((input) => {
             input.value = String(width);
+            syncRangeInputProgress(input);
             setSettingMeta(input.closest('.composite-setting'), formatNumber(width));
         });
         root.querySelectorAll('[data-composite-action="update-export-resolution"][data-field="height"]').forEach((input) => {
             input.value = String(height);
+            syncRangeInputProgress(input);
             setSettingMeta(input.closest('.composite-setting'), formatNumber(height));
         });
+    }
+
+    function syncRangeInputProgress(input) {
+        if (!(input instanceof HTMLInputElement) || input.type !== 'range') return;
+        const min = Number(input.min || 0);
+        const max = Number(input.max || 100);
+        const value = Number(input.value || 0);
+        const span = max - min;
+        const ratio = span > 0 ? (value - min) / span : 0;
+        input.style.setProperty('--composite-range-progress', `${Math.max(0, Math.min(1, ratio)) * 100}%`);
+    }
+
+    function syncAllRangeInputProgress() {
+        root.querySelectorAll('input.composite-range').forEach((input) => syncRangeInputProgress(input));
     }
 
     function applyResizeModeChange(control = {}) {
@@ -1406,7 +1829,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             refs.layersPanel.innerHTML = `
                 <div class="composite-info-card">
                     <strong>No layers yet</strong>
-                    <span class="composite-help">Use the top toolbar to add Editor projects, images, text, or square/circle/triangle objects.</span>
+                    <span class="composite-help">Add Editor projects, images, text, or shapes from the toolbar.</span>
                 </div>
             `;
             return;
@@ -1522,10 +1945,10 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     value: resizeMode,
                     dataset: { selectionscope: 'multi' },
                     options: RESIZE_MODE_OPTIONS,
-                    help: 'Grouped handles can scale from center, from the opposite side, or stretch from the opposite side.'
+                    help: 'Scale from center, from the opposite side, or stretch from the opposite side.'
                 })}
                 <div class="composite-info-card">
-                    <span class="composite-help">Drag any selected object to move the group, use the gold handles to scale the group, or press Delete to remove the full selection.</span>
+                    <span class="composite-help">Drag the selection to move it, use the gold handles to scale it, or press Delete to remove it.</span>
                 </div>
                     <div class="composite-card-actions">
                         <button type="button" class="toolbar-button" data-composite-action="clear-selection">Clear Selection</button>
@@ -1559,7 +1982,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         <button type="button" class="toolbar-button" data-composite-action="convert-layer-to-editor" data-layer-id="${layer.id}" ${layer.locked ? 'disabled' : ''}>Convert + Edit In Editor</button>
                     </div>
                     <div class="composite-info-card">
-                        <span class="composite-help">Converted image layers become linked Editor projects. Their generated Editor Library records are kept in sync when Composite saves to the Library.</span>
+                        <span class="composite-help">Converted image layers stay linked to their generated Editor project when Composite saves.</span>
                     </div>
                 ` : layer.kind === 'editor-project' ? `
                     <div class="composite-card-actions">
@@ -1571,8 +1994,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         <div class="composite-info-line"><span>Crop Mode</span><strong>${cropModeActive ? 'Handles Active' : 'Inactive'}</strong></div>
                         <div class="composite-info-line"><span>Crop Insets</span><strong>${escapeHtml(`L ${crop.left} | T ${crop.top} | R ${crop.right} | B ${crop.bottom}`)}</strong></div>
                         <span class="composite-help">${cropModeActive
-                            ? 'Drag the stage handles to trim the visible image. While crop mode is active, the gold selection handles switch to blue crop handles.'
-                            : 'Use the stage handles to crop this image non-destructively without opening the Editor.'}</span>
+                            ? 'Drag the stage handles to trim the visible image. Gold handles switch to blue while crop mode is active.'
+                            : 'Crop this image non-destructively with the stage handles.'}</span>
                     </div>
                     <div class="composite-card-actions">
                         <button type="button" class="toolbar-button" data-composite-action="${cropModeActive ? 'exit-layer-crop-mode' : 'enter-layer-crop-mode'}" data-layer-id="${layer.id}" ${layer.locked ? 'disabled' : ''}>${cropModeActive ? 'Exit Crop Mode' : 'Crop With Handles'}</button>
@@ -1590,8 +2013,8 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                     dataset: { layerid: layer.id },
                     options: getLayerResizeOptions(layer),
                     help: supportsStretch
-                        ? 'This layer can also stretch or squish from the opposite side. Pick a mode here before dragging the canvas handles.'
-                        : 'Pick whether the layer scales from its center or from the opposite side before dragging the canvas handles.'
+                        ? 'This layer can stretch from the opposite side. Pick the handle behavior before dragging on canvas.'
+                        : 'Choose whether the layer scales from center or from the opposite side.'
                 })}
                 ${renderLayerSpecificTransformControls(layer)}
                 ${renderRangeRow({ id: `layer-x-${layer.id}`, label: 'X Position', value: layer.x, min: -8192, max: 8192, step: 1, disabled: layer.locked, dataset: { layerid: layer.id, field: 'x' } })}
@@ -1615,6 +2038,22 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
             : '';
         refs.blendPanel.innerHTML = `
             <div class="composite-setting-stack">
+                <div class="composite-info-card">
+                    <div class="composite-info-line"><span>Layers</span><strong>${escapeHtml(String(currentDocument.layers.length))}</strong></div>
+                    <div class="composite-info-line"><span>Bounds</span><strong>${escapeHtml(formatDimensions(bounds.width, bounds.height))}</strong></div>
+                    <div class="composite-info-line"><span>Zoom</span><strong>${escapeHtml(`${formatNumber(currentDocument.view.zoom)}x`)}</strong></div>
+                    <div class="composite-info-line"><span>Pan</span><strong>${escapeHtml(`${formatNumber(currentDocument.view.panX)}, ${formatNumber(currentDocument.view.panY)}`)}</strong></div>
+                </div>
+                <label class="composite-toggle-row">
+                    <input type="checkbox" data-composite-action="toggle-checker" ${currentDocument.view.showChecker ? 'checked' : ''}>
+                    <div><strong>Checker Background</strong><span class="composite-help">Preview transparency against the Composite stage.</span></div>
+                </label>
+                <div class="composite-card-actions">
+                    <button type="button" class="toolbar-button" data-composite-action="frame-view">Frame</button>
+                    <button type="button" class="toolbar-button" data-composite-action="reset-pan">Reset Pan</button>
+                    <button type="button" class="toolbar-button" data-composite-action="zoom-in">Zoom In</button>
+                    <button type="button" class="toolbar-button" data-composite-action="zoom-out">Zoom Out</button>
+                </div>
                 ${selectedLayers.length > 1 ? `
                     <label class="composite-select-wrap">
                         <div class="composite-setting-label">
@@ -1636,22 +2075,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                             ${BLEND_MODE_OPTIONS.map(([value, label]) => `<option value="${value}" ${value === layer.blendMode ? 'selected' : ''}>${label}</option>`).join('')}
                         </select>
                     </label>
-                ` : '<div class="composite-mini-empty">Select a layer to edit blending.</div>'}
-                <label class="composite-toggle-row">
-                    <input type="checkbox" data-composite-action="toggle-checker" ${currentDocument.view.showChecker ? 'checked' : ''}>
-                    <div><strong>Checker Background</strong><span class="composite-help">Preview transparency against the composite stage only.</span></div>
-                </label>
-                <div class="composite-info-card">
-                    <div class="composite-info-line"><span>Visible Bounds</span><strong>${escapeHtml(formatDimensions(bounds.width, bounds.height))}</strong></div>
-                    <div class="composite-info-line"><span>Zoom</span><strong>${escapeHtml(`${formatNumber(currentDocument.view.zoom)}x`)}</strong></div>
-                    <div class="composite-info-line"><span>Pan</span><strong>${escapeHtml(`${formatNumber(currentDocument.view.panX)}, ${formatNumber(currentDocument.view.panY)}`)}</strong></div>
-                </div>
-                <div class="composite-card-actions">
-                    <button type="button" class="toolbar-button" data-composite-action="frame-view">Frame</button>
-                    <button type="button" class="toolbar-button" data-composite-action="reset-pan">Reset Pan</button>
-                    <button type="button" class="toolbar-button" data-composite-action="zoom-in">Zoom In</button>
-                    <button type="button" class="toolbar-button" data-composite-action="zoom-out">Zoom Out</button>
-                </div>
+                ` : '<div class="composite-mini-empty">Select a layer to edit its blend mode.</div>'}
             </div>
         `;
     }
@@ -1703,7 +2127,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         </button>
                     </div>
                     <div class="composite-info-card">
-                        <span class="composite-help">Export execution path is controlled in Settings &gt; Composite. Current Composite export stays on CPU 2D canvas; the setting only chooses worker vs main-thread execution.</span>
+                        <span class="composite-help">Settings &gt; Composite controls worker versus main-thread export execution.</span>
                     </div>
                 ` : `
                     <div class="composite-mini-empty">Export bounds and resolution will match the full visible area of all layers together automatically.</div>
@@ -1711,7 +2135,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                         <button type="button" class="toolbar-button" data-composite-action="set-custom-export-from-view">Use View As Export</button>
                     </div>
                     <div class="composite-info-card">
-                        <span class="composite-help">Export execution path is controlled in Settings &gt; Composite. Current Composite export stays on CPU 2D canvas; the setting only chooses worker vs main-thread execution.</span>
+                        <span class="composite-help">Settings &gt; Composite controls worker versus main-thread export execution.</span>
                     </div>
                 `}
             </div>
@@ -1719,15 +2143,6 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
     }
 
     function renderStageChrome() {
-        const bounds = computeLiveDocumentBounds(currentDocument);
-        refs.title.textContent = currentDocument.layers.length
-            ? `${currentDocument.layers.length} layer${currentDocument.layers.length === 1 ? '' : 's'} in Composite`
-            : 'Composite Workspace';
-        refs.meta.innerHTML = `
-            <span>${escapeHtml(`${currentDocument.layers.length} layer${currentDocument.layers.length === 1 ? '' : 's'}`)}</span>
-            <span>${escapeHtml(`Bounds ${formatDimensions(bounds.width, bounds.height)}`)}</span>
-            <span>${escapeHtml(`Zoom ${formatNumber(currentDocument.view.zoom)}x`)}</span>
-        `;
         refs.stageWrap.classList.toggle('is-checker', currentDocument.view.showChecker !== false);
         refs.emptyState.classList.toggle('is-visible', !currentDocument.layers.length);
     }
@@ -1912,6 +2327,7 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
                 renderTransformPanel();
                 renderBlendPanel();
                 renderExportPanel();
+                syncAllRangeInputProgress();
             }
             lastSidebarView = currentDocument.workspace.sidebarView;
         }
@@ -1923,22 +2339,27 @@ export function createCompositeWorkspace(root, { actions, logger = null }) {
         if (!layer) return;
         root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="x"]`).forEach((input) => {
             input.value = String(Math.round(layer.x));
+            syncRangeInputProgress(input);
             setSettingMeta(input.closest('.composite-setting'), formatNumber(layer.x));
         });
         root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="y"]`).forEach((input) => {
             input.value = String(Math.round(layer.y));
+            syncRangeInputProgress(input);
             setSettingMeta(input.closest('.composite-setting'), formatNumber(layer.y));
         });
         root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="scale"]`).forEach((input) => {
             input.value = String(getLayerScaleValue(layer));
+            syncRangeInputProgress(input);
             setSettingMeta(input.closest('.composite-setting'), formatNumber(getLayerScaleValue(layer)));
         });
         root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="scaleX"]`).forEach((input) => {
             input.value = String(getLayerScaleValue(layer, 'x'));
+            syncRangeInputProgress(input);
             setSettingMeta(input.closest('.composite-setting'), formatNumber(getLayerScaleValue(layer, 'x')));
         });
         root.querySelectorAll(`[data-composite-action="update-layer-number"][data-layerid="${layer.id}"][data-field="scaleY"]`).forEach((input) => {
             input.value = String(getLayerScaleValue(layer, 'y'));
+            syncRangeInputProgress(input);
             setSettingMeta(input.closest('.composite-setting'), formatNumber(getLayerScaleValue(layer, 'y')));
         });
     }

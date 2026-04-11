@@ -798,7 +798,6 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         <div class="library-panel-shell">
             <div class="toolbar library-toolbar">
                 <div class="library-toolbar-page">
-                    <div class="library-toolbar-title">Library Page</div>
                     <div class="library-page-tabs" data-library-role="page-tabs">
                         <button type="button" class="mode-button is-active" data-library-action="set-page-mode" data-mode="library">Library</button>
                         <button type="button" class="mode-button" data-library-action="set-page-mode" data-mode="assets">Assets</button>
@@ -822,22 +821,20 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 </div>
                 <div class="library-empty-state">
                     <strong data-library-role="empty-title">Library is empty</strong>
-                    <span data-library-role="empty-text">Save projects from Editor, Composite, Stitch, or 3D, or import JSON files to build your gallery.</span>
+                    <span data-library-role="empty-text">Save or import items to populate this view.</span>
                 </div>
                 <div class="library-fullscreen-view">
-                    <div class="library-fullscreen-label">Library Preview</div>
-                    <div class="library-hover-hint">Hovering Original</div>
+                    <div class="library-fullscreen-label"></div>
                     <img class="library-img-base" alt="">
                     <img class="library-img-hover" alt="">
                 </div>
             </div>
             <button type="button" class="library-side-tab" data-library-action="toggle-side-panel" aria-expanded="false">
-                <span>Library Tools</span>
+                <span>Tools</span>
             </button>
             <aside class="library-side-panel" aria-hidden="true">
                 <div class="library-side-scroll">
                     <div class="library-side-header">
-                        <strong>Library Tools</strong>
                         <button type="button" class="toolbar-button" data-library-action="close-side-panel">Close</button>
                     </div>
                     <div class="library-side-content"></div>
@@ -870,9 +867,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 </div>
             </div>
             <div class="library-detail-overlay">
-                    <div class="library-detail-shell">
+                <div class="library-detail-shell">
                     <div class="library-detail-image-pane">
-                        <div class="library-hover-hint">Hovering Original</div>
                         <img class="library-img-base" alt="">
                         <img class="library-img-hover" alt="">
                         <div class="library-asset-preview-shell" data-library-role="asset-preview-shell">
@@ -1810,7 +1806,6 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             <article class="library-grid-item ${selectedIds.has(item.id) || selectedPrimaryId === item.id ? 'is-selected' : ''}" data-library-index="${index}" data-library-id="${item.id}">
                 <button type="button" class="library-delete-button" data-library-action="delete-project" data-library-id="${item.id}" aria-label="Delete ${escapeHtml(item.name)}">&times;</button>
                 ${selectedIds.has(item.id) ? '<div class="library-selection-badge">Selected</div>' : ''}
-                ${item.hoverSrc ? '<div class="library-hover-hint">Hovering Original</div>' : ''}
                 <div class="library-image-container">
                     <img src="${item.url}" class="library-img-base" alt="${escapeHtml(item.name)}" loading="lazy" decoding="async">
                     ${item.hoverSrc ? `<img src="${item.hoverSrc}" class="library-img-hover" alt="" loading="lazy" decoding="async">` : ''}
@@ -1841,8 +1836,8 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             refs.empty.classList.add('is-visible');
             refs.emptyTitle.textContent = isAssetsPage() ? 'Assets page is empty' : 'Library is empty';
             refs.emptyText.textContent = isAssetsPage()
-                ? '3D imports and saved Editor renders appear here as assets, or you can import asset bundles and asset folders.'
-                : 'Save projects from Editor, Composite, Stitch, or 3D, or import JSON files to build your gallery.';
+                ? 'Import or save assets to populate this view.'
+                : 'Save or import items to populate this view.';
             return;
         }
 
@@ -1851,7 +1846,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             gridMarkupSignatureByMode[activeMode] = gridStateSignatureByMode[activeMode];
             refs.empty.classList.add('is-visible');
             refs.emptyTitle.textContent = isAssetsPage() ? 'No assets match this view' : 'No projects match this view';
-            refs.emptyText.textContent = 'Try a different tag tab or sorting mode from the Library Tools drawer.';
+            refs.emptyText.textContent = 'Try a different tag or sort.';
             return;
         }
 

@@ -759,9 +759,11 @@ export function createThreeDWorkspace(actions, store) {
             .threed-overlay-top-right { top:6px; right:6px; flex-wrap:wrap; justify-content:flex-end; align-items:flex-start; }
             .threed-overlay-bottom-left { left:6px; bottom:6px; max-width:min(58%, calc(100% - 12px)); }
             .threed-overlay-bottom-right { right:6px; bottom:6px; flex-direction:column; align-items:flex-end; gap:4px; max-width:min(58%, calc(100% - 12px)); }
-            .threed-mini-bar { display:inline-flex; align-items:center; gap:3px; padding:3px; border:1px solid var(--threed-border-soft); background:rgba(0,0,0,0.92); }
-            .threed-mini-bar .toolbar-button, .threed-mini-bar .secondary-button { min-height:20px; padding:0 6px !important; border-radius:3px; }
-            .threed-overlay-chip { display:inline-flex; align-items:center; gap:4px; min-height:20px; padding:0 6px; border:1px solid var(--threed-border-soft); background:rgba(0,0,0,0.92); color:var(--threed-text); font-size:10px; white-space:nowrap; }
+            .threed-mini-bar { display:inline-flex; align-items:center; gap:3px; padding:3px; border:1px solid var(--threed-border-soft); background:rgba(0,0,0,0.92); box-shadow:none !important; filter:none !important; }
+            .threed-mini-bar .toolbar-button, .threed-mini-bar .secondary-button { min-height:20px; padding:0 6px !important; border-radius:3px; box-shadow:none !important; filter:none !important; text-shadow:none; }
+            .threed-mini-bar .toolbar-button:focus, .threed-mini-bar .secondary-button:focus { outline:none; }
+            .threed-mini-bar .toolbar-button:focus-visible, .threed-mini-bar .secondary-button:focus-visible { outline:1px solid var(--threed-border); outline-offset:1px; }
+            .threed-overlay-chip { display:inline-flex; align-items:center; gap:4px; min-height:20px; padding:0 6px; border:1px solid var(--threed-border-soft); background:rgba(0,0,0,0.92); color:var(--threed-text); font-size:10px; white-space:nowrap; box-shadow:none !important; filter:none !important; }
             .threed-overlay-chip.is-muted { color:var(--threed-muted); }
             .threed-context-menu-host { position:absolute; inset:0; z-index:18; pointer-events:none; }
             .threed-context-menu { position:absolute; min-width:180px; max-width:240px; display:flex; flex-direction:column; gap:2px; padding:4px; border:1px solid var(--threed-border); background:#000000; box-shadow:0 18px 38px rgba(0,0,0,0.38); pointer-events:auto; }

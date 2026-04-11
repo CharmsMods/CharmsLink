@@ -1008,6 +1008,9 @@ export class NoiseStudioEngine {
             canvas.height = previewResolution.h;
         }
         const ctx = canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         drawImagePlaced(ctx, this.runtime.baseImage, canvas.width, canvas.height, this.runtime.sourcePlacement);

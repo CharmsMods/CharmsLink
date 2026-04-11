@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tool Index</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --hover-color: #ffffff;
+            --border-color: #2a2a2a;
+        }
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 600px;
+            width: 100%;
+        }
+        h1 {
+            font-size: 1.2rem;
+            font-weight: 500;
+            margin-bottom: 2rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .list-group {
+            margin-bottom: 2.5rem;
+        }
+        .list-group-title {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        a.tool-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            color: var(--text-color);
+            text-decoration: none;
+            border-bottom: 1px solid var(--border-color);
+            transition: color 0.2s, padding-left 0.2s;
+            font-size: 1rem;
+        }
+        a.tool-item:last-child {
+            border-bottom: none;
+        }
+        a.tool-item:hover {
+            color: var(--hover-color);
+            padding-left: 8px;
+        }
+        .arrow {
+            color: #555;
+            transition: color 0.2s, transform 0.2s;
+        }
+        a.tool-item:hover .arrow {
+            color: #aaa;
+            transform: translateX(4px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Tool Index</h1>
+
+        <div class="list-group">
+            <h2 class="list-group-title">Image Utilities</h2>
+            <a href="Charms Web Tools/Image Tools/Background Remover/Background Remover/background remover and patcher.html" class="tool-item">
+                Background Remover <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/Image Tools/Image Corruption/Image Corruption/Image Corruption.html" class="tool-item">
+                Image Corruption <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/Image Tools/JPG Hex Editor/Current/index.html" class="tool-item">
+                JPG Hex Editor <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/Image Tools/Motion Detection/Current/index.html" class="tool-item">
+                Motion Detection <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/Image Tools/Pixel Art/Current/index.html" class="tool-item">
+                Pixel Art <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/Image Tools/Dithering/Current/index.html" class="tool-item">
+                Image Dithering <span class="arrow">→</span>
+            </a>
+        </div>
+
+        <div class="list-group">
+            <h2 class="list-group-title">Other Tools</h2>
+            <a href="Charms Web Tools/image border sizer.html" class="tool-item">
+                Image Border Sizer <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/text_replacer.html" class="tool-item">
+                Text Replacer <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/foldercleaner.html" class="tool-item">
+                Folder Cleaner <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/image to ascii art.html" class="tool-item">
+                Image to ASCII Art <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/swaper.html" class="tool-item">
+                Color Palette Swapper <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/Mandelbrot.html" class="tool-item">
+                Mandelbrot Visualizer <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/Tiler/index.html" class="tool-item">
+                Image Tiler <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/File Encryptor/index.html" class="tool-item">
+                File Encryptor <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/base converter.html" class="tool-item">
+                Base Converter <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/QR code gen.html" class="tool-item">
+                QR Code Generator <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/image hex code.html" class="tool-item">
+                Image Color Picker <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/zalgo gen.html" class="tool-item">
+                Zalgo Text Generator <span class="arrow">→</span>
+            </a>
+            <a href="Charms Web Tools/image layerer V1.html" class="tool-item">
+                Image Layerer V1 <span class="arrow">→</span>
+            </a>
+        </div>
+    </div>
+</body>
+</html>

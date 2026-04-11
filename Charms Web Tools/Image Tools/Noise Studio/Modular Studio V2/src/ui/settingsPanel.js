@@ -38,21 +38,35 @@ function formatMegapixels(value = 0) {
 
 function normalizeCategory(category) {
     const normalized = String(category || '').trim().toLowerCase();
-    return ['general', 'library', 'editor', 'composite', 'stitch', '3d', 'logs'].includes(normalized) ? normalized : 'general';
+    return ['general', 'personalization', 'library', 'editor', 'composite', 'stitch', '3d', 'logs'].includes(normalized) ? normalized : 'general';
 }
 
 const CATEGORIES = [
-    ['general', 'General', 'Theme, save behavior, workers, settings import/export'],
-    ['library', 'Library', 'Storage, auto-load, defaults, maintenance'],
-    ['editor', 'Editor', 'Viewport defaults, palette automation, checker tone'],
-    ['composite', 'Composite', 'Checker, zoom-lock, export routing, and graphics diagnostics'],
-    ['stitch', 'Stitch', 'Analysis defaults, photo runtime diagnostics, workspace-first behavior'],
-    ['3d', '3D', 'Navigation, helpers, snapping, render defaults'],
-    ['logs', 'Logs', 'Retention, cards, flash effects, filters']
+    ['general', 'General'],
+    ['personalization', 'Personalization'],
+    ['library', 'Library'],
+    ['editor', 'Editor'],
+    ['composite', 'Composite'],
+    ['stitch', 'Stitch'],
+    ['3d', '3D'],
+    ['logs', 'Logs']
+];
+
+const PERSONALIZATION_FIELDS = [
+    ['page', 'Page Background'],
+    ['surface', 'Raised Surface'],
+    ['surfaceSoft', 'Inset Surface'],
+    ['text', 'Primary Text'],
+    ['muted', 'Muted Text'],
+    ['accent', 'Highlight / Accent'],
+    ['success', 'Success'],
+    ['warning', 'Warning'],
+    ['danger', 'Danger']
 ];
 
 const SETTING_ICONS = {
     'general': `<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.91,7.62,6.29L5.23,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.72,8.87 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.84,11.36,4.81,11.68,4.81,12c0,0.32,0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.11-0.2,0.06-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>`,
+    'personalization': `<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0-9 9a4 4 0 0 0 4 4h1.2a1.3 1.3 0 0 1 1.3 1.3A3.7 3.7 0 0 0 13.2 21H14a7 7 0 0 0 0-14h-2zm-4.1 8.3a1.3 1.3 0 1 1 0-2.6a1.3 1.3 0 0 1 0 2.6zm3.2-3.3a1.3 1.3 0 1 1 0-2.6a1.3 1.3 0 0 1 0 2.6zm3.6.4a1.3 1.3 0 1 1 0-2.6a1.3 1.3 0 0 1 0 2.6zm1.8 4a1.3 1.3 0 1 1 0-2.6a1.3 1.3 0 0 1 0 2.6z"/></svg>`,
     'library': `<svg viewBox="0 0 24 24"><path d="M20,8.18v8.64c0,0.44-0.24,0.86-0.61,1.08l-7,4.04c-0.25,0.14-0.54,0.14-0.79,0l-7-4.04 c-0.38-0.22-0.61-0.63-0.61-1.08V8.18c0-0.44,0.24-0.86,0.61-1.08l7-4.04c0.25-0.14,0.54-0.14,0.79,0l7,4.04 C19.76,7.31,20,7.73,20,8.18z M12,4.02L5,8.06l7,4.04l7-4.04L12,4.02z M19,9.81l-6,3.46v6.91l6-3.46V9.81z M5,9.81v6.91l6,3.46v-6.91 L5,9.81z"/></svg>`,
     'editor': `<svg viewBox="0 0 24 24"><path d="M4,10.5c-0.83,0-1.5,0.67-1.5,1.5s0.67,1.5,1.5,1.5s1.5-0.67,1.5-1.5S4.83,10.5,4,10.5z M4,4.5C3.17,4.5,2.5,5.17,2.5,6s0.67,1.5,1.5,1.5S5.5,6.83,5.5,6S4.83,4.5,4,4.5z M4,16.5c-0.83,0-1.5,0.67-1.5,1.5s0.67,1.5,1.5,1.5s1.5-0.67,1.5-1.5S4.83,16.5,4,16.5z M7,19h14v-2H7V19z M7,13h14v-2H7V13z M7,7h14V5H7V7z"/></svg>`,
     'composite': `<svg viewBox="0 0 24 24"><path d="M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z"/></svg>`,
@@ -62,13 +76,12 @@ const SETTING_ICONS = {
 };
 
 function renderRail(category) {
-    return CATEGORIES.map(([id, label, summary]) => `
+    return CATEGORIES.map(([id, label]) => `
         <button type="button" class="settings-rail-button ${category === id ? 'is-active' : ''}" data-settings-action="category" data-category="${id}">
             <div class="settings-rail-button-head">
                 <span class="settings-rail-icon">${SETTING_ICONS[id] || '&#8226;'}</span>
                 <strong>${label}</strong>
             </div>
-            <span>${summary}</span>
         </button>
     `).join('');
 }
@@ -94,11 +107,86 @@ function renderField({ type = 'checkbox', path, label, value, min, max, step, op
             </label>
         `;
     }
+    if (type === 'color') {
+        const displayValue = String(value || '#000000').toUpperCase();
+        return `
+            <label class="settings-field">
+                <span>${escapeHtml(label)}</span>
+                <input type="color" value="${escapeHtml(value)}" data-settings-path="${escapeHtml(path)}">
+                <small>${escapeHtml(note || displayValue)}</small>
+            </label>
+        `;
+    }
     return `
         <label class="settings-field settings-field-toggle">
             <span>${escapeHtml(label)}</span>
             <input type="checkbox" data-settings-path="${escapeHtml(path)}" ${value ? 'checked' : ''}>
         </label>
+    `;
+}
+
+function renderPersonalizationPalette(themeKey, palette = {}) {
+    const themeLabel = themeKey === 'dark' ? 'Dark' : 'Light';
+    return `
+        <section class="settings-card">
+            <div class="settings-card-header">
+                <div>
+                    <div class="settings-eyebrow">${themeLabel} Palette</div>
+                    <h3>${themeLabel} Theme Colors</h3>
+                </div>
+                <div class="settings-button-grid">
+                    <button type="button" class="toolbar-button" data-settings-action="personalization-copy" data-settings-source="${themeKey}" data-settings-target="${themeKey === 'dark' ? 'light' : 'dark'}">Copy To ${themeKey === 'dark' ? 'Light' : 'Dark'}</button>
+                    <button type="button" class="toolbar-button" data-settings-action="personalization-reset-palette" data-settings-palette="${themeKey}">Reset ${themeLabel}</button>
+                </div>
+            </div>
+            <div class="settings-field-grid">
+                ${PERSONALIZATION_FIELDS.map(([key, label]) => renderField({
+                    type: 'color',
+                    path: `personalization.${themeKey}.${key}`,
+                    label,
+                    value: palette[key]
+                })).join('')}
+            </div>
+        </section>
+    `;
+}
+
+function renderPersonalizationPreview(activeThemeLabel = 'Light') {
+    return `
+        <section class="settings-card">
+            <div class="settings-card-header">
+                <div>
+                    <div class="settings-eyebrow">Live Preview</div>
+                    <h3>Shared UI Sample</h3>
+                </div>
+            </div>
+            <div class="settings-preview-shell">
+                <div class="settings-preview-toolbar">
+                    <span class="settings-preview-chip is-accent">${activeThemeLabel} Active</span>
+                    <span class="settings-preview-chip">Raised Surface</span>
+                    <span class="settings-preview-chip">Inset Field</span>
+                </div>
+                <div class="settings-preview-content">
+                    <div class="settings-preview-copy">
+                        <strong>Preview Panel</strong>
+                        <span>This sample reflects the same shared shell styling used by the main site tabs.</span>
+                    </div>
+                    <div class="settings-preview-actions">
+                        <button type="button" class="settings-preview-action is-primary">Primary Action</button>
+                        <button type="button" class="settings-preview-action">Secondary</button>
+                    </div>
+                    <div class="settings-preview-field">
+                        <span>Inset Field</span>
+                        <div class="settings-preview-field-surface">Text, chips, fields, and buttons derive from these palette colors.</div>
+                    </div>
+                    <div class="settings-preview-statuses">
+                        <span class="settings-preview-status is-success">Success</span>
+                        <span class="settings-preview-status is-warning">Warning</span>
+                        <span class="settings-preview-status is-danger">Danger</span>
+                    </div>
+                </div>
+            </div>
+        </section>
     `;
 }
 
@@ -192,6 +280,33 @@ function renderCategoryContent(category, settings) {
                     <button type="button" class="toolbar-button is-danger" data-settings-action="maintenance" data-kind="wipe-assets">Wipe Assets</button>
                 </div>
             </section>
+        `;
+    }
+    if (category === 'personalization') {
+        const personalization = settings?.personalization || {};
+        const activeTheme = settings?.general?.theme === 'dark' ? 'dark' : 'light';
+        const activeThemeLabel = activeTheme === 'dark' ? 'Dark' : 'Light';
+        return `
+            <section class="settings-card">
+                <div class="settings-card-header"><div><div class="settings-eyebrow">Personalization</div><h3>Shared UI Palette</h3></div></div>
+                <div class="settings-banner">These controls recolor the shared shell used by <strong>Editor</strong>, <strong>Composite</strong>, <strong>Library</strong>, <strong>Stitch</strong>, <strong>Settings</strong>, and <strong>Logs</strong>. The <strong>General &gt; Theme</strong> setting still chooses whether the light or dark palette is active right now. The 3D tab keeps its own separate black interface for now.</div>
+                <div class="settings-field-grid">
+                    ${renderField({ path: 'personalization.enabled', label: 'Use custom site colors', value: personalization.enabled, note: `${activeThemeLabel} is the currently active palette.` })}
+                    <div class="settings-field">
+                        <span>Current theme</span>
+                        <strong class="settings-inline-value">${activeThemeLabel}</strong>
+                        <small>Switch between Light and Dark in the General category. Both palettes are editable here.</small>
+                    </div>
+                    <div class="settings-field">
+                        <span>Coverage</span>
+                        <strong class="settings-inline-value">Shared UI</strong>
+                        <small>Applies to the shared neumorphic site shell and its feedback colors. Functional overlays and the 3D tab keep their own specialized colors.</small>
+                    </div>
+                </div>
+            </section>
+            ${renderPersonalizationPreview(activeThemeLabel)}
+            ${renderPersonalizationPalette('light', personalization.light || {})}
+            ${renderPersonalizationPalette('dark', personalization.dark || {})}
         `;
     }
     if (category === 'editor') {
@@ -367,63 +482,57 @@ function renderCategoryContent(category, settings) {
 export function createSettingsPanel(root, { actions } = {}) {
     root.innerHTML = `
         <style data-settings-panel-style>
-            :root {
-                --s-bg-main: #0a0c10;
-                --s-bg-side: #0e1116;
-                --s-bg-card: rgba(20, 24, 30, 0.65);
-                --s-bg-field: rgba(255, 255, 255, 0.03);
-                --s-accent: #f5d08e;
-                --s-accent-rgb: 245, 208, 142;
-                --s-text: #f5f1e8;
-                --s-text-muted: rgba(245, 241, 232, 0.6);
-                --s-border: rgba(255, 255, 255, 0.08);
-                --s-radius: 8px;
-            }
             .settings-shell {
                 height: 100%;
                 min-height: 0;
                 display: grid;
-                grid-template-columns: 280px 1fr;
-                background: var(--s-bg-main);
-                color: var(--s-text);
+                grid-template-columns: minmax(248px, 280px) minmax(0, 1fr);
+                gap: 16px;
+                padding: 4px;
+                background: transparent;
+                color: var(--studio-neu-text);
                 font-family: inherit;
             }
+            .settings-rail,
+            .settings-header,
+            .settings-card,
+            .settings-feedback {
+                border: none;
+                background: var(--studio-neu-surface);
+                color: var(--studio-neu-text);
+                box-shadow: var(--studio-neu-shadow-card);
+            }
+            .settings-rail,
+            .settings-header,
+            .settings-card {
+                border-radius: 22px;
+            }
             .settings-rail {
-                padding: 32px 20px;
-                background: var(--s-bg-side);
-                border-right: 1px solid var(--s-border);
+                padding: 24px 18px;
+                z-index: 2;
                 display: flex;
                 flex-direction: column;
-                gap: 24px;
+                gap: 14px;
                 overflow-y: auto;
-            }
-            .settings-rail h2 {
-                margin: 0;
-                font-size: 1.5rem;
-                font-weight: 600;
-                letter-spacing: -0.01em;
-            }
-            .settings-rail-copy {
-                font-size: 12px;
-                line-height: 1.6;
-                color: var(--s-text-muted);
             }
             .settings-rail-list {
                 display: flex;
                 flex-direction: column;
-                gap: 8px;
+                gap: 12px;
+            }
+            .settings-rail-button,
+            .settings-shell .toolbar-button {
+                border: none;
+                border-radius: 999px;
+                background: var(--studio-neu-button-fill);
+                color: var(--studio-neu-text);
+                box-shadow: var(--studio-neu-shadow-button);
+                transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
             }
             .settings-rail-button {
                 display: flex;
-                flex-direction: column;
-                gap: 8px;
-                padding: 14px 16px;
-                background: transparent;
-                border: 1px solid transparent;
-                border-radius: var(--s-radius);
-                color: var(--s-text);
+                padding: 12px 14px;
                 cursor: pointer;
-                transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
                 text-align: left;
             }
             .settings-rail-button-head {
@@ -436,82 +545,81 @@ export function createSettingsPanel(root, { actions } = {}) {
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                width: 24px;
-                height: 24px;
-                background: rgba(255, 255, 255, 0.05);
-                border-radius: 6px;
-                color: var(--s-text-muted);
-                transition: all 0.2s ease;
+                width: 30px;
+                height: 30px;
+                border-radius: 999px;
+                background: transparent;
+                color: var(--studio-neu-muted);
+                box-shadow: none;
+                transition: inherit;
+                flex: 0 0 auto;
             }
             .settings-rail-icon svg {
                 width: 14px;
                 height: 14px;
                 fill: currentColor;
             }
-            .settings-rail-button.is-active .settings-rail-icon {
-                background: rgba(var(--s-accent-rgb), 0.15);
-                color: var(--s-accent);
-                box-shadow: 0 0 8px rgba(var(--s-accent-rgb), 0.2);
-            }
-            .settings-rail-button:hover {
-                background: rgba(255, 255, 255, 0.04);
-                border-color: rgba(255, 255, 255, 0.1);
-            }
-            .settings-rail-button.is-active {
-                background: rgba(var(--s-accent-rgb), 0.08);
-                border-color: rgba(var(--s-accent-rgb), 0.3);
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            }
             .settings-rail-button strong {
                 font-size: 13px;
-                font-weight: 600;
-                color: var(--s-text);
+                font-weight: 700;
+                color: var(--studio-neu-text);
             }
-            .settings-rail-button.is-active strong {
-                color: var(--s-accent);
+
+            .settings-rail-button:hover:not(:disabled),
+            .settings-shell .toolbar-button:hover:not(:disabled) {
+                background: var(--studio-neu-button-fill-hover);
+                box-shadow: var(--studio-neu-shadow-button-soft);
+                transform: translateY(-1px);
             }
-            .settings-rail-button span {
-                font-size: 11px;
-                color: var(--s-text-muted);
-                line-height: 1.4;
+            .settings-rail-button.is-active,
+            .settings-shell .toolbar-button:active:not(:disabled),
+            .settings-shell .toolbar-button.is-active {
+                background: var(--studio-neu-button-fill-active);
+                box-shadow: var(--studio-neu-shadow-button-pressed);
+                transform: translateY(0);
+            }
+            .settings-rail-button.is-active:hover:not(:disabled),
+            .settings-shell .toolbar-button.is-active:hover:not(:disabled) {
+                background: var(--studio-neu-button-fill-active);
+                box-shadow: var(--studio-neu-shadow-button-pressed);
+                transform: translateY(0);
+            }
+            .settings-rail-button.is-active strong,
+            .settings-rail-button.is-active .settings-rail-icon {
+                color: var(--studio-accent);
+            }
+            .settings-rail-button.is-active .settings-rail-icon {
+                background: transparent;
+                box-shadow: none;
             }
             .settings-content {
                 display: grid;
-                grid-template-rows: auto auto 1fr;
+                grid-template-rows: auto auto minmax(0, 1fr);
                 min-height: 0;
-                background: radial-gradient(circle at top right, rgba(var(--s-accent-rgb), 0.03), transparent 40%);
+                gap: 16px;
+                padding: 4px 4px 4px 0;
             }
             .settings-header {
-                padding: 32px 40px;
+                padding: 18px 24px;
                 display: flex;
-                align-items: flex-start;
-                justify-content: space-between;
-                gap: 24px;
-                border-bottom: 1px solid var(--s-border);
-                min-height: 124px; /* Normalize height across all categories */
-            }
-            .settings-header h3 {
-                margin: 4px 0 8px;
-                font-size: 24px;
-                font-weight: 600;
-                line-height: 1.2;
-            }
-            .settings-header p {
-                margin: 0;
-                font-size: 13px;
-                color: var(--s-text-muted);
-                line-height: 1.5;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 12px;
+                min-height: 0;
             }
             .settings-actions {
                 display: flex;
+                flex-wrap: wrap;
                 gap: 10px;
+                justify-content: flex-end;
             }
             .settings-scroll {
-                padding: 32px 40px;
+                min-height: 0;
                 overflow-y: auto;
                 display: flex;
                 flex-direction: column;
-                gap: 32px;
+                gap: 16px;
+                padding: 4px;
                 transition: opacity 0.15s ease, transform 0.15s ease, filter 0.15s ease;
             }
             .settings-scroll.is-switching {
@@ -528,60 +636,64 @@ export function createSettingsPanel(root, { actions } = {}) {
                 100% { opacity: 1; transform: translateY(0); filter: blur(0); }
             }
             .settings-card {
-                background: var(--s-bg-card);
-                border: 1px solid var(--s-border);
-                border-radius: 12px;
                 padding: 24px;
-                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-                backdrop-filter: blur(12px);
             }
             .settings-card-header {
-                margin-bottom: 24px;
+                margin-bottom: 18px;
                 display: flex;
                 justify-content: space-between;
                 align-items: flex-start;
+                gap: 12px;
             }
             .settings-eyebrow {
                 font-size: 11px;
                 font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: 0.12em;
-                color: var(--s-accent);
+                color: var(--studio-neu-muted);
                 margin-bottom: 6px;
             }
             .settings-card h3 {
                 margin: 0;
                 font-size: 17px;
-                font-weight: 600;
+                font-weight: 700;
+                color: var(--studio-neu-text);
             }
             .settings-field-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
                 gap: 16px;
             }
+            .settings-button-grid {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .settings-field,
+            .settings-banner,
+            .settings-kpi {
+                border: none;
+                background: transparent;
+                box-shadow: none;
+                color: var(--studio-neu-text);
+            }
             .settings-field {
                 display: flex;
                 flex-direction: column;
                 gap: 10px;
-                padding: 16px;
-                background: var(--s-bg-field);
-                border: 1px solid var(--s-border);
-                border-radius: var(--s-radius);
-                transition: border-color 0.2s ease;
-            }
-            .settings-field:focus-within {
-                border-color: rgba(var(--s-accent-rgb), 0.4);
+                padding: 2px 2px 0;
+                border-radius: 0;
             }
             .settings-field span {
                 font-size: 13px;
-                font-weight: 500;
-                color: var(--s-text);
+                font-weight: 600;
+                color: var(--studio-neu-text);
             }
             .settings-field small {
                 font-size: 11px;
-                color: var(--s-text-muted);
+                color: var(--studio-neu-muted);
+                line-height: 1.45;
             }
-            /* Custom Toggles */
             .settings-field-toggle {
                 flex-direction: row;
                 align-items: center;
@@ -590,174 +702,307 @@ export function createSettingsPanel(root, { actions } = {}) {
             }
             .settings-field-toggle input[type="checkbox"] {
                 appearance: none;
-                width: 38px;
-                height: 20px;
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 20px;
+                width: 46px;
+                height: 24px;
+                border: none;
+                border-radius: 999px;
                 position: relative;
                 cursor: pointer;
-                transition: background 0.2s ease;
+                transition: background 0.18s ease, box-shadow 0.18s ease;
                 flex-shrink: 0;
                 margin: 0;
+                background: var(--studio-neu-surface);
+                box-shadow: var(--studio-neu-shadow-inset-soft);
             }
             .settings-field-toggle input[type="checkbox"]::before {
                 content: '';
                 position: absolute;
-                width: 14px;
-                height: 14px;
-                background: #fff;
-                border-radius: 50%;
-                top: 3px;
-                left: 3px;
-                transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+                inset: 3px auto 3px 3px;
+                width: 18px;
+                border-radius: 999px;
+                background: var(--studio-neu-button-fill);
+                box-shadow: var(--studio-neu-shadow-button-soft);
+                transition: transform 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
             }
             .settings-field-toggle input[type="checkbox"]:checked {
-                background: var(--s-accent);
+                background: var(--studio-neu-button-fill-active);
+                box-shadow: var(--studio-neu-shadow-button-pressed);
             }
             .settings-field-toggle input[type="checkbox"]:checked::before {
-                transform: translateX(18px);
-                background: #000;
+                transform: translateX(22px);
+                background: var(--studio-accent);
+                box-shadow: none;
             }
-            /* Styled Inputs */
-            .custom-select, .control-number {
-                background: rgba(0, 0, 0, 0.2);
-                border: 1px solid var(--s-border);
-                border-radius: 6px;
-                padding: 8px 12px;
-                color: var(--s-text);
+            .settings-shell :where(.custom-select, .control-number) {
+                border: none;
+                border-radius: 14px;
+                padding: 10px 14px;
+                color: var(--studio-neu-text);
+                font-weight: 600;
                 font-size: 13px;
                 outline: none;
-                transition: border-color 0.2s ease;
+                background: var(--studio-neu-surface);
+                box-shadow: var(--studio-neu-shadow-inset-soft);
+                transition: box-shadow 0.18s ease, background 0.18s ease;
             }
-            .custom-select:focus, .control-number:focus {
-                border-color: var(--s-accent);
+            .settings-shell :where(.custom-select, .control-number):focus {
+                box-shadow: var(--studio-neu-shadow-inset-soft), inset 0 0 0 2px color-mix(in srgb, var(--studio-accent) 18%, transparent);
             }
-            /* Progress & KPI Styles */
+            .settings-shell input[type="color"] {
+                width: 100%;
+                height: 44px;
+                padding: 0;
+                border: none;
+                border-radius: 14px;
+                background: var(--studio-neu-surface);
+                box-shadow: var(--studio-neu-shadow-inset-soft);
+                cursor: pointer;
+            }
+            .settings-shell input[type="color"]::-webkit-color-swatch-wrapper {
+                padding: 6px;
+            }
+            .settings-shell input[type="color"]::-webkit-color-swatch {
+                border: none;
+                border-radius: 10px;
+                box-shadow: var(--studio-neu-shadow-button-soft);
+            }
+            .settings-shell input[type="color"]::-moz-color-swatch {
+                border: none;
+                border-radius: 10px;
+                box-shadow: var(--studio-neu-shadow-button-soft);
+            }
             .settings-banner {
-                margin-bottom: 20px;
-                padding: 12px 16px;
-                background: rgba(var(--s-accent-rgb), 0.05);
-                border: 1px solid rgba(var(--s-accent-rgb), 0.1);
-                border-radius: var(--s-radius);
+                margin-bottom: 18px;
+                padding: 2px 2px 0;
+                border-radius: 0;
                 font-size: 12px;
-                color: var(--s-accent);
+                color: var(--studio-neu-muted);
+                font-weight: 600;
+                line-height: 1.55;
+            }
+            .settings-banner strong {
+                color: var(--studio-neu-text);
             }
             .settings-kpi-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-                gap: 12px;
-                margin-top: 24px;
+                gap: 14px;
+                margin-top: 18px;
             }
             .settings-kpi {
-                padding: 16px;
-                background: rgba(255, 255, 255, 0.02);
-                border: 1px solid var(--s-border);
-                border-radius: var(--s-radius);
+                padding: 12px 2px 0;
+                border-radius: 0;
                 text-align: center;
             }
             .settings-kpi span {
                 display: block;
                 font-size: 10px;
                 text-transform: uppercase;
-                letter-spacing: 0.05em;
-                color: var(--s-text-muted);
-                margin-bottom: 4px;
+                letter-spacing: 0.08em;
+                font-weight: 700;
+                color: var(--studio-neu-muted);
+                margin-bottom: 6px;
             }
             .settings-kpi strong {
-                font-size: 18px;
-                font-weight: 600;
-                color: var(--s-accent);
+                font-size: 20px;
+                font-weight: 700;
+                color: var(--studio-neu-text);
             }
-            /* Range Styling */
-            input[type="range"] {
+            .settings-inline-value {
+                font-size: 18px;
+                line-height: 1.1;
+                color: var(--studio-neu-text);
+            }
+            .settings-preview-shell {
+                display: flex;
+                flex-direction: column;
+                gap: 14px;
+                padding: 2px 2px 0;
+                border-radius: 0;
+                background: transparent;
+                box-shadow: none;
+            }
+            .settings-preview-toolbar {
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                box-shadow: none;
+            }
+            .settings-preview-toolbar {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                padding: 0;
+            }
+            .settings-preview-content {
+                display: grid;
+                gap: 14px;
+            }
+            .settings-preview-copy {
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+            }
+            .settings-preview-copy strong {
+                font-size: 15px;
+                color: var(--studio-neu-text);
+            }
+            .settings-preview-copy span,
+            .settings-preview-field span {
+                font-size: 12px;
+                color: var(--studio-neu-muted);
+                line-height: 1.5;
+            }
+            .settings-preview-actions,
+            .settings-preview-statuses {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            .settings-preview-action,
+            .settings-preview-chip,
+            .settings-preview-status {
+                border: none;
+                border-radius: 999px;
+                background: var(--studio-neu-button-fill);
+                color: var(--studio-neu-text);
+                box-shadow: var(--studio-neu-shadow-button-soft);
+                font-weight: 700;
+            }
+            .settings-preview-action {
+                min-height: 34px;
+                padding: 0 16px;
+                font-size: 12px;
+            }
+            .settings-preview-action.is-primary,
+            .settings-preview-chip.is-accent {
+                color: var(--studio-accent);
+            }
+            .settings-preview-chip,
+            .settings-preview-status {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 24px;
+                padding: 0 10px;
+                font-size: 10px;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+            }
+            .settings-preview-field {
+                display: grid;
+                gap: 8px;
+            }
+            .settings-preview-field-surface {
+                border: none;
+                border-radius: 18px;
+                background: var(--studio-neu-surface);
+                box-shadow: var(--studio-neu-shadow-inset-soft);
+                padding: 12px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--studio-neu-text);
+                line-height: 1.45;
+            }
+            .settings-preview-status.is-success {
+                color: var(--studio-success);
+            }
+            .settings-preview-status.is-warning {
+                color: var(--studio-warning);
+            }
+            .settings-preview-status.is-danger {
+                color: var(--studio-danger);
+            }
+            .settings-shell input[type="range"] {
                 appearance: none;
                 background: transparent;
                 cursor: pointer;
                 width: 100%;
-                margin: 10px 0;
+                margin: 8px 0;
             }
-            input[type="range"]::-webkit-slider-runnable-track {
-                background: rgba(255, 255, 255, 0.1);
-                height: 4px;
-                border-radius: 4px;
+            .settings-shell input[type="range"]::-webkit-slider-runnable-track {
+                background: var(--studio-neu-surface);
+                box-shadow: var(--studio-neu-shadow-inset-soft);
+                height: 8px;
+                border-radius: 999px;
             }
-            input[type="range"]::-webkit-slider-thumb {
+            .settings-shell input[type="range"]::-webkit-slider-thumb {
                 appearance: none;
-                width: 16px;
-                height: 16px;
-                background: var(--s-accent);
+                width: 20px;
+                height: 20px;
+                border: none;
+                background: var(--studio-neu-button-fill);
                 border-radius: 50%;
                 margin-top: -6px;
-                box-shadow: 0 0 10px rgba(var(--s-accent-rgb), 0.4);
+                box-shadow: var(--studio-neu-shadow-button-soft);
             }
-            /* Feedback styling */
+            .settings-shell input[type="range"]::-moz-range-track {
+                background: var(--studio-neu-surface);
+                box-shadow: var(--studio-neu-shadow-inset-soft);
+                height: 8px;
+                border-radius: 999px;
+            }
+            .settings-shell input[type="range"]::-moz-range-thumb {
+                width: 20px;
+                height: 20px;
+                border: none;
+                background: var(--studio-neu-button-fill);
+                border-radius: 50%;
+                box-shadow: var(--studio-neu-shadow-button-soft);
+            }
             .settings-feedback {
-                padding: 12px 40px;
-                font-size: 13px;
-                font-weight: 500;
-                background: #111;
-                border-bottom: 1px solid var(--s-border);
                 display: flex;
                 align-items: center;
                 gap: 8px;
-                height: 0;
                 overflow: hidden;
                 opacity: 0;
-                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                min-height: 0;
+                max-height: 0;
+                margin: 0 4px;
+                padding: 0 18px;
+                border-radius: 18px;
+                font-size: 13px;
+                font-weight: 600;
+                transition: opacity 0.22s ease, max-height 0.22s ease, padding 0.22s ease, margin 0.22s ease;
             }
             .settings-feedback.is-visible {
-                height: 44px;
                 opacity: 1;
+                max-height: 56px;
+                min-height: 48px;
+                padding: 12px 18px;
+                margin: 0 4px;
             }
-            .settings-feedback[data-tone="success"] { color: #8ef5b4; background: rgba(142, 245, 180, 0.05); }
-            .settings-feedback[data-tone="warning"] { color: #f5d08e; background: rgba(245, 208, 142, 0.05); }
-            .settings-feedback[data-tone="error"] { color: #f58e8e; background: rgba(245, 142, 142, 0.05); }
-
-            /* Action Buttons Styling (override toolbar-button for settings context) */
-            .settings-actions .toolbar-button {
-                background: rgba(255, 255, 255, 0.05);
-                border: 1px solid var(--s-border);
-                color: var(--s-text);
-                padding: 8px 16px;
-                border-radius: 6px;
+            .settings-feedback[data-tone="success"] { color: var(--studio-success); }
+            .settings-feedback[data-tone="warning"] { color: var(--studio-warning); }
+            .settings-feedback[data-tone="error"] { color: var(--studio-danger); }
+            .settings-shell .toolbar-button {
+                padding: 10px 16px;
                 font-size: 12px;
-                font-weight: 500;
-                transition: all 0.2s ease;
+                font-weight: 700;
+                cursor: pointer;
             }
-            .settings-actions .toolbar-button:hover {
-                background: rgba(255, 255, 255, 0.1);
-                border-color: rgba(255, 255, 255, 0.2);
+            .settings-shell .toolbar-button.is-danger {
+                color: var(--studio-danger);
             }
-            .settings-actions .toolbar-button.is-danger {
-                background: rgba(255, 142, 142, 0.05);
-                border-color: rgba(255, 142, 142, 0.1);
-                color: #f58e8e;
-            }
-            .settings-actions .toolbar-button.is-danger:hover {
-                background: rgba(255, 142, 142, 0.15);
-                border-color: rgba(255, 142, 142, 0.3);
-                color: #fff;
-            }
-
             @media (max-width: 980px) {
-                .settings-shell { grid-template-columns: 1fr; }
-                .settings-rail { border-right: none; border-bottom: 1px solid var(--s-border); }
-                .settings-header, .settings-scroll { padding: 24px; }
+                .settings-shell {
+                    grid-template-columns: 1fr;
+                }
+                .settings-content {
+                    padding: 0 4px 4px;
+                }
+                .settings-header {
+                    flex-direction: column;
+                    min-height: 0;
+                }
             }
         </style>
         <div class="settings-shell">
             <aside class="settings-rail">
-                <h2>Settings</h2>
-                <div class="settings-rail-copy">App-wide preferences, maintenance actions, and runtime limits that persist across loads.</div>
                 <div class="settings-rail-list" data-settings-role="rail"></div>
             </aside>
             <section class="settings-content">
                 <header class="settings-header">
-                    <div>
-                        <div class="settings-eyebrow">Preferences</div>
-                        <h3 data-settings-role="title">General</h3>
-                        <p data-settings-role="summary">Theme, save behavior, workers, settings import/export</p>
-                    </div>
                     <div class="settings-actions">
                         <button type="button" class="toolbar-button" data-settings-action="export">Export Settings</button>
                         <button type="button" class="toolbar-button" data-settings-action="import">Import Settings</button>
@@ -774,8 +1019,6 @@ export function createSettingsPanel(root, { actions } = {}) {
 
     const refs = {
         rail: root.querySelector('[data-settings-role="rail"]'),
-        title: root.querySelector('[data-settings-role="title"]'),
-        summary: root.querySelector('[data-settings-role="summary"]'),
         feedback: root.querySelector('[data-settings-role="feedback"]'),
         content: root.querySelector('[data-settings-role="content"]'),
         importInput: root.querySelector('[data-settings-role="import-input"]')
@@ -798,7 +1041,6 @@ export function createSettingsPanel(root, { actions } = {}) {
     function render(state) {
         latestState = state;
         const category = normalizeCategory(state?.ui?.settingsCategory);
-        const meta = CATEGORIES.find(([id]) => id === category) || CATEGORIES[0];
 
         if (currentCategory && category !== currentCategory && !isAnimating) {
             isAnimating = true;
@@ -807,8 +1049,6 @@ export function createSettingsPanel(root, { actions } = {}) {
             setTimeout(() => {
                 currentCategory = category;
                 refs.rail.innerHTML = renderRail(category);
-                refs.title.textContent = meta[1];
-                refs.summary.textContent = meta[2];
                 refs.content.innerHTML = renderCategoryContent(category, state.settings);
                 
                 requestAnimationFrame(() => {
@@ -827,8 +1067,6 @@ export function createSettingsPanel(root, { actions } = {}) {
         if (!isAnimating) {
             currentCategory = category;
             refs.rail.innerHTML = renderRail(category);
-            refs.title.textContent = meta[1];
-            refs.summary.textContent = meta[2];
             refs.content.innerHTML = renderCategoryContent(category, state.settings);
         }
     }
@@ -899,6 +1137,18 @@ export function createSettingsPanel(root, { actions } = {}) {
         if (action === 'apply-3d-defaults') {
             const applied = await actions.applyCurrentThreeDDefaults?.();
             if (applied) showFeedback('3D render defaults applied to the current scene.');
+            return;
+        }
+        if (action === 'personalization-reset-palette') {
+            const updated = await actions.resetPersonalizationPalette?.(node.dataset.settingsPalette || '');
+            if (updated) showFeedback(`${String(node.dataset.settingsPalette || '').trim().toLowerCase() === 'dark' ? 'Dark' : 'Light'} palette reset.`);
+            return;
+        }
+        if (action === 'personalization-copy') {
+            const source = node.dataset.settingsSource || '';
+            const target = node.dataset.settingsTarget || '';
+            const updated = await actions.copyPersonalizationPalette?.(source, target);
+            if (updated) showFeedback(`Copied ${source} palette to ${target}.`);
         }
     });
 

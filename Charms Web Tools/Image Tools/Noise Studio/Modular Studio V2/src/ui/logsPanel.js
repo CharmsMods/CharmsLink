@@ -78,52 +78,51 @@ function filterEntries(entries = [], levelFilter = 'all') {
 export function createLogsPanel(root, { logger = null, settings = null } = {}) {
     root.innerHTML = `
         <style data-logs-panel-style>
-            .logs-shell{position:relative;height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);background:#090909;color:#f5f1e8;overflow:hidden}
-            .logs-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);background:#111}
-            .logs-title-block{display:flex;flex-direction:column;gap:3px}
-            .logs-eyebrow{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:rgba(245,241,232,.62)}
-            .logs-title{margin:0;font-size:20px;line-height:1}
-            .logs-subtitle{font-size:11px;color:rgba(245,241,232,.64)}
-            .logs-toolbar-actions{display:flex;align-items:center;gap:8px}
-            .logs-toolbar button{min-height:28px;padding:0 10px;border:1px solid rgba(255,255,255,0.16);background:#141414;color:#f5f1e8;border-radius:0;cursor:pointer}
-            .logs-toolbar button:hover{background:#1b1b1b}
-            .logs-count{font-size:11px;color:rgba(245,241,232,.64)}
-            .logs-grid{min-height:0;overflow:auto;padding:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;align-content:start}
-            .logs-empty{display:grid;place-items:center;min-height:100%;padding:24px;color:rgba(245,241,232,.6);text-align:center;border:1px solid rgba(255,255,255,0.08);background:#0e0e0e}
-            .log-card{position:relative;display:grid;grid-template-rows:auto auto minmax(0,1fr);min-height:260px;border:1px solid rgba(255,255,255,0.1);background:#101010}
-            .log-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;border-bottom:1px solid rgba(255,255,255,0.08)}
+            .logs-shell{position:relative;height:100%;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr);gap:16px;padding:4px;background:transparent;color:var(--studio-neu-text);overflow:hidden}
+            .logs-toolbar,.log-card{border:none;background:var(--studio-neu-surface);color:var(--studio-neu-text);box-shadow:var(--studio-neu-shadow-card)}
+            .logs-toolbar{display:flex;align-items:center;justify-content:flex-end;gap:16px;padding:16px 18px;border-radius:22px;z-index:2}
+            .logs-toolbar-actions{display:flex;align-items:center;gap:12px}
+            .logs-toolbar button,.log-card-actions button{border:none;border-radius:999px;background:var(--studio-neu-button-fill);color:var(--studio-neu-text);box-shadow:var(--studio-neu-shadow-button);cursor:pointer;font-weight:700;transition:transform .18s ease, box-shadow .18s ease, background .18s ease, color .18s ease, opacity .18s ease}
+            .logs-toolbar button{min-height:30px;padding:0 14px;font-size:12px}
+            .log-card-actions button{min-height:26px;padding:0 10px;font-size:10px;box-shadow:var(--studio-neu-shadow-button-soft)}
+            .logs-toolbar button:hover:not(:disabled),.log-card-actions button:hover:not(:disabled){background:var(--studio-neu-button-fill-hover);box-shadow:var(--studio-neu-shadow-button-soft);transform:translateY(-1px)}
+            .logs-toolbar button:active:not(:disabled),.log-card-actions button:active:not(:disabled){background:var(--studio-neu-button-fill-active);box-shadow:var(--studio-neu-shadow-button-pressed);transform:translateY(0)}
+            .logs-count{font-size:11px;color:var(--studio-neu-muted);font-weight:600}
+            .logs-grid{min-height:0;overflow:auto;padding:4px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px;align-content:start}
+            .logs-empty{display:grid;place-items:center;min-height:100%;padding:24px;color:var(--studio-neu-muted);text-align:center;background:transparent;border:none;border-radius:0;box-shadow:none}
+            .logs-empty strong{color:var(--studio-neu-text)}
+            .log-card{position:relative;display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;gap:12px;min-height:260px;padding:16px;border-radius:22px}
+            .log-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:0}
             .log-card-title{display:flex;flex-direction:column;gap:5px;min-width:0}
-            .log-card-title strong{font-size:14px;line-height:1.2}
-            .log-card-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:10px;color:rgba(245,241,232,.62)}
-            .log-status-chip{display:inline-flex;align-items:center;justify-content:center;min-width:62px;min-height:22px;padding:0 8px;border:1px solid rgba(255,255,255,0.12);font-size:10px;text-transform:uppercase;letter-spacing:.08em;background:#151515}
-            .log-status-chip[data-status="active"]{border-color:rgba(255,223,168,.4);color:#ffe3a8}
-            .log-status-chip[data-status="success"]{border-color:rgba(154,255,205,.36);color:#9affcd}
-            .log-status-chip[data-status="warning"]{border-color:rgba(255,198,128,.42);color:#ffc680}
-            .log-status-chip[data-status="error"]{border-color:rgba(255,145,145,.42);color:#ff9191}
-            .log-progress{height:6px;background:#181818;border-bottom:1px solid rgba(255,255,255,0.08)}
-            .log-progress-fill{height:100%;background:#f5f1e8;width:0%}
-            .log-progress.is-hidden{visibility:hidden}
-            .log-card-actions{display:flex;gap:6px}
-            .log-card-actions button{min-height:24px;padding:0 8px;border:1px solid rgba(255,255,255,0.14);background:#161616;color:#f5f1e8;border-radius:0;cursor:pointer;font-size:10px}
-            .log-card-actions button:hover{background:#1c1c1c}
-            .log-lines{min-height:0;overflow:auto;padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px}
-            .log-line{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;font-size:11px;line-height:1.35}
-            .log-line-time{color:rgba(245,241,232,.46);white-space:nowrap}
-            .log-line-text{min-width:0;color:#f5f1e8;word-break:break-word}
+            .log-card-title strong{font-size:14px;line-height:1.2;font-weight:700}
+            .log-card-meta{display:flex;flex-wrap:wrap;gap:8px;font-size:10px;color:var(--studio-neu-muted);font-weight:600}
+            .log-status-chip{display:inline-flex;align-items:center;justify-content:center;min-width:62px;min-height:24px;padding:0 10px;font-size:10px;text-transform:uppercase;letter-spacing:.08em;background:var(--studio-neu-surface);border:none;border-radius:999px;box-shadow:var(--studio-neu-shadow-inset-soft);font-weight:700}
+            .log-status-chip[data-status="active"]{color:var(--studio-warning)}
+            .log-status-chip[data-status="success"]{color:var(--studio-success)}
+            .log-status-chip[data-status="warning"]{color:var(--studio-warning)}
+            .log-status-chip[data-status="error"]{color:var(--studio-danger)}
+            .log-progress{height:8px;background:var(--studio-neu-surface);box-shadow:var(--studio-neu-shadow-inset-soft);position:relative;border-radius:999px;overflow:hidden}
+            .log-progress-fill{height:100%;background:linear-gradient(180deg,color-mix(in srgb, var(--studio-accent) 68%, white 32%) 0%,var(--studio-accent) 100%);width:0%;border-radius:999px}
+            .log-progress.is-hidden{visibility:hidden;height:0}
+            .log-card-actions{display:flex;gap:8px}
+            .log-lines{min-height:0;overflow:auto;padding:8px 0 0;display:flex;flex-direction:column;gap:10px;background:transparent;box-shadow:none;margin:0;border:none;border-radius:0}
+            .log-line{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start;font-size:11px;line-height:1.4}
+            .log-line-time{color:var(--studio-neu-muted);white-space:nowrap;font-weight:600}
+            .log-line-text{min-width:0;color:var(--studio-neu-text);word-break:break-word}
             .log-line-meta{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
-            .log-line-repeat{display:inline-flex;align-items:center;justify-content:center;min-height:16px;padding:0 6px;border:1px solid rgba(255,255,255,0.12);background:#171717;color:rgba(245,241,232,.72);font-size:10px;letter-spacing:.04em;text-transform:uppercase}
-            .log-line[data-level="warning"] .log-line-text{color:#ffd39a}
-            .log-line[data-level="error"] .log-line-text{color:#ffb0b0}
-            .log-line[data-level="success"] .log-line-text{color:#aff4c6}
-            .log-card-footer{padding:0 12px 12px;font-size:10px;color:rgba(245,241,232,.58)}
+            .log-line-repeat{display:inline-flex;align-items:center;justify-content:center;min-height:18px;padding:0 8px;background:var(--studio-neu-button-fill);color:var(--studio-neu-text);font-size:10px;font-weight:700;border-radius:999px;box-shadow:var(--studio-neu-shadow-button-soft)}
+            .log-line[data-level="warning"] .log-line-text{color:var(--studio-warning);font-weight:700}
+            .log-line[data-level="error"] .log-line-text{color:var(--studio-danger);font-weight:700}
+            .log-line[data-level="success"] .log-line-text{color:var(--studio-success);font-weight:700}
+            .log-card-footer{padding:0 2px 2px;font-size:10px;color:var(--studio-neu-muted);border:none;font-weight:600}
             .logs-flash-layer{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:4}
             .logs-flash{position:absolute;inset:0;pointer-events:none}
             .logs-flash-bloom{position:absolute;left:var(--logs-flash-x);top:var(--logs-flash-y);width:34vmax;height:34vmax;border-radius:999px;transform:translate(-50%,-50%) scale(.12);filter:blur(2px)}
             .logs-flash-tint{position:absolute;inset:0;opacity:0}
-            .logs-flash.is-success .logs-flash-bloom{background:radial-gradient(circle, rgba(82,214,142,.76) 0%, rgba(82,214,142,.44) 26%, rgba(255,226,170,.22) 48%, rgba(82,214,142,0) 74%);animation:logs-flash-bloom 900ms cubic-bezier(.18,.72,.22,.98) forwards}
-            .logs-flash.is-success .logs-flash-tint{background:rgba(72,186,122,.18);animation:logs-flash-tint 820ms ease-out forwards}
-            .logs-flash.is-error .logs-flash-bloom{background:radial-gradient(circle, rgba(245,94,94,.74) 0%, rgba(245,94,94,.42) 26%, rgba(255,188,188,.18) 48%, rgba(245,94,94,0) 74%);animation:logs-flash-bloom 900ms cubic-bezier(.18,.72,.22,.98) forwards}
-            .logs-flash.is-error .logs-flash-tint{background:rgba(186,72,72,.16);animation:logs-flash-tint 820ms ease-out forwards}
+            .logs-flash.is-success .logs-flash-bloom{background:radial-gradient(circle, color-mix(in srgb, var(--studio-success) 40%, transparent) 0%, color-mix(in srgb, var(--studio-success) 20%, transparent) 26%, color-mix(in srgb, var(--studio-neu-surface) 10%, transparent) 48%, transparent 74%);animation:logs-flash-bloom 900ms cubic-bezier(.18,.72,.22,.98) forwards}
+            .logs-flash.is-success .logs-flash-tint{background:color-mix(in srgb, var(--studio-success) 10%, transparent);animation:logs-flash-tint 820ms ease-out forwards}
+            .logs-flash.is-error .logs-flash-bloom{background:radial-gradient(circle, color-mix(in srgb, var(--studio-danger) 40%, transparent) 0%, color-mix(in srgb, var(--studio-danger) 20%, transparent) 26%, color-mix(in srgb, var(--studio-neu-surface) 10%, transparent) 48%, transparent 74%);animation:logs-flash-bloom 900ms cubic-bezier(.18,.72,.22,.98) forwards}
+            .logs-flash.is-error .logs-flash-tint{background:color-mix(in srgb, var(--studio-danger) 10%, transparent);animation:logs-flash-tint 820ms ease-out forwards}
             .log-card.is-success-flash{animation:logs-card-success 1100ms ease-out}
             .log-card.is-error-flash{animation:logs-card-error 1100ms ease-out}
             @keyframes logs-flash-bloom{
@@ -137,28 +136,24 @@ export function createLogsPanel(root, { logger = null, settings = null } = {}) {
                 100%{opacity:0}
             }
             @keyframes logs-card-success{
-                0%{background:#101010;border-color:rgba(255,255,255,.1);box-shadow:0 0 0 rgba(255,220,140,0)}
-                22%{background:rgba(255,236,196,.16);border-color:rgba(255,223,168,.92);box-shadow:0 0 0 1px rgba(255,223,168,.26),0 0 28px rgba(255,223,168,.16)}
-                100%{background:#101010;border-color:rgba(255,255,255,.1);box-shadow:0 0 0 rgba(255,220,140,0)}
+                0%{background:var(--studio-neu-surface);box-shadow:var(--studio-neu-shadow-card);}
+                22%{background:color-mix(in srgb, var(--studio-neu-surface) 78%, var(--studio-success) 22%);box-shadow:var(--studio-neu-shadow-card), inset 0 0 0 2px color-mix(in srgb, var(--studio-success) 32%, transparent),0 0 28px color-mix(in srgb, var(--studio-success) 18%, transparent)}
+                100%{background:var(--studio-neu-surface);box-shadow:var(--studio-neu-shadow-card);}
             }
             @keyframes logs-card-error{
-                0%{background:#101010;border-color:rgba(255,255,255,.1);box-shadow:0 0 0 rgba(255,124,124,0)}
-                22%{background:rgba(255,166,166,.12);border-color:rgba(255,145,145,.9);box-shadow:0 0 0 1px rgba(255,145,145,.18),0 0 26px rgba(255,120,120,.14)}
-                100%{background:#101010;border-color:rgba(255,255,255,.1);box-shadow:0 0 0 rgba(255,124,124,0)}
+                0%{background:var(--studio-neu-surface);box-shadow:var(--studio-neu-shadow-card);}
+                22%{background:color-mix(in srgb, var(--studio-neu-surface) 80%, var(--studio-danger) 20%);box-shadow:var(--studio-neu-shadow-card), inset 0 0 0 2px color-mix(in srgb, var(--studio-danger) 32%, transparent),0 0 26px color-mix(in srgb, var(--studio-danger) 18%, transparent)}
+                100%{background:var(--studio-neu-surface);box-shadow:var(--studio-neu-shadow-card);}
             }
             @media (max-width: 720px){
                 .logs-toolbar{align-items:flex-start;flex-direction:column}
-                .logs-grid{grid-template-columns:1fr;padding:12px}
+                .logs-toolbar-actions{width:100%;justify-content:space-between}
+                .logs-grid{grid-template-columns:1fr;padding:4px}
             }
         </style>
         <section class="logs-shell">
             <div class="logs-flash-layer" data-logs-role="flash-layer"></div>
             <header class="logs-toolbar">
-                <div class="logs-title-block">
-                    <div class="logs-eyebrow">Process Monitor</div>
-                    <h2 class="logs-title">Logs</h2>
-                    <div class="logs-subtitle">Process cards track save, sync, load, render, and workspace activity across the whole site.</div>
-                </div>
                 <div class="logs-toolbar-actions">
                     <span class="logs-count" data-logs-role="count">0 processes</span>
                     <button type="button" data-logs-action="clear-all">Clear All</button>
@@ -216,7 +211,7 @@ export function createLogsPanel(root, { logger = null, settings = null } = {}) {
                 <div class="logs-empty">
                     <div>
                         <strong>No process cards yet.</strong><br>
-                        Open Library, switch workspaces, save, load, import, or render to populate the Logs tab.
+                        Run a task to populate this view.
                     </div>
                 </div>
             `;

@@ -9,9 +9,8 @@ import { createLogsPanel } from './logsPanel.js';
 import { createSettingsPanel } from './settingsPanel.js';
 import { createProgressOverlayController } from './progressOverlay.js';
 import { getCropTransformMetrics } from '../engine/cropTransformShared.js';
+import { applyPersonalizationTheme } from '../settings/personalization.js';
 import {
-    EDITOR_BASE_ASPECT_PRESETS,
-    EDITOR_BASE_RESOLUTION_PRESETS,
     getEditorCanvasLabel,
     getEditorCanvasResolution,
     hasEditorCanvas,
@@ -30,10 +29,11 @@ const GROUP_LABELS = {
     damage: 'Damage'
 };
 const STUDIO_TABS = [
-    { id: 'edit', label: 'Edit' },
-    { id: 'base', label: 'Base' },
-    { id: 'layer', label: 'Layer' },
-    { id: 'pipeline', label: 'Pipeline' },
+    { id: 'edit', label: 'Layers' },
+    { id: 'base', label: 'Canvas' },
+    { id: 'info', label: 'Info' },
+    { id: 'layer', label: 'Selected' },
+    { id: 'pipeline', label: 'Stack' },
     { id: 'scopes', label: 'Scopes' }
 ];
 
@@ -285,6 +285,9 @@ function renderBgPatcherEditor(instance) {
     const patches = params.bgPatcherPatches || [];
     const selectedPatchIndex = Number(params.bgPatcherSelectedPatchIndex ?? -1);
     const selectedPatch = selectedPatchIndex >= 0 ? patches[selectedPatchIndex] : null;
+    const keepSelectedRange = !!params.bgPatcherKeepSelectedRange;
+    const selectionActionLabel = keepSelectedRange ? 'Keep' : 'Remove';
+    const affectedRangeLabel = keepSelectedRange ? 'Kept' : 'Removed';
 
     return `
         <div class="custom-layer-editor">
@@ -292,7 +295,7 @@ function renderBgPatcherEditor(instance) {
             <section class="custom-group">
                 <div class="panel-heading">Selection</div>
                 <div class="custom-picker-row">
-                    <button type="button" class="secondary-button compact-button" data-action="bg-patcher-pick-main" data-instance="${instance.instanceId}">Pick Color To Remove</button>
+                    <button type="button" class="secondary-button compact-button" data-action="bg-patcher-pick-main" data-instance="${instance.instanceId}">Pick Color To ${selectionActionLabel}</button>
                     <span class="grade-swatch large-swatch checker-swatch" style="--swatch:${targetColor}"></span>
                     <code>${String(targetColor).toUpperCase()}</code>
                 </div>
@@ -302,17 +305,18 @@ function renderBgPatcherEditor(instance) {
                 <div class="button-cluster" style="margin: 8px 16px;">
                     <button type="button" class="secondary-button compact-button" data-action="bg-patcher-add-sample" data-instance="${instance.instanceId}">+ Add Pin</button>
                     ${(params.bgPatcherSamples || []).length > 0 ? `
-                        <button type="button" class="secondary-button danger" data-action="bg-patcher-clear-samples" data-instance="${instance.instanceId}">Clear Pins</button>
+                    <button type="button" class="secondary-button danger" data-action="bg-patcher-clear-samples" data-instance="${instance.instanceId}">Clear Pins</button>
                     ` : ''}
                 </div>
-                ${rangeRow(instance, 'bgPatcherOpacity', 'Opacity To Transparent', 0, 100, 1, 0)}
+                ${rangeRow(instance, 'bgPatcherOpacity', 'Removed Area Opacity', 0, 100, 1, 0)}
                 <label class="check-row"><input type="checkbox" ${params.bgPatcherFloodFill ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherFloodFill"><span>Contiguous Mode (Flood Fill)</span></label>
+                <label class="check-row"><input type="checkbox" ${keepSelectedRange ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="bgPatcherKeepSelectedRange"><span>Keep Selected Range Only</span></label>
             </section>
             <section class="custom-group">
                 <div class="panel-heading">Tolerance & Edges</div>
                 ${rangeRow(instance, 'bgPatcherTolerance', 'Color Tolerance', 0, 100, 1, 0)}
                 <div style="margin: 4px 16px 16px; position: relative;">
-                    <span style="display: block; font-size: 10px; color: rgba(255,255,255,0.5); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">Range of colors currently Affected</span>
+                    <span style="display: block; font-size: 10px; color: rgba(255,255,255,0.5); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; text-align: center;">Range of colors currently ${affectedRangeLabel}</span>
                     <canvas class="tolerance-spectrum-canvas" data-instance="${instance.instanceId}" style="width: 100%; height: 12px; border-radius: 4px; cursor: crosshair; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1), 0 0 0 1px rgba(0,0,0,0.5);"></canvas>
                 </div>
                 ${rangeRow(instance, 'bgPatcherSmoothing', 'Edge Smoothing', 0, 100, 1, 0)}
@@ -636,10 +640,9 @@ function renderLayerPanel(state, registry) {
     if (!instance) {
         return `
             <div class="panel-section">
-                <div class="panel-heading">Layer</div>
                 <div class="empty-panel">
                     <h3>No layer selected</h3>
-                    <p>Select an active effect to edit it. In Studio, ordering and visibility stay in Pipeline.</p>
+                    <p>Select a layer to edit it.</p>
                 </div>
             </div>
         `;
@@ -654,11 +657,8 @@ function renderLayerPanel(state, registry) {
         <div class="panel-section">
             <div class="inspector-header compact-header">
                 <div>
-                    <div class="eyebrow">${GROUP_LABELS[layerDef.group] || layerDef.group}</div>
                     <h3>${layerDef.label}${instance.meta.instanceIndex > 1 ? ` ${instance.meta.instanceIndex}` : ''}</h3>
-                    <p>${layerDef.description}</p>
                 </div>
-                <div class="inspector-note">Manage order, duplication, visibility, and removal in Pipeline.</div>
             </div>
         </div>
         <div class="panel-section controls-section">${controls.map((control) => renderControl(instance, control, state, layerDef)).join('')}${renderMask(instance, layerDef)}</div>
@@ -668,36 +668,30 @@ function renderLayerPanel(state, registry) {
 function renderPipeline(state, registry) {
     if (!state.document.layerStack.length) {
         return `
-            <div class="panel-section">
-                <div class="panel-heading">Pipeline</div>
-                <div class="empty-panel"><h3>No layers</h3><p>Add effects from Edit, then use Pipeline to reorder and manage them.</p></div>
-            </div>
+            <div class="empty-panel"><h3>No layers</h3><p>Add effects from Layers to build the stack.</p></div>
         `;
     }
 
     return `
-        <div class="panel-section">
-            <div class="panel-heading">Pipeline</div>
-            <div class="pipeline-list">
-                ${state.document.layerStack.map((instance) => {
+        <div class="pipeline-list">
+            ${state.document.layerStack.map((instance) => {
         const layer = registry.byId[instance.layerId];
         const selected = instance.instanceId === state.document.selection.layerInstanceId;
         return `
-                        <div class="pipeline-item ${selected ? 'is-selected' : ''}" draggable="true" data-instance="${instance.instanceId}">
-                            <button type="button" class="pipeline-main" data-action="select-instance" data-instance="${instance.instanceId}">
-                                <span class="pipeline-name">${layer.label}${instance.meta.instanceIndex > 1 ? ` ${instance.meta.instanceIndex}` : ''}</span>
-                                <span class="pipeline-meta">${GROUP_LABELS[layer.group] || layer.group} | ${instance.enabled ? 'Enabled' : 'Disabled'} | ${instance.visible ? 'Visible' : 'Hidden'}</span>
-                            </button>
-                            <div class="pipeline-actions">
-                                <button type="button" class="mini-button" data-action="toggle-layer-visible" data-instance="${instance.instanceId}">${instance.visible ? 'Hide' : 'Show'}</button>
-                                <button type="button" class="mini-button" data-action="toggle-layer-enabled" data-instance="${instance.instanceId}">${instance.enabled ? 'Disable' : 'Enable'}</button>
-                                ${layer.supportsMultiInstance !== false ? `<button type="button" class="mini-button" data-action="duplicate-layer" data-instance="${instance.instanceId}">Duplicate</button>` : ''}
-                                <button type="button" class="mini-button danger" data-action="remove-layer" data-instance="${instance.instanceId}">Delete</button>
-                            </div>
+                    <div class="pipeline-item ${selected ? 'is-selected' : ''}" draggable="true" data-instance="${instance.instanceId}">
+                        <button type="button" class="pipeline-main" data-action="select-instance" data-instance="${instance.instanceId}">
+                            <span class="pipeline-name">${layer.label}${instance.meta.instanceIndex > 1 ? ` ${instance.meta.instanceIndex}` : ''}</span>
+                            <span class="pipeline-meta">${GROUP_LABELS[layer.group] || layer.group} | ${instance.enabled ? 'Enabled' : 'Disabled'} | ${instance.visible ? 'Visible' : 'Hidden'}</span>
+                        </button>
+                        <div class="pipeline-actions">
+                            <button type="button" class="mini-button" data-action="toggle-layer-visible" data-instance="${instance.instanceId}">${instance.visible ? 'Hide' : 'Show'}</button>
+                            <button type="button" class="mini-button" data-action="toggle-layer-enabled" data-instance="${instance.instanceId}">${instance.enabled ? 'Disable' : 'Enable'}</button>
+                            ${layer.supportsMultiInstance !== false ? `<button type="button" class="mini-button" data-action="duplicate-layer" data-instance="${instance.instanceId}">Duplicate</button>` : ''}
+                            <button type="button" class="mini-button danger" data-action="remove-layer" data-instance="${instance.instanceId}">Delete</button>
                         </div>
+                    </div>
                     `;
     }).join('')}
-            </div>
         </div>
     `;
 }
@@ -708,44 +702,12 @@ function renderBasePanel(state) {
     const hasSourceImage = hasEditorSourceImage(state.document);
 
     return `
-        <div class="panel-section">
-            <div class="inspector-header compact-header">
-                <div>
-                    <div class="eyebrow">Editor Base</div>
-                    <h3>Base Canvas</h3>
-                    <p>Sets the underlying Editor canvas even when no source image is loaded. Effects, text, export, save, and Library capture all use this base.</p>
-                </div>
-                <div class="inspector-note">Source images are fit inside the current base canvas when the resolutions differ.</div>
-            </div>
-        </div>
         <div class="panel-section controls-section">
             <div class="custom-layer-editor">
                 <section class="custom-group">
-                    <div class="panel-heading">Canvas Resolution</div>
-                    <div class="text-grid">
-                        <label class="control-row compact-control">
-                            <div class="control-row-top"><span>Width</span></div>
-                            <input type="number" min="1" max="32768" step="1" value="${base.width}" data-editor-base-dimension="width">
-                        </label>
-                        <label class="control-row compact-control">
-                            <div class="control-row-top"><span>Height</span></div>
-                            <input type="number" min="1" max="32768" step="1" value="${base.height}" data-editor-base-dimension="height">
-                        </label>
-                    </div>
-                    <div class="button-cluster" style="margin-top: 8px;">
-                        <button type="button" class="mini-button" data-action="editor-base-swap-dimensions">Swap W/H</button>
-                    </div>
+                    <div class="panel-heading">Canvas</div>
                     <div class="info-banner is-data"><span>Current Canvas</span><strong>${base.width} x ${base.height}</strong></div>
-                    <div class="button-cluster">
-                        ${EDITOR_BASE_RESOLUTION_PRESETS.map((preset) => `<button type="button" class="mini-button" data-action="editor-base-resolution-preset" data-width="${preset.width}" data-height="${preset.height}">${preset.label}</button>`).join('')}
-                    </div>
-                </section>
-                <section class="custom-group">
-                    <div class="panel-heading">Aspect Presets</div>
-                    <div class="button-cluster">
-                        ${EDITOR_BASE_ASPECT_PRESETS.map((preset) => `<button type="button" class="mini-button" data-action="editor-base-aspect-preset" data-width="${preset.width}" data-height="${preset.height}">${preset.label}</button>`).join('')}
-                    </div>
-                    <div class="info-banner">Aspect preset buttons preserve the larger current side so ratio changes stay predictable instead of fighting the resolution presets.</div>
+                    <div class="info-banner">Use Crop / Rotate / Flip and Resolution Scale layers to change framing or output size.</div>
                 </section>
                 <section class="custom-group">
                     <div class="panel-heading">Background</div>
@@ -785,11 +747,53 @@ function renderBasePanel(state) {
     `;
 }
 
+function renderInfoPanel(state) {
+    const canvas = getEditorCanvasResolution(state.document);
+    const renderResolution = computeResolutionThroughInstance(state);
+    const zoom = Number(state.document.view.zoom || 1);
+    const renderMatchesCanvas = renderResolution.width === canvas.width && renderResolution.height === canvas.height;
+
+    return `
+        <div class="panel-section controls-section">
+            <div class="custom-layer-editor">
+                <section class="custom-group">
+                    <div class="panel-heading">Canvas</div>
+                    <div class="info-banner is-data"><span>Name</span><strong id="previewTitle">${escapeHtml(getEditorCanvasLabel(state.document))}</strong></div>
+                    <div class="info-banner is-data"><span>Base Resolution</span><strong>${canvas.width} x ${canvas.height}</strong></div>
+                    ${renderMatchesCanvas ? '' : `<div class="info-banner is-data"><span>Render Resolution</span><strong>${renderResolution.width} x ${renderResolution.height}</strong></div>`}
+                </section>
+                <section class="custom-group">
+                    <div class="panel-heading">Preview Options</div>
+                    <div class="custom-stack editor-info-toggle-stack">
+                        <label class="tiny-toggle"><input type="checkbox" id="highQualityPreviewToggle" ${state.document.view.highQualityPreview ? 'checked' : ''}><span>High Quality</span></label>
+                        <label class="tiny-toggle"><input type="checkbox" id="hoverCompareToggle" ${state.document.view.hoverCompareEnabled ? 'checked' : ''}><span>Hover Original</span></label>
+                        <label class="tiny-toggle"><input type="checkbox" id="isolateActiveLayerToggle" ${state.document.view.isolateActiveLayerChain ? 'checked' : ''}><span>Render to Active Layer</span></label>
+                    </div>
+                </section>
+                <section class="custom-group">
+                    <div class="panel-heading">Zoom</div>
+                    <div class="control-row control-row-range editor-info-zoom-row">
+                        <div class="control-row-top">
+                            <label>Canvas Zoom</label>
+                            <span class="control-value zoom-readout" id="previewZoomLabel">${zoom.toFixed(2)}x</span>
+                        </div>
+                        <div class="control-stack">
+                            <button type="button" class="mini-button" data-action="zoom-out">-</button>
+                            <input id="previewZoomRange" type="range" min="1" max="${MAX_PREVIEW_ZOOM}" step="0.1" value="${zoom}">
+                            <button type="button" class="mini-button" data-action="zoom-in">+</button>
+                            <button type="button" class="mini-button" data-action="zoom-fit">Fit</button>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    `;
+}
+
 function renderScopes(state, registry) {
     const selected = selectedInstance(state);
     return `
         <div class="panel-section">
-            <div class="panel-heading">Scopes</div>
             <div class="scope-tools">
                 <button type="button" class="mini-button" data-action="compare-open">Compare</button>
                 <button type="button" class="mini-button" data-action="popup-open">Pop-out</button>
@@ -813,24 +817,25 @@ function renderSidebar(state, registry) {
 
     if (currentView === 'pipeline') body = renderPipeline(state, registry);
     else if (currentView === 'base') body = renderBasePanel(state);
+    else if (currentView === 'info') body = renderInfoPanel(state);
     else if (currentView === 'scopes') body = renderScopes(state, registry);
     else if (currentView === 'layer') body = renderLayerPanel(state, registry);
-    else body = `<div class="panel-section"><div class="panel-heading">Effect Library</div>${renderGroups(state, registry)}</div>`;
+    else body = renderGroups(state, registry);
 
     return `
         <div class="workspace-tabs">
             ${tabs.map((tab) => `<button type="button" class="workspace-tab ${currentView === tab.id ? 'is-active' : ''}" data-action="set-studio-view" data-view="${tab.id}">${tab.label}</button>`).join('')}
         </div>
         ${currentView === 'layer' ? `
-        <div class="panel-section layer-preview-container ${state.document.view.layerPreviewsOpen ? 'is-open' : 'is-collapsed'}" style="margin-bottom: 0; flex-shrink: 0; border-bottom: 1px solid var(--border-light); background: var(--bg-100); z-index: 10;">
-            <div class="panel-heading" style="cursor: pointer; display: flex; justify-content: space-between; align-items: center;" data-action="toggle-layer-previews">
+        <div class="layer-preview-container ${state.document.view.layerPreviewsOpen ? 'is-open' : 'is-collapsed'}">
+            <div class="panel-heading layer-preview-toggle" data-action="toggle-layer-previews">
                 <span>Sub-Layer Previews</span>
                 <span>${state.document.view.layerPreviewsOpen ? '▲' : '▼'}</span>
             </div>
             ${state.document.view.layerPreviewsOpen ? `
-                <div class="preview-canvas-wrapper fixed-size" style="padding: 12px; padding-top: 0;">
-                    <div class="preview-label" style="font-size: 11px; margin-bottom: 8px; color: var(--text-muted);"><span id="subLayerLabel">Loading...</span></div>
-                    <canvas id="subLayerCanvas" width="320" height="180" data-action="cycle-layer-preview" style="cursor: pointer; display: block; width: 100%; border-radius: 4px; border: 1px solid var(--border-light); background: #000;"></canvas>
+                <div class="preview-canvas-wrapper fixed-size layer-preview-canvas-wrap">
+                    <div class="preview-label layer-preview-label"><span id="subLayerLabel">Loading...</span></div>
+                    <canvas id="subLayerCanvas" width="320" height="180" data-action="cycle-layer-preview" class="layer-preview-canvas"></canvas>
                 </div>
             ` : ''}
         </div>
@@ -1135,19 +1140,6 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             <div class="workspace-shell" id="workspaceShell">
                 <aside class="workspace-sidebar" id="sidebarPanel"></aside>
                 <section class="workspace-center">
-                    <div class="preview-topbar">
-                        <div class="preview-title-block"><div class="eyebrow">Preview</div><h2 id="previewTitle">Blank Canvas</h2></div>
-                        <div class="preview-toolbar">
-                            <label class="tiny-toggle"><input type="checkbox" id="highQualityPreviewToggle"><span>High Quality</span></label>
-                            <label class="tiny-toggle"><input type="checkbox" id="hoverCompareToggle"><span>Hover Original</span></label>
-                            <label class="tiny-toggle"><input type="checkbox" id="isolateActiveLayerToggle"><span>Render to Active Layer</span></label>
-                            <button type="button" class="mini-button" data-action="zoom-out">-</button>
-                            <input id="previewZoomRange" type="range" min="1" max="${MAX_PREVIEW_ZOOM}" step="0.1" value="1">
-                            <button type="button" class="mini-button" data-action="zoom-in">+</button>
-                            <button type="button" class="mini-button" data-action="zoom-fit">Fit</button>
-                            <span class="zoom-readout" id="previewZoomLabel">1.0x</span>
-                        </div>
-                    </div>
                     <div class="preview-shell" id="previewShell">
                         <div class="preview-empty" id="previewEmpty"><strong>No canvas available</strong><span>Set a Base canvas or load a project to start editing.</span></div>
                         <div class="preview-stage" id="previewStage">
@@ -1219,6 +1211,8 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         previewZoomRange: root.querySelector('#previewZoomRange'),
         previewZoomLabel: root.querySelector('#previewZoomLabel'),
         highQualityPreviewToggle: root.querySelector('#highQualityPreviewToggle'),
+        hoverCompareToggle: root.querySelector('#hoverCompareToggle'),
+        isolateActiveLayerToggle: root.querySelector('#isolateActiveLayerToggle'),
         imageInput: root.querySelector('#imageInput'),
         stateInput: root.querySelector('#stateInput'),
         paletteImageInput: root.querySelector('#paletteImageInput'),
@@ -1327,6 +1321,24 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         return actions.getState?.() || latestState;
     }
 
+    function syncEditorRangeVisual(rangeInput) {
+        if (!(rangeInput instanceof HTMLInputElement) || rangeInput.type !== 'range') return;
+        const min = Number.parseFloat(rangeInput.min || '0');
+        const max = Number.parseFloat(rangeInput.max || '100');
+        const value = Number.parseFloat(rangeInput.value || String(min));
+        const safeMin = Number.isFinite(min) ? min : 0;
+        const safeMax = Number.isFinite(max) ? max : 100;
+        const safeValue = Number.isFinite(value) ? value : safeMin;
+        const span = safeMax - safeMin;
+        const ratio = span > 0 ? (safeValue - safeMin) / span : 0;
+        const percent = Math.max(0, Math.min(100, ratio * 100));
+        rangeInput.style.setProperty('--editor-range-progress', `${percent}%`);
+    }
+
+    function syncAllEditorRangeVisuals(scope = root) {
+        scope.querySelectorAll('input[type="range"]').forEach((rangeInput) => syncEditorRangeVisual(rangeInput));
+    }
+
     function setAppDialogError(message = '') {
         if (!refs.appDialogError) return;
         const text = String(message || '').trim();
@@ -1356,6 +1368,15 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
 
     function setAppDialogModalState(isOpen) {
         refs.appShell?.classList.toggle('is-app-dialog-open', !!isOpen);
+    }
+
+    function refreshEditorPreviewInfoRefs() {
+        refs.previewTitle = root.querySelector('#previewTitle');
+        refs.previewZoomRange = root.querySelector('#previewZoomRange');
+        refs.previewZoomLabel = root.querySelector('#previewZoomLabel');
+        refs.highQualityPreviewToggle = root.querySelector('#highQualityPreviewToggle');
+        refs.hoverCompareToggle = root.querySelector('#hoverCompareToggle');
+        refs.isolateActiveLayerToggle = root.querySelector('#isolateActiveLayerToggle');
     }
 
     function hideAppDialog(restoreFocus = false) {
@@ -2090,20 +2111,49 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         viewportState.pointer = getPointerRatio(clientX, clientY, refs.previewStage.getBoundingClientRect(), viewportState.pointer);
     }
 
+    function fitPreviewStageToResolution(resolution) {
+        if (!resolution?.width || !resolution?.height) {
+            refs.previewStage.style.setProperty('--preview-stage-width', '100%');
+            refs.previewStage.style.setProperty('--preview-stage-height', '100%');
+            refs.previewStage.style.aspectRatio = '';
+            return {
+                width: Math.max(1, refs.previewStage.clientWidth),
+                height: Math.max(1, refs.previewStage.clientHeight)
+            };
+        }
+        const fit = computePreviewTransform(
+            Math.max(1, refs.previewShell.clientWidth),
+            Math.max(1, refs.previewShell.clientHeight),
+            resolution.width,
+            resolution.height,
+            1,
+            { x: 0.5, y: 0.5 }
+        );
+        refs.previewStage.style.setProperty('--preview-stage-width', `${fit.scaledWidth}px`);
+        refs.previewStage.style.setProperty('--preview-stage-height', `${fit.scaledHeight}px`);
+        refs.previewStage.style.aspectRatio = `${resolution.width} / ${resolution.height}`;
+        return {
+            width: Math.max(1, fit.scaledWidth),
+            height: Math.max(1, fit.scaledHeight)
+        };
+    }
+
     function applyPreviewScale() {
         if (!latestState) return;
         const hasSource = hasEditorCanvas(latestState.document);
         const resolution = getActivePreviewResolution(latestState);
         if (!hasSource || !resolution?.width || !resolution?.height) {
+            fitPreviewStageToResolution(null);
             refs.previewScaleWrap.style.transform = 'translate(0px, 0px) scale(1)';
             refs.previewScaleWrap.style.width = '0px';
             refs.previewScaleWrap.style.height = '0px';
-            refs.previewZoomLabel.textContent = `${Number(latestState.document.view.zoom || 1).toFixed(2)}x`;
+            if (refs.previewZoomLabel) refs.previewZoomLabel.textContent = `${Number(latestState.document.view.zoom || 1).toFixed(2)}x`;
             return;
         }
+        const previewStageSize = fitPreviewStageToResolution(resolution);
         const transform = computePreviewTransform(
-            Math.max(1, refs.previewStage.clientWidth),
-            Math.max(1, refs.previewStage.clientHeight),
+            previewStageSize.width,
+            previewStageSize.height,
             resolution.width,
             resolution.height,
             latestState.document.view.zoom,
@@ -2112,7 +2162,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         refs.previewScaleWrap.style.width = `${resolution.width}px`;
         refs.previewScaleWrap.style.height = `${resolution.height}px`;
         refs.previewScaleWrap.style.transform = `translate(${transform.offsetX}px, ${transform.offsetY}px) scale(${transform.visualScale})`;
-        refs.previewZoomLabel.textContent = `${Number(latestState.document.view.zoom || 1).toFixed(2)}x`;
+        if (refs.previewZoomLabel) refs.previewZoomLabel.textContent = `${Number(latestState.document.view.zoom || 1).toFixed(2)}x`;
     }
 
     const previewResizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => applyPreviewScale()) : null;
@@ -2120,6 +2170,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     previewResizeObserver?.observe(refs.previewStage);
     previewResizeObserver?.observe(refs.canvas);
     previewResizeObserver?.observe(refs.sourcePreviewCanvas);
+    previewResizeObserver?.observe(refs.hoverPreviewCanvas);
     window.addEventListener('resize', applyPreviewScale);
 
     const queueWheelUpdate = (instanceId, key, value) => {
@@ -2549,6 +2600,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     });
     root.addEventListener('input', (event) => {
         const target = event.target;
+        if (target instanceof HTMLInputElement && target.type === 'range') {
+            syncEditorRangeVisual(target);
+        }
         if (target.dataset.controlInstance && target.dataset.controlKey) {
             const isRangeOrNumber = target.type === 'range' || target.type === 'number';
             const isTextEntry = target.type === 'text' || String(target.tagName || '').toLowerCase() === 'textarea';
@@ -2593,7 +2647,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
                 { render: true, skipViewRender: true }
             );
         } else if (target === refs.previewZoomRange) {
-            refs.previewZoomLabel.textContent = `${Number(target.value).toFixed(2)}x`;
+            if (refs.previewZoomLabel) refs.previewZoomLabel.textContent = `${Number(target.value).toFixed(2)}x`;
         }
     });
     root.addEventListener('change', (event) => {
@@ -2666,6 +2720,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     function render(state) {
         latestState = state;
         const activeSection = state.ui.activeSection;
+        refs.appShell.dataset.activeSection = activeSection || 'editor';
         if (state.settings?.logs?.completionFlashEffects === false && logsTabPulse) {
             if (logsTabPulseTimer) clearTimeout(logsTabPulseTimer);
             logsTabPulse = '';
@@ -2683,6 +2738,10 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         }
 
         document.documentElement.dataset.theme = state.document.view.theme === 'dark' ? 'dark' : 'light';
+        applyPersonalizationTheme(state.settings, {
+            root: document.documentElement,
+            appShell: refs.appShell
+        });
         renderSectionTabsSlot(state);
         applyLogsTabPulse();
         logsPanel.setSettings?.(state.settings?.logs || null);
@@ -2764,6 +2823,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             const sidebarScrollTop = sidebarScrollElement ? sidebarScrollElement.scrollTop : refs.sidebarPanel.scrollTop;
 
             refs.sidebarPanel.innerHTML = renderSidebar(state, registry);
+            refreshEditorPreviewInfoRefs();
 
             const newSidebarScroll = refs.sidebarPanel.querySelector('.sidebar-scroll');
             if (newSidebarScroll) {
@@ -2773,15 +2833,14 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             }
 
             drawToleranceSpectrums(state);
-            refs.previewTitle.textContent = getEditorCanvasLabel(state.document);
-            refs.previewZoomRange.value = String(state.document.view.zoom);
+            if (refs.previewTitle) refs.previewTitle.textContent = getEditorCanvasLabel(state.document);
+            if (refs.previewZoomRange) refs.previewZoomRange.value = String(state.document.view.zoom);
+            syncAllEditorRangeVisuals();
             refs.previewScaleWrap.style.display = hasSource ? 'block' : 'none';
             refs.previewStage.style.display = hasSource ? 'flex' : 'none';
-            refs.highQualityPreviewToggle.checked = !!state.document.view.highQualityPreview;
-            const hoverCompareToggle = root.querySelector('#hoverCompareToggle');
-            if (hoverCompareToggle) hoverCompareToggle.checked = !!state.document.view.hoverCompareEnabled;
-            const isolateActiveLayerToggle = root.querySelector('#isolateActiveLayerToggle');
-            if (isolateActiveLayerToggle) isolateActiveLayerToggle.checked = !!state.document.view.isolateActiveLayerChain;
+            if (refs.highQualityPreviewToggle) refs.highQualityPreviewToggle.checked = !!state.document.view.highQualityPreview;
+            if (refs.hoverCompareToggle) refs.hoverCompareToggle.checked = !!state.document.view.hoverCompareEnabled;
+            if (refs.isolateActiveLayerToggle) refs.isolateActiveLayerToggle.checked = !!state.document.view.isolateActiveLayerChain;
             const current = selectedInstance(state);
             const suppressHoverCompare = current?.layerId === 'bgPatcher'
                 && (

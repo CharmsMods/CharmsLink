@@ -996,6 +996,7 @@ function renderBgPatcher(gl, runtime, inputTex, outputFbo, instance, options = {
     gl.uniform1f(gl.getUniformLocation(program, 'u_defringe'), clamp(Number(params.bgPatcherDefringe || 0), 0, 100) / 100);
     gl.uniform1f(gl.getUniformLocation(program, 'u_edgeShift'), clamp(Number(params.bgPatcherEdgeShift || 0), 0, 10));
     gl.uniform1i(gl.getUniformLocation(program, 'u_showMask'), params.bgPatcherShowMask ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_keepSelectedRange'), params.bgPatcherKeepSelectedRange ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(program, 'u_aaEnabled'), params.bgPatcherAaEnabled ? 1 : 0);
     gl.uniform1f(gl.getUniformLocation(program, 'u_antialias'), clamp(Number(params.bgPatcherAaRadius || 0), 0, 10));
     gl.uniform1i(gl.getUniformLocation(program, 'u_numProtected'), protectedColors.length);

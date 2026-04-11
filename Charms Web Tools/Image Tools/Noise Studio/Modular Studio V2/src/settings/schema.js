@@ -1,4 +1,5 @@
 import { createDefaultAppSettings, SETTINGS_SCHEMA_VERSION } from './defaults.js';
+import { normalizePersonalizationSettings } from './personalization.js';
 
 function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -84,7 +85,7 @@ function normalizeCompositeDiagnostics(source = {}, defaults) {
 
 export function normalizeSettingsCategory(category) {
     const normalized = String(category || '').trim().toLowerCase();
-    if (normalized === 'general' || normalized === 'library' || normalized === 'editor' || normalized === 'composite' || normalized === 'stitch' || normalized === '3d' || normalized === 'logs') {
+    if (normalized === 'general' || normalized === 'library' || normalized === 'editor' || normalized === 'composite' || normalized === 'stitch' || normalized === '3d' || normalized === 'logs' || normalized === 'personalization') {
         return normalized;
     }
     return 'general';
@@ -107,6 +108,7 @@ export function normalizeAppSettings(candidate = {}, options = {}) {
     const threeDPreferences = threeD.preferences && typeof threeD.preferences === 'object' ? threeD.preferences : {};
     const threeDDefaults = threeD.defaults && typeof threeD.defaults === 'object' ? threeD.defaults : {};
     const logs = candidate.logs && typeof candidate.logs === 'object' ? candidate.logs : {};
+    const personalization = candidate.personalization && typeof candidate.personalization === 'object' ? candidate.personalization : {};
     const diagnosticsSource = options.diagnostics || candidate.diagnostics || {};
 
     return {
@@ -233,6 +235,7 @@ export function normalizeAppSettings(candidate = {}, options = {}) {
                 ? logs.compactMessages
                 : defaults.logs.compactMessages
         },
+        personalization: normalizePersonalizationSettings(personalization),
         diagnostics: normalizeDiagnostics(diagnosticsSource, defaults.diagnostics)
     };
 }
@@ -251,6 +254,7 @@ export function stripDiagnosticsFromSettings(settings = {}) {
             defaults: normalized.stitch.defaults
         },
         threeD: normalized.threeD,
-        logs: normalized.logs
+        logs: normalized.logs,
+        personalization: normalized.personalization
     };
 }

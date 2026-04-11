@@ -1,0 +1,547 @@
+# Neumorphism UI Implementation Spec
+
+This document is not a concept pitch. It is the exact recreation spec for the current shipped neumorphic Editor styling in Modular Studio V2.
+
+If this style ever needs to be rebuilt from scratch, this file should be treated as the source-of-truth design brief alongside the live CSS in `style.css`.
+
+## 1. Scope
+
+The neumorphic skin is intentionally scoped to the Editor tab only.
+
+It is enabled by setting `data-active-section` on the app shell:
+
+```js
+refs.appShell.dataset.activeSection = activeSection || 'editor';
+```
+
+All Editor neumorphism selectors are rooted under:
+
+```css
+.app-shell[data-active-section='editor']
+```
+
+Do not apply this treatment globally.
+Do not move the token set to `:root`.
+Do not let it bleed into Composite, Library, Stitch, 3D, Settings, or Logs.
+
+The 3D canvas overlay explicitly opts out of this style to prevent halo leakage. The 3D top overlay buttons and chips must keep:
+
+```css
+box-shadow: none !important;
+filter: none !important;
+text-shadow: none;
+```
+
+That is required to preserve the clean top-of-canvas overlay look.
+
+## 2. Style Intent
+
+The final look is not heavy old-school neumorphism and not perfectly flat industrial minimalism either.
+
+It should read as:
+
+- Soft, matte, off-white molded surfaces.
+- Very gentle convex lift on buttons and pills.
+- Larger cards with more depth than buttons.
+- Pressed states that clearly tuck inward.
+- High readability despite low-contrast surfaces.
+- Calm and clean, not glossy, not metallic, not purple, not highly saturated.
+
+The single best reference for the intended button feel is the Editor preview zoom controls: the circular `+` and `-` buttons, plus the adjacent `Fit` and zoom readout cluster. Those controls became the calibration target for the rest of the Editor pass.
+
+If a future restyle changes the general Editor buttons, compare them against that zoom-control feel:
+
+- outer shadow should be present but restrained
+- button gradient should be subtle
+- the surface should feel lifted, not swollen
+- pressed states should read inward immediately
+- large buttons should not look flat
+
+## 3. Exact Light Theme Tokens
+
+These values must be recreated exactly:
+
+```css
+.app-shell[data-active-section='editor'] {
+    --editor-neu-page:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.54) 24%, rgba(255, 255, 255, 0) 44%),
+        linear-gradient(180deg, #e8e8e8 0%, #dcdcdc 100%);
+    --editor-neu-surface: #e0e0e0;
+    --editor-neu-surface-soft: #ececec;
+    --editor-neu-text: #2f2f2f;
+    --editor-neu-muted: #666666;
+    --editor-neu-button-fill: linear-gradient(145deg, #ebebeb 0%, #dcdcdc 100%);
+    --editor-neu-button-fill-hover: linear-gradient(145deg, #efefef 0%, #e1e1e1 100%);
+    --editor-neu-button-fill-active: linear-gradient(145deg, #d8d8d8 0%, #e8e8e8 100%);
+    --editor-neu-shadow-card: 12px 12px 28px #c8c8c8, -12px -12px 28px #ffffff;
+    --editor-neu-shadow-button: 5px 5px 12px #cacaca, -5px -5px 12px #fbfbfb;
+    --editor-neu-shadow-button-soft: 3px 3px 8px #cdcdcd, -3px -3px 8px #fbfbfb;
+    --editor-neu-shadow-button-pressed: inset 3px 3px 7px #cfcfcf, inset -3px -3px 7px #f8f8f8;
+    --editor-neu-shadow-inset: inset 7px 7px 14px #c7c7c7, inset -7px -7px 14px #fbfbfb;
+    --editor-neu-shadow-inset-soft: inset 3px 3px 7px #cecece, inset -3px -3px 7px #f8f8f8;
+}
+```
+
+## 4. Exact Dark Theme Tokens
+
+These values must be recreated exactly:
+
+```css
+:root[data-theme='dark'] .app-shell[data-active-section='editor'] {
+    --editor-neu-page:
+        radial-gradient(circle at top left, rgba(68, 68, 68, 0.9) 0%, rgba(52, 52, 52, 0.45) 24%, rgba(43, 43, 43, 0) 44%),
+        linear-gradient(180deg, #313131 0%, #262626 100%);
+    --editor-neu-surface: #2b2b2b;
+    --editor-neu-surface-soft: #333333;
+    --editor-neu-text: #f3f3f3;
+    --editor-neu-muted: #c3c3c3;
+    --editor-neu-button-fill: linear-gradient(145deg, #343434 0%, #292929 100%);
+    --editor-neu-button-fill-hover: linear-gradient(145deg, #393939 0%, #2d2d2d 100%);
+    --editor-neu-button-fill-active: linear-gradient(145deg, #282828 0%, #353535 100%);
+    --editor-neu-shadow-card: 12px 12px 28px #1b1b1b, -12px -12px 28px #3b3b3b;
+    --editor-neu-shadow-button: 5px 5px 12px #1f1f1f, -5px -5px 12px #3a3a3a;
+    --editor-neu-shadow-button-soft: 3px 3px 8px #1f1f1f, -3px -3px 8px #3b3b3b;
+    --editor-neu-shadow-button-pressed: inset 3px 3px 7px #202020, inset -3px -3px 7px #383838;
+    --editor-neu-shadow-inset: inset 7px 7px 14px #1d1d1d, inset -7px -7px 14px #393939;
+    --editor-neu-shadow-inset-soft: inset 3px 3px 7px #202020, inset -3px -3px 7px #373737;
+}
+```
+
+## 5. Geometry and Layout Rules
+
+These shape and spacing decisions matter to the look and should not be casually changed.
+
+- Global Editor workspace gap: `16px`
+- Editor center column gap: `16px`
+- Sidebar internal padding: `4px`
+- Main raised card radius: `22px`
+- Workspace tabs tray radius: `18px`
+- Inset row/toggle/control radius: `16px`
+- Preview stage radius: `20px`
+- Text and search inputs radius: `14px`
+- Raised buttons and tabs radius: `999px`
+- Main toolbar / section switcher / preview topbar / preview shell padding: `14px 16px`
+- Workspace tabs tray padding: `8px`
+- Workspace tabs tray gap: `8px`
+- Preview topbar internal gap: `14px`
+- Mini button minimum size: `30px x 30px`
+- Mini button horizontal padding: `11px`
+- Toggle pill padding: `5px 10px`
+
+Do not convert the raised button family back to small corner radii.
+The pill silhouette is part of why the current Editor feels polished.
+
+## 6. Page and Structural Surfaces
+
+The app shell itself carries the page gradient:
+
+- bright radial bloom from the top-left
+- vertical soft grey gradient beneath it
+
+The following structural wrappers must remain visually transparent so the neumorphic cards sit on the page rather than stacking boxed layers on boxed layers:
+
+- `.workspace-shell`
+- `.workspace-sidebar`
+- `.workspace-center`
+- `.sidebar-scroll`
+
+These wrappers must keep:
+
+- `background: transparent`
+- `border: none`
+- `box-shadow: none`
+
+## 7. Raised Card Family
+
+These elements use the main surface color, the `22px` radius, and `--editor-neu-shadow-card`:
+
+- `.section-switcher`
+- `.toolbar`
+- `.preview-topbar`
+- `.preview-shell`
+- `.panel-section`
+- `.scope-card`
+- `.empty-panel`
+- `.effect-chip`
+- `.pipeline-item`
+- `.custom-group`
+- `.custom-list-item`
+- `.grade-wheel-card`
+- `.preview-loupe`
+- `.layer-preview-container`
+
+Spec:
+
+- `background: var(--editor-neu-surface)`
+- `border: none`
+- `border-radius: 22px`
+- `box-shadow: var(--editor-neu-shadow-card)`
+- `color: var(--editor-neu-text)`
+
+Cards should be more lifted than buttons.
+Buttons should never have the same shadow weight as cards.
+
+## 8. Inset Container Family
+
+These elements are intentionally recessed:
+
+- `.workspace-tabs`
+- `.control-row`
+- `.check-row`
+- `.info-banner`
+- `.palette-editor`
+- `.mask-editor`
+- `.custom-list-button`
+- `.toolbar-toggle`
+- `.tiny-toggle`
+
+The tab tray specifically uses:
+
+```css
+display: grid;
+grid-template-columns: repeat(4, minmax(0, 1fr));
+gap: 8px;
+padding: 8px;
+border-radius: 18px;
+background: var(--editor-neu-surface);
+box-shadow: var(--editor-neu-shadow-inset-soft);
+```
+
+The general inset family uses:
+
+- `background: var(--editor-neu-surface)`
+- `border: none`
+- `border-radius: 16px`
+- `box-shadow: var(--editor-neu-shadow-inset-soft)`
+- `color: var(--editor-neu-text)`
+
+## 9. Raised Button Family
+
+This is the most important interaction family in the entire style.
+
+These classes must all share the same raised treatment:
+
+- `.toolbar-button`
+- `.mode-button`
+- `.primary-button`
+- `.secondary-button`
+- `.mini-button`
+- `.icon-button`
+- `.workspace-tab`
+- `.pipeline-actions button`
+- `.compact-button`
+- `.chip-add`
+- `.section-header-status span`
+
+Base spec:
+
+```css
+border: none;
+border-radius: 999px;
+background: var(--editor-neu-button-fill);
+color: var(--editor-neu-text);
+box-shadow: var(--editor-neu-shadow-button);
+transition: transform 0.18s ease, box-shadow 0.18s ease, color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+```
+
+Typography spec:
+
+- `font-weight: 600`
+- `letter-spacing: 0.01em`
+
+This family should feel gently convex.
+It should not be flat.
+It should not be puffy.
+It should not have aggressive edge halos.
+
+## 10. Hover State
+
+Raised buttons on hover must move toward the lighter hover gradient and a slightly tighter shadow:
+
+```css
+background: var(--editor-neu-button-fill-hover);
+box-shadow: var(--editor-neu-shadow-button-soft);
+transform: translateY(-1px);
+```
+
+This hover state should feel cleaner and lighter, not dramatically taller.
+
+## 11. Pressed / Active / Selected State
+
+Pressed, active, or selected raised controls must sink inward:
+
+```css
+background: var(--editor-neu-button-fill-active);
+color: var(--editor-neu-text);
+box-shadow: var(--editor-neu-shadow-button-pressed);
+transform: translateY(0);
+```
+
+This applies to:
+
+- `:active:not(:disabled)` states
+- `.mode-button.is-active`
+- `.workspace-tab.is-active`
+- `.toolbar-button.is-active`
+- `.mini-button.is-active`
+- `.custom-list-button.is-selected`
+
+If a control is conceptually selected, it should feel pressed, not merely recolored.
+
+## 12. Disabled State
+
+Disabled raised buttons must lose their lift:
+
+```css
+opacity: 0.52;
+box-shadow: none;
+```
+
+Do not create a separate disabled gradient.
+The current design intentionally reduces depth and visibility together.
+
+## 13. Primary Button Accent
+
+Primary buttons stay inside the shared raised system but tint their label only:
+
+- light mode text color: `#3158d4`
+- dark mode text color: `#b3c3ff`
+
+Do not fill primary buttons with blue.
+The current style uses neutral surfaces with a restrained text accent only.
+
+## 14. Toggle Pills
+
+The preview toggles and small checkbox pills are not plain inset trays anymore. They intentionally inherit the button feel.
+
+For:
+
+- `.toolbar-toggle`
+- `.tiny-toggle`
+
+use:
+
+```css
+border-radius: 999px;
+background: var(--editor-neu-button-fill);
+box-shadow: var(--editor-neu-shadow-button-soft);
+padding: 5px 10px;
+```
+
+Hover:
+
+```css
+background: var(--editor-neu-button-fill-hover);
+```
+
+Checked state:
+
+```css
+.toolbar-toggle:has(input:checked),
+.tiny-toggle:has(input:checked) {
+    background: var(--editor-neu-button-fill-active);
+    box-shadow: var(--editor-neu-shadow-button-pressed);
+}
+```
+
+Checkbox accent:
+
+```css
+accent-color: #4f72dd;
+```
+
+This is important. The current implementation does not make toggles look like standard browser checkbox rows. It makes them look like small neumorphic control capsules.
+
+## 15. Text, Select, Number, and Color Inputs
+
+Text-like inputs stay inset:
+
+```css
+:where(input[type='text'], input[type='search'], textarea),
+select,
+input[type='number'] {
+    border: none;
+    border-radius: 14px;
+    background: var(--editor-neu-surface);
+    color: var(--editor-neu-text);
+    box-shadow: var(--editor-neu-shadow-inset-soft);
+}
+```
+
+Color inputs are slightly more raised:
+
+```css
+input[type='color'] {
+    border: none;
+    border-radius: 14px;
+    background: var(--editor-neu-surface);
+    box-shadow: var(--editor-neu-shadow-button-soft);
+}
+```
+
+Range sliders keep:
+
+```css
+accent-color: #4f72dd;
+```
+
+## 16. Preview Surfaces
+
+The preview shell itself is a raised card.
+The preview content area is inset.
+
+The following preview surfaces must use:
+
+- `border: none`
+- `border-radius: 20px`
+- `background: var(--editor-neu-surface-soft)`
+- `box-shadow: var(--editor-neu-shadow-inset)`
+
+Targets:
+
+- `.preview-stage`
+- `.preview-empty`
+- `.scope-card canvas`
+- `#compareOriginal`
+- `#compareProcessed`
+- `#subLayerCanvas`
+
+The preview shell also uses:
+
+- `padding: 16px`
+
+Zoom lock adds a blue inset ring on top of the raised shell:
+
+```css
+box-shadow: var(--editor-neu-shadow-card), inset 0 0 0 2px rgba(79, 114, 221, 0.2);
+```
+
+## 17. Checkerboard Exception
+
+The background remover and other transparency-sensitive preview states require a checkerboard override.
+
+When `.preview-shell.checker-active` is set, `.preview-stage` must switch away from the plain neumorphic background and use:
+
+Light checker:
+
+```css
+background:
+    linear-gradient(45deg, rgba(0, 0, 0, 0.06) 25%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.06) 75%),
+    linear-gradient(45deg, rgba(0, 0, 0, 0.06) 25%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.06) 75%);
+background-color: #f7f7f7;
+background-size: 8px 8px;
+background-position: 0 0, 4px 4px;
+```
+
+Dark checker:
+
+```css
+background:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.08) 75%),
+    linear-gradient(45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.08) 75%);
+background-color: #0f0f0f;
+background-size: 8px 8px;
+background-position: 0 0, 4px 4px;
+```
+
+Do not remove this exception. Without it, transparency previews become visually wrong.
+
+## 18. Status Chips and Feedback Colors
+
+`.section-header-status` itself is transparent and shadowless.
+
+Its child `span` is the visible pill and must use:
+
+- `background: var(--editor-neu-surface)`
+- `box-shadow: var(--editor-neu-shadow-inset-soft)`
+- `color: var(--editor-neu-muted)`
+
+State colors:
+
+Light mode:
+
+- success: `#296b46`
+- warning: `#8d6517`
+- error: `#9f3939`
+
+Dark mode:
+
+- success: `#9fddb4`
+- warning: `#f3d08d`
+- error: `#ffb4b4`
+
+These are text-color changes only.
+The chip structure itself should remain soft and neutral.
+
+## 19. Special Small Elements
+
+These elements use the softer raised shadow, not the full button shadow:
+
+- `.grade-wheel-handle`
+- `.grade-swatch`
+- `.ca-pin-overlay`
+
+Spec:
+
+```css
+border: none;
+box-shadow: var(--editor-neu-shadow-button-soft);
+```
+
+The grade wheel surface itself uses:
+
+- `border: none`
+- `border-radius: 20px`
+- `box-shadow: var(--editor-neu-shadow-inset-soft)`
+
+## 20. Text Hierarchy
+
+Use these text rules to keep the soft UI legible:
+
+- primary text: `var(--editor-neu-text)`
+- muted labels and metadata: `var(--editor-neu-muted)`
+- Editor preview title: `font-size: 20px`, `font-weight: 700`
+- button family: `font-weight: 600`, `letter-spacing: 0.01em`
+
+Never let muted grey text appear on an already muted raised button.
+The current look works because the surfaces are low-contrast but the text stays readable.
+
+## 21. What This Style Is Not
+
+To recreate the current result correctly, avoid these wrong interpretations:
+
+- Do not make surfaces perfectly flat with no gradients.
+- Do not use heavy deep-cavity shadows on standard buttons.
+- Do not use giant blurred glows around controls.
+- Do not make the buttons sharp-cornered.
+- Do not make the cards and buttons share the same shadow strength.
+- Do not recolor the whole UI blue.
+- Do not apply the Editor shadow system to the 3D top overlay controls.
+- Do not remove the transparency checker override.
+
+## 22. Recreation Checklist
+
+If rebuilding this style from zero, the order should be:
+
+1. Add `data-active-section` to the app shell and scope all Editor neumorphism rules under `.app-shell[data-active-section='editor']`.
+2. Install the exact light and dark token sets from sections 3 and 4.
+3. Clear structural wrapper backgrounds and shadows so the page gradient can breathe.
+4. Apply the raised card family to the main Editor containers.
+5. Apply the inset tray family to control rows and tab trays.
+6. Apply the raised button family using the exact pill radius, gradients, and shadow tokens.
+7. Add the hover, pressed, selected, and disabled states exactly as specified.
+8. Convert preview toggle pills to the button-family treatment with checked-state depression.
+9. Restore the inset preview stage styling and the checkerboard exception.
+10. Reapply the 3D overlay anti-halo rules so the Editor skin does not leak into the 3D top-of-canvas controls.
+
+## 23. Source of Truth Files
+
+If this document and the code ever disagree, compare against these files first:
+
+- `style.css`
+- `src/ui/workspaces.js`
+- `src/3d/ui.js`
+
+The goal is simple:
+
+The Editor should look like a soft sculpted workstation where the preview zoom controls set the standard for how all raised controls feel.

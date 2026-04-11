@@ -3,10 +3,10 @@ import { STITCH_ANALYSIS_GROUPS, STITCH_SELECTION_ACTION_HELP, STITCH_SELECTION_
 import { createProgressOverlayController } from '../ui/progressOverlay.js';
 
 const PANEL_TABS = [
-    { id: 'inputs', label: 'Inputs', description: 'Load and manage source images.' },
-    { id: 'analysis', label: 'Analysis', description: 'Run the matcher and tune settings.' },
-    { id: 'selection', label: 'Selection', description: 'Adjust the selected image.' },
-    { id: 'candidates', label: 'Results', description: 'Choose candidates and export.' }
+    { id: 'inputs', label: 'Inputs' },
+    { id: 'analysis', label: 'Analysis' },
+    { id: 'selection', label: 'Selection' },
+    { id: 'candidates', label: 'Results' }
 ];
 
 const OPEN_ANALYSIS_GROUPS = new Set(['detection', 'warp']);
@@ -131,48 +131,358 @@ function getStageStatus(document) {
 export function createStitchWorkspace(root, { actions, stitchEngine, logger = null }) {
     root.innerHTML = `
         <style data-stitch-compact-style>
-            .stitch-shell{--stitch-border:#b8b2a3;--stitch-border-soft:rgba(184,178,163,.28);--stitch-accent:rgba(184,178,163,.14);--stitch-muted:#b8b2a3;position:relative;width:100%;height:100%;min-width:0;min-height:0;display:grid;grid-template-columns:minmax(232px,292px) minmax(0,1fr);gap:8px;padding:8px;background:#000;color:#fff;font-size:11px;line-height:1.24;overflow:hidden}
+            .stitch-shell{
+                position:relative;
+                width:100%;
+                height:100%;
+                min-width:0;
+                min-height:0;
+                display:grid;
+                grid-template-columns:minmax(232px,292px) minmax(0,1fr);
+                gap:16px;
+                padding:4px;
+                background:transparent;
+                color:var(--studio-neu-text);
+                font-size:11px;
+                line-height:1.24;
+                overflow:hidden
+            }
             .stitch-shell button,.stitch-shell input,.stitch-shell select,.stitch-gallery-overlay button{font-size:11px!important}
-            .stitch-shell .mini-button,.stitch-shell .toolbar-button,.stitch-shell input[type="number"],.stitch-shell select,.stitch-gallery-overlay .toolbar-button{min-height:22px;padding:2px 7px!important;border-radius:4px;border:1px solid var(--stitch-border);background:#000;color:#fff;box-shadow:none}
-            .stitch-shell .mini-button.is-danger{border-color:rgba(184,178,163,.72)}
-            .stitch-dock,.stitch-stage-card,.stitch-gallery-panel{min-width:0;min-height:0;border:1px solid var(--stitch-border);background:#000;overflow:hidden}
-            .stitch-dock{display:flex;flex-direction:column}
-            .stitch-dock-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:6px;border-bottom:1px solid var(--stitch-border);background:#050505}
-            .stitch-dock-tab{min-height:20px;padding:0 7px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--stitch-muted);cursor:pointer}
-            .stitch-dock-tab.is-active,.stitch-dock-tab:hover{background:var(--stitch-accent);border-color:var(--stitch-border);color:#fff}
-            .stitch-dock-panels{flex:1;min-height:0}.stitch-dock-panel{display:none;height:100%;min-height:0;flex-direction:column}.stitch-dock-panel.is-active{display:flex}
-            .stitch-dock-panel-head{padding:8px 9px 7px;border-bottom:1px solid var(--stitch-border);background:#050505}.stitch-dock-panel-head span{display:block;margin-top:2px;color:var(--stitch-muted);font-size:10px}
-            .stitch-dock-panel-body{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:8px;display:flex;flex-direction:column;gap:8px}
-            .stitch-stage-card{display:flex;flex-direction:column}
-            .stitch-stage-topbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-bottom:1px solid var(--stitch-border);background:#050505}
-            .stitch-stage-title{min-width:0}.stitch-stage-title .eyebrow{margin:0 0 2px;color:var(--stitch-muted);font-size:10px;letter-spacing:.04em;text-transform:uppercase}.stitch-stage-title h2{margin:0;font-size:12px;line-height:1.2;overflow-wrap:anywhere}
-            .stitch-mini-bar{display:inline-flex;align-items:center;gap:3px;padding:3px;border:1px solid var(--stitch-border-soft);background:rgba(0,0,0,.92)}.stitch-mini-bar .mini-button{min-height:20px;padding:0 6px!important;border-radius:3px}
-            .stitch-stage-wrap{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden;background:#000}.stitch-canvas{display:block;width:100%;height:100%;background:#000}
-            .stitch-stage-overlay{position:absolute;display:flex;gap:4px;z-index:3;pointer-events:none;max-width:min(64%,calc(100% - 12px))}.stitch-overlay-top-right{top:6px;right:6px;flex-wrap:wrap;justify-content:flex-end}.stitch-overlay-bottom-left{left:6px;bottom:6px}
-            .stitch-overlay-chip,.stitch-status-chip{display:inline-flex;align-items:center;gap:4px;min-height:20px;padding:0 6px;border:1px solid var(--stitch-border-soft);background:rgba(0,0,0,.92);color:#fff;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.stitch-overlay-chip.is-muted{color:var(--stitch-muted)}.stitch-status-chip[data-tone="warning"],.stitch-status-chip[data-tone="error"]{border-color:rgba(184,178,163,.72)}
-            .stitch-empty-state{position:absolute;inset:12px;display:none;align-items:center;justify-content:center;flex-direction:column;gap:6px;text-align:center;pointer-events:none;color:var(--stitch-muted);border:1px dashed var(--stitch-border-soft);background:rgba(0,0,0,.74)}.stitch-empty-state.is-visible{display:flex}
-            .stitch-stack,.stitch-input-list,.stitch-candidate-list,.stitch-settings-stack{display:flex;flex-direction:column;gap:8px;min-width:0}.stitch-button-row{display:grid;gap:6px}.stitch-button-row-2{grid-template-columns:repeat(2,minmax(0,1fr))}.stitch-button-row-3{grid-template-columns:repeat(3,minmax(0,1fr))}
-            .stitch-info-banner,.stitch-analysis-note{padding:7px 8px;border:1px solid var(--stitch-border-soft);background:rgba(184,178,163,.08);color:#fff;font-size:10px;line-height:1.4}.stitch-analysis-note.is-warning,.stitch-analysis-note.is-error{border-color:rgba(184,178,163,.72)}.stitch-mini-empty{padding:4px 0;color:var(--stitch-muted);font-size:10px;line-height:1.4}
-            .stitch-summary-card,.stitch-input-item,.stitch-candidate-card,.stitch-foldout,.stitch-gallery-card{border:1px solid var(--stitch-border);background:#050505;min-width:0}.stitch-summary-card{padding:8px;display:flex;flex-direction:column;gap:6px}
-            .stitch-summary-row,.stitch-analysis-line{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:10px;color:var(--stitch-muted)}.stitch-summary-row strong,.stitch-analysis-line strong{color:#fff}
-            .stitch-input-item.is-selected,.stitch-candidate-card.is-active,.stitch-gallery-card.is-active{background:var(--stitch-accent);border-color:var(--stitch-border)}
-            .stitch-input-main,.stitch-candidate-main{width:100%;border:none;background:none;color:inherit;text-align:left;padding:7px;display:flex;flex-direction:column;gap:4px;cursor:pointer}
-            .stitch-input-copy,.stitch-candidate-copy,.stitch-gallery-meta{display:flex;flex-direction:column;gap:2px;min-width:0}.stitch-input-copy strong,.stitch-candidate-copy strong,.stitch-gallery-meta strong{font-size:11px;overflow-wrap:anywhere}
-            .stitch-input-copy span,.stitch-candidate-copy span,.stitch-gallery-meta span{color:var(--stitch-muted);font-size:10px}
-            .stitch-item-badges{display:flex;flex-wrap:wrap;gap:4px}.stitch-kind-badge{display:inline-flex;align-items:center;justify-content:center;min-height:18px;padding:0 5px;border:1px solid var(--stitch-border-soft);background:rgba(184,178,163,.08);color:var(--stitch-muted);font-size:9px;letter-spacing:.04em;text-transform:uppercase}
-            .stitch-input-actions,.stitch-candidate-actions,.stitch-gallery-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:6px;padding:0 7px 7px}
-            .stitch-foldout summary{list-style:none;cursor:pointer;user-select:none;padding:7px 8px;color:#fff;font-weight:600}.stitch-foldout summary::-webkit-details-marker{display:none}.stitch-foldout-body{padding:0 8px 8px;display:flex;flex-direction:column;gap:8px}
-            .stitch-setting-grid{display:grid;grid-template-columns:1fr;gap:8px}.stitch-setting{display:flex;flex-direction:column;gap:6px;font-size:10px;color:var(--stitch-muted);min-width:0}
-            .stitch-setting-label{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;min-width:0;color:inherit}.stitch-setting-label>span:first-child{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}.stitch-setting-label-checkbox{margin-bottom:3px}
-            .stitch-setting input,.stitch-setting select{width:100%}.stitch-setting-checkbox{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;padding:7px 8px;border:1px solid var(--stitch-border);background:#000}.stitch-setting-checkbox strong{display:block;font-size:10px;color:#fff}
-            .stitch-help-button{width:16px;height:16px;border-radius:999px;border:1px solid var(--stitch-border-soft);background:#000;color:var(--stitch-muted);font:700 10px/1 monospace;display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}.stitch-tooltip-wrap{position:relative;display:inline-flex;align-items:center}
-            .stitch-tooltip-wrap.is-open .stitch-help-button,.stitch-help-button:hover{color:#fff;border-color:var(--stitch-border)}
-            .stitch-tooltip-popover{position:fixed;top:0;left:0;width:min(260px,60vw);padding:9px 10px;border:1px solid var(--stitch-border);background:#000;color:#fff;font-size:10px;line-height:1.45;z-index:40;display:none;white-space:normal}.stitch-tooltip-wrap.is-open .stitch-tooltip-popover{display:block}
-            .stitch-selection-help-row{display:flex;flex-direction:column;gap:6px}.stitch-selection-help-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--stitch-muted);font-size:10px}
-            .stitch-gallery-overlay{position:absolute;inset:0;display:none;align-items:center;justify-content:center;padding:12px;background:rgba(0,0,0,.78);z-index:30}.stitch-gallery-overlay.is-open{display:flex}
-            .stitch-gallery-panel{width:min(1060px,100%);height:min(86vh,760px);display:flex;flex-direction:column;gap:8px;padding:10px}.stitch-gallery-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.stitch-gallery-header .eyebrow{margin:0 0 2px;color:var(--stitch-muted);font-size:10px;text-transform:uppercase;letter-spacing:.04em}.stitch-gallery-header h3{margin:0;font-size:12px}
-            .stitch-gallery-grid{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}.stitch-gallery-preview{aspect-ratio:4/3;background:#000;border-bottom:1px solid var(--stitch-border);display:flex;align-items:center;justify-content:center}.stitch-gallery-preview img{display:block;width:100%;height:100%;object-fit:contain}.stitch-gallery-placeholder{color:var(--stitch-muted);font-size:10px}
-            @media (max-width:980px){.stitch-shell{grid-template-columns:1fr;grid-template-rows:minmax(240px,42vh) minmax(0,1fr)}.stitch-gallery-overlay{padding:8px}.stitch-gallery-panel{width:100%;height:100%}}
+            .stitch-dock,.stitch-stage-card,.stitch-gallery-panel{
+                min-width:0;
+                min-height:0;
+                border:none;
+                border-radius:22px;
+                background:var(--studio-neu-surface);
+                box-shadow:var(--studio-neu-shadow-card);
+                color:var(--studio-neu-text);
+                overflow:hidden
+            }
+            .stitch-dock{
+                display:flex;
+                flex-direction:column;
+                gap:12px;
+                padding:12px
+            }
+            .stitch-dock-tabs{
+                display:flex;
+                flex-wrap:wrap;
+                gap:8px;
+                padding:0;
+                border:none;
+                border-radius:0;
+                background:transparent;
+                box-shadow:none
+            }
+            .stitch-shell .mini-button,
+            .stitch-shell .toolbar-button,
+            .stitch-dock-tab,
+            .stitch-help-button{
+                min-height:28px;
+                padding:5px 10px!important;
+                border:none;
+                border-radius:999px;
+                background:var(--studio-neu-button-fill);
+                color:var(--studio-neu-text);
+                box-shadow:var(--studio-neu-shadow-button);
+                font-weight:600;
+                letter-spacing:.01em;
+                transition:transform .18s ease,box-shadow .18s ease,background .18s ease,color .18s ease,opacity .18s ease
+            }
+            .stitch-shell .mini-button:hover:not(:disabled),
+            .stitch-shell .toolbar-button:hover:not(:disabled),
+            .stitch-dock-tab:hover:not(:disabled),
+            .stitch-help-button:hover:not(:disabled){
+                background:var(--studio-neu-button-fill-hover);
+                box-shadow:var(--studio-neu-shadow-button-soft);
+                transform:translateY(-1px)
+            }
+            .stitch-shell .mini-button:active:not(:disabled),
+            .stitch-shell .toolbar-button:active:not(:disabled),
+            .stitch-dock-tab:active:not(:disabled),
+            .stitch-dock-tab.is-active,
+            .stitch-help-button:active:not(:disabled){
+                background:var(--studio-neu-button-fill-active);
+                box-shadow:var(--studio-neu-shadow-button-pressed);
+                color:var(--studio-neu-text);
+                transform:translateY(0)
+            }
+            .stitch-dock-tab.is-active:hover:not(:disabled){
+                background:var(--studio-neu-button-fill-active);
+                box-shadow:var(--studio-neu-shadow-button-pressed);
+                transform:translateY(0)
+            }
+            .stitch-shell .mini-button:disabled,
+            .stitch-shell .toolbar-button:disabled,
+            .stitch-dock-tab:disabled{opacity:.52;box-shadow:none;cursor:not-allowed}
+            .stitch-shell .mini-button.is-danger{color:var(--studio-danger)}
+            .stitch-shell input[type="number"],
+            .stitch-shell select{
+                min-height:28px;
+                padding:5px 9px!important;
+                border:none;
+                border-radius:14px;
+                background:var(--studio-neu-surface);
+                color:var(--studio-neu-text);
+                box-shadow:var(--studio-neu-shadow-inset-soft)
+            }
+            .stitch-shell input[type="checkbox"],.stitch-shell input[type="range"]{accent-color:var(--studio-accent)}
+            .stitch-dock-tab{min-width:72px}
+            .stitch-dock-panels{flex:1;min-height:0}
+            .stitch-dock-panel{display:none;height:100%;min-height:0;flex-direction:column}
+            .stitch-dock-panel.is-active{display:flex}
+            .stitch-dock-panel-head{
+                padding:2px 2px 0;
+                border:none;
+                background:transparent
+            }
+            .stitch-dock-panel-head strong,.stitch-gallery-header h3,.stitch-stage-title h2{font-size:12px;line-height:1.2;color:var(--studio-neu-text)}
+            .stitch-dock-panel-head span,.stitch-input-copy span,.stitch-candidate-copy span,.stitch-gallery-meta span,.stitch-mini-empty,.stitch-setting,.stitch-selection-help-chip,.stitch-gallery-placeholder,.stitch-overlay-chip.is-muted,.stitch-summary-row,.stitch-analysis-line{
+                color:var(--studio-neu-muted);
+                font-size:10px
+            }
+            .stitch-dock-panel-body{
+                flex:1;
+                min-height:0;
+                overflow:auto;
+                overscroll-behavior:contain;
+                padding:4px;
+                display:flex;
+                flex-direction:column;
+                gap:10px
+            }
+            .stitch-stage-card{
+                display:flex;
+                flex-direction:column;
+                gap:14px;
+                padding:14px
+            }
+            .stitch-stage-topbar{
+                display:flex;
+                align-items:center;
+                justify-content:space-between;
+                gap:10px;
+                padding:0 2px;
+                border:none;
+                background:transparent
+            }
+            .stitch-stage-title{min-width:0}
+            .stitch-stage-title .eyebrow,.stitch-gallery-header .eyebrow{
+                margin:0 0 2px;
+                color:var(--studio-neu-muted);
+                font-size:10px;
+                letter-spacing:.04em;
+                text-transform:uppercase
+            }
+            .stitch-stage-title h2{margin:0;overflow-wrap:anywhere}
+            .stitch-mini-bar{
+                display:inline-flex;
+                align-items:center;
+                gap:6px;
+                padding:0;
+                border:none;
+                border-radius:0;
+                background:transparent;
+                box-shadow:none
+            }
+            .stitch-mini-bar .mini-button{min-height:30px;padding:0 11px!important}
+            .stitch-stage-wrap{
+                position:relative;
+                flex:1;
+                min-width:0;
+                min-height:0;
+                overflow:hidden;
+                border:none;
+                border-radius:20px;
+                background:var(--studio-neu-surface-soft);
+                box-shadow:var(--studio-neu-shadow-inset)
+            }
+            .stitch-canvas{display:block;width:100%;height:100%;background:transparent}
+            .stitch-stage-overlay{
+                position:absolute;
+                display:flex;
+                gap:6px;
+                z-index:3;
+                pointer-events:none;
+                max-width:min(64%,calc(100% - 12px))
+            }
+            .stitch-overlay-top-right{top:8px;right:8px;flex-wrap:wrap;justify-content:flex-end}
+            .stitch-overlay-bottom-left{left:8px;bottom:8px}
+            .stitch-overlay-chip,.stitch-status-chip{
+                display:inline-flex;
+                align-items:center;
+                gap:4px;
+                min-height:22px;
+                padding:0 8px;
+                border:none;
+                border-radius:999px;
+                background:var(--studio-neu-button-fill);
+                color:var(--studio-neu-text);
+                box-shadow:var(--studio-neu-shadow-button-soft);
+                font-size:10px;
+                white-space:nowrap;
+                overflow:hidden;
+                text-overflow:ellipsis
+            }
+            .stitch-status-chip[data-tone="warning"]{color:var(--studio-warning)}
+            .stitch-status-chip[data-tone="error"]{color:var(--studio-danger)}
+            .stitch-empty-state{
+                position:absolute;
+                inset:14px;
+                display:none;
+                align-items:center;
+                justify-content:center;
+                flex-direction:column;
+                gap:6px;
+                text-align:center;
+                pointer-events:none;
+                color:var(--studio-neu-muted);
+                border:none;
+                border-radius:18px;
+                background:color-mix(in srgb,var(--studio-neu-surface) 82%,transparent);
+                box-shadow:var(--studio-neu-shadow-inset-soft)
+            }
+            .stitch-empty-state.is-visible{display:flex}
+            .stitch-stack,.stitch-input-list,.stitch-candidate-list,.stitch-settings-stack{display:flex;flex-direction:column;gap:10px;min-width:0}
+            .stitch-button-row{display:grid;gap:8px}
+            .stitch-button-row-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+            .stitch-button-row-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+            .stitch-info-banner,.stitch-analysis-note,.stitch-summary-card,.stitch-foldout,.stitch-setting-checkbox{
+                border:none;
+                border-radius:18px;
+                background:transparent;
+                box-shadow:none
+            }
+            .stitch-input-item,.stitch-candidate-card,.stitch-gallery-card{
+                border:none;
+                border-radius:18px;
+                background:color-mix(in srgb,var(--studio-neu-surface) 60%, transparent);
+                box-shadow:none
+            }
+            .stitch-info-banner,.stitch-analysis-note{padding:10px;line-height:1.4;color:var(--studio-neu-text)}
+            .stitch-analysis-note.is-warning{color:var(--studio-warning)}
+            .stitch-analysis-note.is-error{color:var(--studio-danger)}
+            .stitch-summary-card{padding:10px;display:flex;flex-direction:column;gap:6px}
+            .stitch-summary-row strong,.stitch-analysis-line strong,.stitch-setting-checkbox strong,.stitch-selection-help-chip strong{color:var(--studio-neu-text)}
+            .stitch-input-item.is-selected,.stitch-candidate-card.is-active,.stitch-gallery-card.is-active{
+                box-shadow:var(--studio-neu-shadow-inset), inset 0 0 0 2px color-mix(in srgb, var(--studio-accent) 18%, transparent)
+            }
+            .stitch-input-main,.stitch-candidate-main{
+                width:100%;
+                border:none;
+                background:none;
+                color:inherit;
+                text-align:left;
+                padding:10px;
+                display:flex;
+                flex-direction:column;
+                gap:4px;
+                cursor:pointer
+            }
+            .stitch-input-copy,.stitch-candidate-copy,.stitch-gallery-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
+            .stitch-input-copy strong,.stitch-candidate-copy strong,.stitch-gallery-meta strong{font-size:11px;overflow-wrap:anywhere;color:var(--studio-neu-text)}
+            .stitch-item-badges{display:flex;flex-wrap:wrap;gap:4px}
+            .stitch-kind-badge{
+                display:inline-flex;
+                align-items:center;
+                justify-content:center;
+                min-height:auto;
+                padding:0;
+                border:none;
+                border-radius:0;
+                background:transparent;
+                color:var(--studio-neu-muted);
+                box-shadow:none;
+                font-size:9px;
+                letter-spacing:.04em;
+                text-transform:uppercase
+            }
+            .stitch-input-actions,.stitch-candidate-actions,.stitch-gallery-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;padding:0 10px 10px}
+            .stitch-foldout summary{
+                list-style:none;
+                cursor:pointer;
+                user-select:none;
+                padding:10px;
+                color:var(--studio-neu-text);
+                font-weight:600
+            }
+            .stitch-foldout summary::-webkit-details-marker{display:none}
+            .stitch-foldout-body{padding:0 0 10px;display:flex;flex-direction:column;gap:10px}
+            .stitch-setting-grid{display:grid;grid-template-columns:1fr;gap:10px}
+            .stitch-setting{display:flex;flex-direction:column;gap:6px;min-width:0}
+            .stitch-setting-label{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;min-width:0;color:inherit}
+            .stitch-setting-label>span:first-child{flex:1 1 auto;min-width:0;overflow-wrap:anywhere}
+            .stitch-setting-label-checkbox{margin-bottom:3px}
+            .stitch-setting input,.stitch-setting select{width:100%}
+            .stitch-setting-checkbox{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px;align-items:start;padding:10px}
+            .stitch-help-button{
+                width:18px;
+                height:18px;
+                padding:0!important;
+                font:700 10px/1 monospace;
+                display:inline-flex;
+                align-items:center;
+                justify-content:center
+            }
+            .stitch-tooltip-wrap{position:relative;display:inline-flex;align-items:center}
+            .stitch-tooltip-popover{
+                position:fixed;
+                top:0;
+                left:0;
+                width:min(260px,60vw);
+                padding:10px 12px;
+                border:none;
+                border-radius:18px;
+                background:var(--studio-neu-surface);
+                color:var(--studio-neu-text);
+                box-shadow:var(--studio-neu-shadow-card);
+                font-size:10px;
+                line-height:1.45;
+                z-index:40;
+                display:none;
+                white-space:normal
+            }
+            .stitch-tooltip-wrap.is-open .stitch-tooltip-popover{display:block}
+            .stitch-selection-help-row{display:flex;flex-direction:column;gap:6px}
+            .stitch-selection-help-chip{display:flex;align-items:center;justify-content:space-between;gap:8px}
+            .stitch-gallery-overlay{
+                position:absolute;
+                inset:0;
+                display:none;
+                align-items:center;
+                justify-content:center;
+                padding:14px;
+                background:color-mix(in srgb,var(--studio-neu-surface) 56%,transparent);
+                z-index:30
+            }
+            .stitch-gallery-overlay.is-open{display:flex}
+            .stitch-gallery-panel{
+                width:min(1060px,100%);
+                height:min(86vh,760px);
+                display:flex;
+                flex-direction:column;
+                gap:12px;
+                padding:14px
+            }
+            .stitch-gallery-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+            .stitch-gallery-grid{flex:1;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+            .stitch-gallery-preview{
+                aspect-ratio:4/3;
+                background:var(--studio-neu-surface-soft);
+                border:none;
+                border-radius:18px;
+                box-shadow:var(--studio-neu-shadow-inset-soft);
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                overflow:hidden
+            }
+            .stitch-gallery-preview img{display:block;width:100%;height:100%;object-fit:contain}
+            @media (max-width:980px){
+                .stitch-shell{grid-template-columns:1fr;grid-template-rows:minmax(240px,42vh) minmax(0,1fr);gap:14px}
+                .stitch-gallery-overlay{padding:8px}
+                .stitch-gallery-panel{width:100%;height:100%}
+            }
         </style>
         <div class="stitch-shell">
             <aside class="stitch-dock">
@@ -180,7 +490,6 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                 <div class="stitch-dock-panels">
                     ${PANEL_TABS.map((tab) => `
                         <section class="stitch-dock-panel" data-stitch-panel="${tab.id}">
-                            <div class="stitch-dock-panel-head"><strong>${tab.label}</strong><span>${tab.description}</span></div>
                             <div class="stitch-dock-panel-body" data-stitch-role="${tab.id}-panel"></div>
                         </section>
                     `).join('')}
@@ -189,7 +498,6 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
             <section class="stitch-stage-card">
                 <div class="stitch-stage-topbar">
                     <div class="stitch-stage-title">
-                        <div class="eyebrow">Stitch Preview</div>
                         <h2 data-stitch-role="title">Stitch Workspace</h2>
                     </div>
                     <div class="stitch-mini-bar">
@@ -202,13 +510,13 @@ export function createStitchWorkspace(root, { actions, stitchEngine, logger = nu
                     <canvas class="stitch-canvas" data-stitch-role="canvas"></canvas>
                     <div class="stitch-stage-overlay stitch-overlay-top-right" data-stitch-role="metrics"></div>
                     <div class="stitch-stage-overlay stitch-overlay-bottom-left"><div class="stitch-status-chip" data-stitch-role="status" data-tone="info">Stitch workspace ready.</div></div>
-                    <div class="stitch-empty-state" data-stitch-role="empty-state"><strong>Add two or more images</strong><span>Run analysis to generate candidate layouts, then refine the result directly in the viewport.</span></div>
+                    <div class="stitch-empty-state" data-stitch-role="empty-state"><strong>Add two or more images</strong><span>Run analysis, then refine the result in the viewport.</span></div>
                 </div>
             </section>
             <div class="stitch-gallery-overlay" data-stitch-role="gallery-overlay">
                 <div class="stitch-gallery-panel">
                     <div class="stitch-gallery-header">
-                        <div><div class="eyebrow">Candidate Gallery</div><h3>Possible Stitch Layouts</h3></div>
+                        <div><h3>Possible Stitch Layouts</h3></div>
                         <button type="button" class="toolbar-button" data-stitch-action="close-gallery">Close</button>
                     </div>
                     <div class="stitch-gallery-grid" data-stitch-role="gallery-grid"></div>

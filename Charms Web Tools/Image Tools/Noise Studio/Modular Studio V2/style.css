@@ -142,9 +142,55 @@ button {
     flex-direction: column;
     height: 100%;
     min-height: 0;
-    gap: 10px;
-    padding: 10px;
+    gap: 12px;
+    padding: 12px;
     overflow: hidden;
+    --studio-neu-page:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.54) 24%, rgba(255, 255, 255, 0) 44%),
+        linear-gradient(180deg, #e8e8e8 0%, #dcdcdc 100%);
+    --studio-neu-surface: #e0e0e0;
+    --studio-neu-surface-soft: #ececec;
+    --studio-neu-text: #2f2f2f;
+    --studio-neu-muted: #666666;
+    --studio-neu-button-fill: linear-gradient(145deg, #ebebeb 0%, #dcdcdc 100%);
+    --studio-neu-button-fill-hover: linear-gradient(145deg, #efefef 0%, #e1e1e1 100%);
+    --studio-neu-button-fill-active: linear-gradient(145deg, #d8d8d8 0%, #e8e8e8 100%);
+    --studio-neu-shadow-card: 12px 12px 28px #c8c8c8, -12px -12px 28px #ffffff;
+    --studio-neu-shadow-header: 8px 8px 18px #cccccc, -8px -8px 18px #ffffff;
+    --studio-neu-shadow-button: 5px 5px 12px #cacaca, -5px -5px 12px #fbfbfb;
+    --studio-neu-shadow-button-soft: 3px 3px 8px #cdcdcd, -3px -3px 8px #fbfbfb;
+    --studio-neu-shadow-button-pressed: inset 3px 3px 7px #cfcfcf, inset -3px -3px 7px #f8f8f8;
+    --studio-neu-shadow-inset: inset 7px 7px 14px #c7c7c7, inset -7px -7px 14px #fbfbfb;
+    --studio-neu-shadow-inset-soft: inset 3px 3px 7px #cecece, inset -3px -3px 7px #f8f8f8;
+    --studio-accent: #4f72dd;
+    --studio-success: #296b46;
+    --studio-warning: #8d6517;
+    --studio-danger: #9f3939;
+    background: var(--studio-neu-page);
+}
+
+:root[data-theme="dark"] .app-shell {
+    --studio-neu-page:
+        radial-gradient(circle at top left, rgba(68, 68, 68, 0.9) 0%, rgba(52, 52, 52, 0.45) 24%, rgba(43, 43, 43, 0) 44%),
+        linear-gradient(180deg, #313131 0%, #262626 100%);
+    --studio-neu-surface: #2b2b2b;
+    --studio-neu-surface-soft: #333333;
+    --studio-neu-text: #f3f3f3;
+    --studio-neu-muted: #c3c3c3;
+    --studio-neu-button-fill: linear-gradient(145deg, #343434 0%, #292929 100%);
+    --studio-neu-button-fill-hover: linear-gradient(145deg, #393939 0%, #2d2d2d 100%);
+    --studio-neu-button-fill-active: linear-gradient(145deg, #282828 0%, #353535 100%);
+    --studio-neu-shadow-card: 12px 12px 28px #1b1b1b, -12px -12px 28px #3b3b3b;
+    --studio-neu-shadow-header: 8px 8px 18px #1d1d1d, -8px -8px 18px #3b3b3b;
+    --studio-neu-shadow-button: 5px 5px 12px #1f1f1f, -5px -5px 12px #3a3a3a;
+    --studio-neu-shadow-button-soft: 3px 3px 8px #1f1f1f, -3px -3px 8px #3b3b3b;
+    --studio-neu-shadow-button-pressed: inset 3px 3px 7px #202020, inset -3px -3px 7px #383838;
+    --studio-neu-shadow-inset: inset 7px 7px 14px #1d1d1d, inset -7px -7px 14px #393939;
+    --studio-neu-shadow-inset-soft: inset 3px 3px 7px #202020, inset -3px -3px 7px #373737;
+    --studio-accent: #b3c3ff;
+    --studio-success: #9fddb4;
+    --studio-warning: #f3d08d;
+    --studio-danger: #ffb4b4;
 }
 
 .app-shell.is-app-dialog-open > :not(#appDialog) {
@@ -396,7 +442,7 @@ button {
 
 .workspace-tabs {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     border-bottom: 1px solid var(--line);
 }
 
@@ -427,6 +473,9 @@ button {
 
 .preview-shell {
     flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     min-height: 0;
     overflow: hidden;
     position: relative;
@@ -441,9 +490,11 @@ button {
     display: flex;
     align-items: stretch;
     justify-content: stretch;
-    flex: 1 1 auto;
-    width: 100%;
-    height: 100%;
+    flex: none;
+    width: var(--preview-stage-width, 100%);
+    height: var(--preview-stage-height, 100%);
+    max-width: 100%;
+    max-height: 100%;
     min-height: 0;
     overflow: hidden;
 }
@@ -470,12 +521,14 @@ button {
     position: absolute;
     top: 0;
     left: 0;
+    overflow: hidden;
     transform-origin: top left;
     will-change: transform;
 }
 
 #sourcePreviewCanvas,
-#displayCanvas {
+#displayCanvas,
+#hoverPreviewCanvas {
     display: block;
     max-width: none;
     max-height: none;
@@ -483,6 +536,7 @@ button {
 
 #sourcePreviewCanvas,
 #displayCanvas,
+#hoverPreviewCanvas,
 .hover-preview-canvas {
     position: absolute;
     inset: 0;
@@ -497,13 +551,10 @@ button {
 }
 
 .hover-preview-canvas {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
     opacity: 0;
     pointer-events: none;
     transition: opacity 140ms linear;
+    will-change: opacity;
     z-index: 2;
 }
 
@@ -538,6 +589,7 @@ button {
 
 .preview-empty {
     display: flex;
+    width: 100%;
     min-height: 100%;
     align-items: center;
     justify-content: center;
@@ -760,7 +812,7 @@ button {
 input[type='range'] {
     width: 100%;
     margin: 0;
-    accent-color: #111111;
+    accent-color: var(--studio-accent, var(--text));
 }
 
 select,
@@ -1096,6 +1148,828 @@ code {
 .scope-selection,
 .preview-title-block h2+p {
     margin: 4px 0 0;
+}
+
+/* Shared neumorphic workspace */
+.app-shell[data-active-section='editor'] {
+    background: var(--studio-neu-page);
+}
+
+.app-shell[data-active-section='editor'] .workspace-shell,
+.app-shell[data-active-section='editor'] .workspace-sidebar,
+.app-shell[data-active-section='editor'] .workspace-center,
+.app-shell[data-active-section='editor'] .sidebar-scroll {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .workspace-shell {
+    gap: 16px;
+    overflow: visible;
+}
+
+.app-shell[data-active-section='editor'] .workspace-center {
+    gap: 16px;
+    padding: 4px;
+    overflow: visible;
+}
+
+.app-shell[data-active-section='editor'] .workspace-sidebar {
+    overflow: visible;
+    padding-right: 6px;
+}
+
+.app-shell[data-active-section='editor'] .sidebar-scroll {
+    padding: 4px;
+}
+
+.app-shell[data-active-section='editor'] .section-switcher,
+.app-shell[data-active-section='editor'] .toolbar,
+.app-shell[data-active-section='editor'] .preview-topbar,
+.app-shell[data-active-section='editor'] .preview-shell,
+.app-shell[data-active-section='editor'] .panel-section,
+.app-shell[data-active-section='editor'] .scope-card,
+.app-shell[data-active-section='editor'] .empty-panel,
+.app-shell[data-active-section='editor'] .effect-chip,
+.app-shell[data-active-section='editor'] .pipeline-item,
+.app-shell[data-active-section='editor'] .custom-group,
+.app-shell[data-active-section='editor'] .custom-list-item,
+.app-shell[data-active-section='editor'] .grade-wheel-card,
+.app-shell[data-active-section='editor'] .preview-loupe,
+.app-shell[data-active-section='editor'] .layer-preview-container {
+    background: var(--studio-neu-surface);
+    border: none;
+    border-radius: 22px;
+    box-shadow: var(--studio-neu-shadow-card);
+    color: var(--studio-neu-text);
+}
+
+.app-shell[data-active-section='editor'] .workspace-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .workspace-sidebar .panel-section {
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .workspace-sidebar .effect-chip,
+.app-shell[data-active-section='editor'] .workspace-sidebar .pipeline-item,
+.app-shell[data-active-section='editor'] .workspace-sidebar .custom-group,
+.app-shell[data-active-section='editor'] .workspace-sidebar .custom-list-item,
+.app-shell[data-active-section='editor'] .workspace-sidebar .scope-card,
+.app-shell[data-active-section='editor'] .workspace-sidebar .layer-preview-container,
+.app-shell[data-active-section='editor'] .workspace-sidebar .empty-panel {
+    background: var(--studio-neu-surface-soft);
+    box-shadow: var(--studio-neu-shadow-inset);
+    border-radius: 20px;
+}
+
+.app-shell[data-active-section='editor'] .editor-info-toggle-stack {
+    gap: 8px;
+}
+
+.app-shell[data-active-section='editor'] .editor-info-zoom-row .control-stack {
+    align-items: center;
+}
+
+.app-shell[data-active-section='editor'] .editor-info-zoom-row input[type='range'] {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.app-shell[data-active-section='editor'] .sidebar-scroll {
+    padding: 8px 4px 6px;
+    padding-right: 8px;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--studio-neu-surface) 78%, black 22%) transparent;
+}
+
+.app-shell[data-active-section='editor'] .sidebar-scroll::-webkit-scrollbar {
+    width: 12px;
+}
+
+.app-shell[data-active-section='editor'] .sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 999px;
+    margin-block: 10px;
+}
+
+.app-shell[data-active-section='editor'] .sidebar-scroll::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--studio-neu-surface-soft) 84%, white 16%) 0%,
+            color-mix(in srgb, var(--studio-neu-surface) 86%, black 14%) 100%);
+    background-clip: padding-box;
+    box-shadow:
+        inset 1px 1px 1px rgba(255, 255, 255, 0.35),
+        inset -1px -1px 1px rgba(0, 0, 0, 0.08);
+}
+
+.app-shell[data-active-section='editor'] .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--studio-neu-surface-soft) 70%, var(--studio-accent) 30%) 0%,
+            color-mix(in srgb, var(--studio-neu-surface) 72%, var(--studio-accent) 28%) 100%);
+    background-clip: padding-box;
+}
+
+.app-shell[data-active-section='editor'] .sidebar-scroll::-webkit-scrollbar-thumb:active {
+    background:
+        linear-gradient(180deg,
+            color-mix(in srgb, var(--studio-neu-surface) 62%, var(--studio-accent) 38%) 0%,
+            color-mix(in srgb, var(--studio-neu-surface) 58%, var(--studio-accent) 42%) 100%);
+    background-clip: padding-box;
+}
+
+.app-shell[data-active-section='editor'] .panel-section + .panel-section,
+.app-shell[data-active-section='editor'] .mask-editor,
+.app-shell[data-active-section='editor'] .library-group + .library-group {
+    margin-top: 14px;
+}
+
+.app-shell[data-active-section='editor'] .panel-heading {
+    margin-bottom: 10px;
+}
+
+.app-shell[data-active-section='editor'] .chip-grid,
+.app-shell[data-active-section='editor'] .custom-layer-editor,
+.app-shell[data-active-section='editor'] .custom-stack,
+.app-shell[data-active-section='editor'] .scope-stack {
+    gap: 12px;
+}
+
+.app-shell[data-active-section='editor'] .custom-group {
+    padding: 12px;
+    gap: 12px;
+}
+
+.app-shell[data-active-section='editor'] .control-row,
+.app-shell[data-active-section='editor'] .check-row,
+.app-shell[data-active-section='editor'] .info-banner,
+.app-shell[data-active-section='editor'] .palette-editor,
+.app-shell[data-active-section='editor'] .mask-editor,
+.app-shell[data-active-section='editor'] .custom-list-button,
+.app-shell[data-active-section='editor'] .toolbar-toggle,
+.app-shell[data-active-section='editor'] .tiny-toggle {
+    background: var(--studio-neu-surface);
+    border: none;
+    border-radius: 16px;
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+    color: var(--studio-neu-text);
+}
+
+.app-shell[data-active-section='editor'] .control-row,
+.app-shell[data-active-section='editor'] .check-row,
+.app-shell[data-active-section='editor'] .info-banner,
+.app-shell[data-active-section='editor'] .palette-editor,
+.app-shell[data-active-section='editor'] .mask-editor,
+.app-shell[data-active-section='editor'] .empty-panel {
+    padding: 10px 12px;
+}
+
+.app-shell[data-active-section='editor'] .toolbar,
+.app-shell[data-active-section='editor'] .section-switcher,
+.app-shell[data-active-section='editor'] .preview-topbar,
+.app-shell[data-active-section='editor'] .preview-shell {
+    padding: 14px 16px;
+}
+
+.app-shell[data-active-section='editor'] > #toolbarSlot > .toolbar {
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .preview-topbar {
+    gap: 14px;
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+    background-clip: padding-box;
+}
+
+.app-shell[data-active-section='editor'] .preview-title-block,
+.app-shell[data-active-section='editor'] .preview-title-block > * {
+    background: transparent;
+}
+
+.app-shell[data-active-section='editor'] .preview-title-block h2 {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--studio-neu-text);
+}
+
+.app-shell[data-active-section='editor'] .toolbar-brand span,
+.app-shell[data-active-section='editor'] .eyebrow,
+.app-shell[data-active-section='editor'] .panel-heading,
+.app-shell[data-active-section='editor'] .control-value,
+.app-shell[data-active-section='editor'] .pipeline-meta,
+.app-shell[data-active-section='editor'] .scope-selection,
+.app-shell[data-active-section='editor'] .scope-meta span,
+.app-shell[data-active-section='editor'] .preview-empty span,
+.app-shell[data-active-section='editor'] .inspector-header p,
+.app-shell[data-active-section='editor'] .empty-panel p,
+.app-shell[data-active-section='editor'] .inspector-note,
+.app-shell[data-active-section='editor'] .section-header-status {
+    color: var(--studio-neu-muted);
+}
+
+.app-shell[data-active-section='editor'] .toolbar-button,
+.app-shell[data-active-section='editor'] .mode-button,
+.app-shell[data-active-section='editor'] .primary-button,
+.app-shell[data-active-section='editor'] .secondary-button,
+.app-shell[data-active-section='editor'] .mini-button,
+.app-shell[data-active-section='editor'] .icon-button,
+.app-shell[data-active-section='editor'] .workspace-tab,
+.app-shell[data-active-section='editor'] .pipeline-actions button,
+.app-shell[data-active-section='editor'] .compact-button,
+.app-shell[data-active-section='editor'] .chip-add,
+.app-shell[data-active-section='editor'] .section-header-status span {
+    border: none;
+    border-radius: 999px;
+    background: var(--studio-neu-button-fill);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-button);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, color 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+}
+
+.app-shell[data-active-section='editor'] .toolbar-button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .mode-button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .primary-button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .secondary-button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .mini-button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .icon-button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .workspace-tab:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .pipeline-actions button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .compact-button:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .chip-add:hover:not(:disabled) {
+    background: var(--studio-neu-button-fill-hover);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+    transform: translateY(-1px);
+}
+
+.app-shell[data-active-section='editor'] .toolbar-button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .mode-button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .primary-button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .secondary-button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .mini-button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .icon-button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .workspace-tab:active:not(:disabled),
+.app-shell[data-active-section='editor'] .pipeline-actions button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .compact-button:active:not(:disabled),
+.app-shell[data-active-section='editor'] .chip-add:active:not(:disabled),
+.app-shell[data-active-section='editor'] .mode-button.is-active,
+.app-shell[data-active-section='editor'] .workspace-tab.is-active,
+.app-shell[data-active-section='editor'] .toolbar-button.is-active,
+.app-shell[data-active-section='editor'] .mini-button.is-active,
+.app-shell[data-active-section='editor'] .custom-list-button.is-selected {
+    background: var(--studio-neu-button-fill-active);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+    transform: translateY(0);
+}
+
+.app-shell[data-active-section='editor'] .primary-button {
+    color: var(--studio-accent);
+}
+
+.app-shell[data-active-section='editor'] .mode-button.is-active:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .workspace-tab.is-active:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .toolbar-button.is-active:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .mini-button.is-active:hover:not(:disabled),
+.app-shell[data-active-section='editor'] .custom-list-button.is-selected:hover,
+.app-shell[data-active-section='editor'] .toolbar-toggle:has(input:checked):hover,
+.app-shell[data-active-section='editor'] .tiny-toggle:has(input:checked):hover {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+    transform: translateY(0);
+}
+
+.app-shell[data-active-section='editor'] .toolbar-button:disabled,
+.app-shell[data-active-section='editor'] .mode-button:disabled,
+.app-shell[data-active-section='editor'] .primary-button:disabled,
+.app-shell[data-active-section='editor'] .secondary-button:disabled,
+.app-shell[data-active-section='editor'] .mini-button:disabled,
+.app-shell[data-active-section='editor'] .icon-button:disabled,
+.app-shell[data-active-section='editor'] .workspace-tab:disabled,
+.app-shell[data-active-section='editor'] .pipeline-actions button:disabled,
+.app-shell[data-active-section='editor'] .compact-button:disabled,
+.app-shell[data-active-section='editor'] .chip-add:disabled {
+    opacity: 0.52;
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .toolbar-button,
+.app-shell[data-active-section='editor'] .primary-button,
+.app-shell[data-active-section='editor'] .secondary-button,
+.app-shell[data-active-section='editor'] .mode-button,
+.app-shell[data-active-section='editor'] .workspace-tab,
+.app-shell[data-active-section='editor'] .mini-button,
+.app-shell[data-active-section='editor'] .icon-button,
+.app-shell[data-active-section='editor'] .chip-add,
+.app-shell[data-active-section='editor'] .pipeline-actions button,
+.app-shell[data-active-section='editor'] .compact-button {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+
+.app-shell[data-active-section='editor'] .mini-button {
+    min-width: 30px;
+    min-height: 30px;
+    padding-inline: 11px;
+}
+
+.app-shell[data-active-section='editor'] .toolbar-toggle,
+.app-shell[data-active-section='editor'] .tiny-toggle {
+    border-radius: 999px;
+    background: var(--studio-neu-button-fill);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+    padding: 5px 10px;
+}
+
+.app-shell[data-active-section='editor'] .toolbar-toggle:hover,
+.app-shell[data-active-section='editor'] .tiny-toggle:hover {
+    background: var(--studio-neu-button-fill-hover);
+}
+
+.app-shell[data-active-section='editor'] .toolbar-toggle:has(input:checked),
+.app-shell[data-active-section='editor'] .tiny-toggle:has(input:checked) {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+}
+
+.app-shell[data-active-section='editor'] .toolbar-toggle input,
+.app-shell[data-active-section='editor'] .tiny-toggle input {
+    accent-color: var(--studio-accent);
+}
+
+.app-shell[data-active-section='editor'] .section-header-status span {
+    background: var(--studio-neu-surface);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell[data-active-section='editor'] .effect-chip {
+    padding: 4px;
+    gap: 4px;
+}
+
+.app-shell[data-active-section='editor'] .effect-chip-main,
+.app-shell[data-active-section='editor'] .pipeline-main {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+}
+
+.app-shell[data-active-section='editor'] .effect-chip.is-active,
+.app-shell[data-active-section='editor'] .effect-chip.is-selected,
+.app-shell[data-active-section='editor'] .pipeline-item.is-selected {
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell[data-active-section='editor'] .effect-chip.is-selected {
+    outline: none;
+}
+
+.app-shell[data-active-section='editor'] .pipeline-list {
+    gap: 8px;
+}
+
+.app-shell[data-active-section='editor'] .pipeline-item {
+    padding: 10px 12px;
+    background: var(--studio-neu-surface-soft);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell[data-active-section='editor'] .pipeline-item.is-selected {
+    background: var(--studio-neu-surface-soft);
+    box-shadow:
+        var(--studio-neu-shadow-inset),
+        inset 0 0 0 1px color-mix(in srgb, var(--studio-accent) 16%, transparent);
+}
+
+.app-shell[data-active-section='editor'] .effect-chip {
+    background: var(--studio-neu-surface-soft);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell[data-active-section='editor'] .effect-chip.is-active,
+.app-shell[data-active-section='editor'] .effect-chip.is-selected {
+    background: var(--studio-neu-surface-soft);
+}
+
+.app-shell[data-active-section='editor'] .effect-chip.is-selected {
+    box-shadow:
+        var(--studio-neu-shadow-inset),
+        inset 0 0 0 1px color-mix(in srgb, var(--studio-accent) 16%, transparent);
+}
+
+.app-shell[data-active-section='editor'] .layer-preview-container {
+    padding: 12px;
+}
+
+.app-shell[data-active-section='editor'] .layer-preview-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+}
+
+.app-shell[data-active-section='editor'] .layer-preview-canvas-wrap {
+    padding-top: 2px;
+}
+
+.app-shell[data-active-section='editor'] .layer-preview-label {
+    margin-bottom: 8px;
+    font-size: 11px;
+    color: var(--studio-neu-muted);
+}
+
+.app-shell[data-active-section='editor'] .layer-preview-canvas {
+    cursor: pointer;
+    display: block;
+    width: 100%;
+    border: none;
+    border-radius: 14px;
+    background: #000;
+    box-shadow: var(--studio-neu-shadow-inset);
+}
+
+.app-shell[data-active-section='editor'] :where(input[type='text'], input[type='search'], textarea),
+.app-shell[data-active-section='editor'] select,
+.app-shell[data-active-section='editor'] input[type='number'] {
+    border: none;
+    border-radius: 14px;
+    background: var(--studio-neu-surface);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell[data-active-section='editor'] input[type='color'] {
+    border: none;
+    border-radius: 14px;
+    background: var(--studio-neu-surface);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+}
+
+.app-shell[data-active-section='editor'] input[type='range'] {
+    --editor-range-progress: 0%;
+    --editor-range-fill: linear-gradient(180deg, color-mix(in srgb, var(--studio-accent) 70%, white 30%) 0%, var(--studio-accent) 100%);
+    --editor-range-rest: linear-gradient(180deg, color-mix(in srgb, var(--studio-neu-surface-soft) 90%, white 10%) 0%, color-mix(in srgb, var(--studio-neu-surface) 86%, black 14%) 100%);
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 26px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    accent-color: var(--studio-accent);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']::-webkit-slider-runnable-track {
+    height: 10px;
+    border: none;
+    border-radius: 999px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0) 100%),
+        var(--editor-range-fill) 0 0 / var(--editor-range-progress) 100% no-repeat,
+        var(--editor-range-rest);
+    box-shadow: var(--studio-neu-shadow-inset);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    margin-top: -5px;
+    border: none;
+    border-radius: 999px;
+    background: var(--studio-neu-button-fill);
+    box-shadow: var(--studio-neu-shadow-button);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']:hover::-webkit-slider-thumb {
+    background: var(--studio-neu-button-fill-hover);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']:active::-webkit-slider-thumb {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']::-moz-range-track {
+    height: 10px;
+    border: none;
+    border-radius: 999px;
+    background: var(--editor-range-rest);
+    box-shadow: var(--studio-neu-shadow-inset);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']::-moz-range-progress {
+    height: 10px;
+    border: none;
+    border-radius: 999px;
+    background: var(--editor-range-fill);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 999px;
+    background: var(--studio-neu-button-fill);
+    box-shadow: var(--studio-neu-shadow-button);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']:hover::-moz-range-thumb {
+    background: var(--studio-neu-button-fill-hover);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+}
+
+.app-shell[data-active-section='editor'] input[type='range']:active::-moz-range-thumb {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+}
+
+.app-shell[data-active-section='editor'] .preview-shell {
+    padding: 16px;
+}
+
+.app-shell[data-active-section='editor'] .preview-shell.has-source {
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .preview-stage,
+.app-shell[data-active-section='editor'] .preview-empty,
+.app-shell[data-active-section='editor'] .scope-card canvas,
+.app-shell[data-active-section='editor'] #compareOriginal,
+.app-shell[data-active-section='editor'] #compareProcessed,
+.app-shell[data-active-section='editor'] #subLayerCanvas {
+    border: none;
+    border-radius: 20px;
+    background: var(--studio-neu-surface-soft);
+    box-shadow: var(--studio-neu-shadow-inset);
+}
+
+.app-shell[data-active-section='editor'] .preview-stage {
+    border-radius: 24px;
+}
+
+.app-shell[data-active-section='editor'] .preview-shell.has-source .preview-stage {
+    box-shadow: var(--studio-neu-shadow-inset);
+}
+
+.app-shell[data-active-section='editor'] .preview-shell.checker-active .preview-stage {
+    background:
+        linear-gradient(45deg, rgba(0, 0, 0, 0.06) 25%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.06) 75%),
+        linear-gradient(45deg, rgba(0, 0, 0, 0.06) 25%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.06) 75%);
+    background-color: #f7f7f7;
+    background-size: 8px 8px;
+    background-position: 0 0, 4px 4px;
+}
+
+.app-shell[data-active-section='editor'] .preview-shell.checker-active.checker-dark .preview-stage {
+    background:
+        linear-gradient(45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.08) 75%),
+        linear-gradient(45deg, rgba(255, 255, 255, 0.08) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, 0.08) 75%);
+    background-color: #0f0f0f;
+    background-size: 8px 8px;
+    background-position: 0 0, 4px 4px;
+}
+
+.app-shell[data-active-section='editor'] .preview-shell.zoom-locked {
+    box-shadow: var(--studio-neu-shadow-card), inset 0 0 0 2px color-mix(in srgb, var(--studio-accent) 20%, transparent);
+}
+
+.app-shell[data-active-section='editor'] .preview-shell.has-source.zoom-locked {
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .preview-shell.has-source.zoom-locked .preview-stage {
+    box-shadow:
+        var(--studio-neu-shadow-inset),
+        inset 0 0 0 2px color-mix(in srgb, var(--studio-accent) 20%, transparent);
+}
+
+.app-shell[data-active-section='editor'] .preview-loupe {
+    border-radius: 20px;
+}
+
+.app-shell[data-active-section='editor'] .grade-wheel-surface {
+    border: none;
+    border-radius: 20px;
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell[data-active-section='editor'] .grade-wheel-handle,
+.app-shell[data-active-section='editor'] .grade-swatch,
+.app-shell[data-active-section='editor'] .ca-pin-overlay {
+    border: none;
+    box-shadow: var(--studio-neu-shadow-button-soft);
+}
+
+.app-shell[data-active-section='editor'] .section-header-status {
+    background: transparent;
+    box-shadow: none;
+}
+
+.app-shell[data-active-section='editor'] .section-header-status span {
+    color: var(--studio-neu-muted);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell[data-active-section='editor'] .section-header-status.is-success span {
+    color: var(--studio-success);
+}
+
+.app-shell[data-active-section='editor'] .section-header-status.is-warning span {
+    color: var(--studio-warning);
+}
+
+.app-shell[data-active-section='editor'] .section-header-status.is-error span {
+    color: var(--studio-danger);
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar,
+.library-toolbar {
+    background: var(--studio-neu-surface);
+    border: none;
+    border-radius: 22px;
+    box-shadow: var(--studio-neu-shadow-header);
+    color: var(--studio-neu-text);
+    padding: 12px 14px;
+    position: relative;
+    z-index: 1;
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar {
+    overflow: visible;
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-switcher-buttons,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-cluster,
+.library-toolbar .library-toolbar-page,
+.library-toolbar .library-page-tabs {
+    gap: 8px;
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .mode-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mode-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .primary-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .secondary-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mini-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .icon-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-toggle,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .tiny-toggle,
+.library-toolbar .toolbar-button,
+.library-toolbar .mode-button {
+    border: none;
+    border-radius: 999px;
+    background: var(--studio-neu-button-fill);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-button);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-toggle,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .tiny-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .mode-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mode-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .primary-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .secondary-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mini-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .icon-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-toggle:hover,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .tiny-toggle:hover,
+.library-toolbar .toolbar-button:hover:not(:disabled),
+.library-toolbar .mode-button:hover:not(:disabled) {
+    background: var(--studio-neu-button-fill-hover);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+    transform: translateY(-1px);
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .mode-button:active:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .mode-button.is-active,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-button:active:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-button.is-active,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mode-button:active:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mode-button.is-active,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .primary-button,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .secondary-button.is-active,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mini-button.is-active,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .icon-button.is-active,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-toggle:has(input:checked),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .tiny-toggle:has(input:checked),
+.library-toolbar .toolbar-button:active:not(:disabled),
+.library-toolbar .toolbar-button[aria-pressed="true"],
+.library-toolbar .mode-button:active:not(:disabled),
+.library-toolbar .mode-button.is-active {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+    color: var(--studio-neu-text);
+    transform: translateY(0);
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .mode-button:disabled,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-button:disabled,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mode-button:disabled,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .primary-button:disabled,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .secondary-button:disabled,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mini-button:disabled,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .icon-button:disabled,
+.library-toolbar .toolbar-button:disabled,
+.library-toolbar .mode-button:disabled {
+    opacity: 0.52;
+    box-shadow: none;
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .mode-button.is-active:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-button.is-active:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mode-button.is-active:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .primary-button:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .secondary-button.is-active:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .mini-button.is-active:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .icon-button.is-active:hover:not(:disabled),
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-toggle:has(input:checked):hover,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .tiny-toggle:has(input:checked):hover,
+.library-toolbar .toolbar-button[aria-pressed="true"]:hover:not(:disabled),
+.library-toolbar .mode-button.is-active:hover:not(:disabled) {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+    transform: translateY(0);
+}
+
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .toolbar-toggle input,
+.app-shell:not([data-active-section='editor']) > #toolbarSlot > .toolbar .tiny-toggle input {
+    accent-color: var(--studio-accent);
+}
+
+.app-shell[data-active-section='composite'] > #toolbarSlot > .toolbar {
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    color: var(--studio-neu-muted);
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status span {
+    border: none;
+    background: var(--studio-neu-surface);
+    color: var(--studio-neu-muted);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status.is-success span {
+    color: var(--studio-success);
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status.is-warning span {
+    color: var(--studio-warning);
+}
+
+.app-shell:not([data-active-section='editor']) > #sectionTabsSlot > .section-switcher .section-header-status.is-error span {
+    color: var(--studio-danger);
 }
 
 .inspector-note {
@@ -2203,6 +3077,351 @@ code {
     line-height: 1.5;
 }
 
+.library-panel-shell {
+    gap: 12px;
+    border: none;
+    background: transparent;
+    overflow: visible;
+}
+
+.library-toolbar-title,
+.library-label,
+.library-fullscreen-label,
+.library-layer-card-header strong,
+.library-layer-card-header span,
+.library-detail-meta,
+.library-param-key,
+.library-param-val,
+.library-card-dimensions,
+.library-side-summary,
+.library-side-label,
+.library-selected-meta,
+.library-empty-state span,
+.library-side-empty,
+.library-count-text,
+.library-loading-log-head,
+.library-loading-log-time {
+    color: var(--studio-neu-muted);
+}
+
+.library-page-tabs {
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.library-toolbar-page {
+    justify-content: space-between;
+}
+
+.library-content,
+.library-detail-shell,
+.library-modal-box,
+.library-loading-log-shell {
+    border: none;
+    border-radius: 26px;
+    background: var(--studio-neu-surface);
+    box-shadow: var(--studio-neu-shadow-card);
+}
+
+.library-content {
+    overflow: auto;
+}
+
+.library-grid-view {
+    padding: 16px 18px 22px;
+}
+
+.library-empty-state {
+    background: transparent;
+}
+
+.library-empty-state strong,
+.library-card-title,
+.library-side-header strong,
+.library-side-section h3,
+.library-detail-sidebar-header h3,
+.library-status-text {
+    color: var(--studio-neu-text);
+}
+
+.library-grid-item,
+.library-layer-card,
+.library-source-info,
+.library-side-section,
+.library-modal-choice {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+}
+
+.library-grid-item {
+    margin: 0 0 14px;
+    border-radius: 26px;
+    padding: 0;
+    background: var(--studio-neu-surface);
+    box-shadow: var(--studio-neu-shadow-inset);
+    transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.library-asset-grid .library-grid-item {
+    margin: 0;
+}
+
+.library-grid-item:hover,
+.library-panel-shell.is-list-layout .library-grid-item:hover {
+    transform: none;
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.library-grid-item.is-selected {
+    box-shadow: var(--studio-neu-shadow-inset), inset 0 0 0 2px color-mix(in srgb, var(--studio-accent) 22%, transparent);
+}
+
+.library-selection-badge {
+    border: none;
+    border-radius: 999px;
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+    color: var(--studio-neu-text);
+}
+
+.library-delete-button {
+    border: none;
+    background: var(--studio-neu-button-fill);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+    color: color-mix(in srgb, var(--studio-danger) 78%, var(--studio-neu-text));
+}
+
+.library-image-container,
+.library-asset-thumb {
+    border: none;
+    border-radius: 18px;
+    background: var(--studio-neu-surface-soft);
+    box-shadow: none;
+}
+
+.library-detail-image-pane {
+    border: none;
+    border-radius: 18px;
+    background: var(--studio-neu-surface-soft);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.library-image-container,
+.library-grid-item > .library-asset-thumb {
+    margin-bottom: 8px;
+    border-radius: 26px 26px 0 0;
+}
+
+.library-panel-shell.is-list-layout .library-image-container,
+.library-panel-shell.is-list-layout .library-asset-thumb {
+    border-right: none;
+    margin: 0 8px 0 0;
+    border-radius: 26px 0 0 26px;
+}
+
+.library-asset-thumb {
+    background:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.26), transparent 58%),
+        linear-gradient(180deg, color-mix(in srgb, var(--studio-neu-surface-soft) 88%, white 12%), color-mix(in srgb, var(--studio-neu-surface) 84%, black 16%));
+}
+
+:root[data-theme="dark"] .library-asset-thumb {
+    background:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.08), transparent 58%),
+        linear-gradient(180deg, color-mix(in srgb, var(--studio-neu-surface-soft) 86%, white 14%), color-mix(in srgb, var(--studio-neu-surface) 88%, black 12%));
+}
+
+.library-asset-thumb.is-image {
+    background: var(--studio-neu-surface-soft);
+}
+
+.library-asset-thumb span {
+    border: none;
+    border-radius: 16px;
+    background: var(--studio-neu-button-fill);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+    color: var(--studio-neu-text);
+}
+
+.library-card-meta {
+    background: transparent;
+    padding: 10px 18px 20px;
+    gap: 5px;
+}
+
+.library-panel-shell .toolbar-button,
+.library-panel-shell .mode-button,
+.library-modal-overlay .toolbar-button,
+.library-detail-overlay .toolbar-button {
+    border: none;
+    border-radius: 999px;
+    background: var(--studio-neu-button-fill);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-button);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+
+.library-panel-shell .toolbar-button:hover:not(:disabled),
+.library-panel-shell .mode-button:hover:not(:disabled),
+.library-modal-overlay .toolbar-button:hover:not(:disabled),
+.library-detail-overlay .toolbar-button:hover:not(:disabled),
+.library-filter-chip:hover,
+.library-side-tab:hover,
+.library-param-toggle:hover {
+    background: var(--studio-neu-button-fill-hover);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+    transform: translateY(-1px);
+}
+
+.library-panel-shell .toolbar-button:active:not(:disabled),
+.library-panel-shell .toolbar-button[aria-pressed="true"],
+.library-panel-shell .mode-button:active:not(:disabled),
+.library-panel-shell .mode-button.is-active,
+.library-modal-overlay .toolbar-button:active:not(:disabled),
+.library-detail-overlay .toolbar-button:active:not(:disabled),
+.library-filter-chip.is-active,
+.library-side-tab.is-open,
+.library-param-toggle:active:not(:disabled) {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+    transform: translateY(0);
+}
+
+.library-panel-shell .toolbar-button:disabled,
+.library-panel-shell .mode-button:disabled,
+.library-modal-overlay .toolbar-button:disabled,
+.library-detail-overlay .toolbar-button:disabled {
+    opacity: 0.52;
+    box-shadow: none;
+}
+
+.library-panel-shell .toolbar-button[aria-pressed="true"]:hover:not(:disabled),
+.library-panel-shell .mode-button.is-active:hover:not(:disabled),
+.library-modal-overlay .toolbar-button[aria-pressed="true"]:hover:not(:disabled),
+.library-detail-overlay .toolbar-button[aria-pressed="true"]:hover:not(:disabled),
+.library-filter-chip.is-active:hover,
+.library-side-tab.is-open:hover {
+    background: var(--studio-neu-button-fill-active);
+    box-shadow: var(--studio-neu-shadow-button-pressed);
+    transform: translateY(0);
+}
+
+.library-tag,
+.library-filter-chip,
+.library-side-tab,
+.library-param-toggle,
+.library-modal-actions .toolbar-button,
+.library-detail-sidebar-footer .toolbar-button,
+.library-tag-input-row .toolbar-button {
+    border: none;
+    background: var(--studio-neu-button-fill);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+}
+
+.library-tag,
+.library-filter-chip {
+    border-radius: 999px;
+}
+
+.library-side-tab {
+    right: 2px;
+    border-right: 0;
+}
+
+.library-side-panel {
+    border: none;
+    border-radius: 26px 0 0 26px;
+    background: var(--studio-neu-surface);
+    box-shadow: -18px 0 36px rgba(0, 0, 0, 0.14);
+}
+
+.library-side-scroll {
+    gap: 12px;
+    padding: 12px;
+}
+
+.library-side-header,
+.library-detail-sidebar-header,
+.library-detail-sidebar-footer {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.library-side-content,
+.library-detail-sidebar-scroll {
+    padding: 0;
+}
+
+.library-detail-shell {
+    gap: 12px;
+    padding: 12px;
+}
+
+.library-detail-sidebar {
+    border-left: none;
+    background: transparent;
+    gap: 12px;
+}
+
+:root[data-theme="dark"] .library-detail-image-pane {
+    background: #111111;
+}
+
+.library-layer-card,
+.library-source-info,
+.library-side-section,
+.library-modal-choice {
+    border-radius: 18px;
+}
+
+.library-layer-card-header {
+    border-bottom: none;
+    background: transparent;
+    padding: 8px 10px 0;
+}
+
+.library-layer-card-body,
+.library-source-info {
+    padding: 10px;
+}
+
+.library-side-select,
+.library-tag-input,
+.library-modal-input {
+    border: none;
+    border-radius: 14px;
+    background: var(--studio-neu-surface);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+}
+
+.library-loading-overlay {
+    background: color-mix(in srgb, var(--studio-neu-surface) 64%, transparent);
+}
+
+.library-progress-bar {
+    height: 8px;
+    border: none;
+    border-radius: 999px;
+    background: var(--studio-neu-surface);
+    box-shadow: var(--studio-neu-shadow-inset-soft);
+    overflow: hidden;
+}
+
+.library-progress-fill {
+    border-radius: 999px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--studio-accent) 68%, white 32%) 0%, var(--studio-accent) 100%);
+}
+
 .toolbar-button.is-danger {
     border-color: color-mix(in srgb, #ff5a5a 48%, var(--line));
     color: #ffb8b8;
@@ -2218,7 +3437,7 @@ code {
 
     .library-detail-sidebar {
         border-left: 0;
-        border-top: 1px solid var(--line);
+        border-top: 0;
     }
 }
 
@@ -2986,6 +4205,6 @@ code {
 
     .library-detail-sidebar {
         border-left: 0;
-        border-top: 1px solid var(--line);
+        border-top: 0;
     }
 }
