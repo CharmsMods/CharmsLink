@@ -1,5 +1,6 @@
 import { validateImportPayload } from '../../io/documents.js';
 import { computeAnalysisVisualsJs, computeDiffPreviewJs, extractPaletteFromFileJs } from '../../editor/backgroundCompute.js';
+import { exportDngBufferToPng16, prepareDngBuffer, probeDngBuffer } from '../../editor/dngProcessing.js';
 import { getEditorWasmRuntime } from '../../wasm/editorRuntime.js';
 import { reviveWorkerSingleFile } from '../filePayload.js';
 
@@ -333,6 +334,70 @@ export const editorTaskHandlers = {
                 taskMs,
                 fallbackReason
             }
+        };
+    },
+    async 'probe-dng-source'(payload = {}, context) {
+        context.assertNotCancelled();
+        const file = reviveWorkerSingleFile(payload.fileEntry, payload.file);
+        if (!file) {
+            throw new Error('No DNG file was provided for probing.');
+        }
+        context.log('active', `Probing DNG source "${file.name || 'source'}".`);
+        context.progress(0.12, 'Reading the DNG source...');
+        const buffer = await file.arrayBuffer();
+        context.assertNotCancelled();
+        context.progress(0.56, 'Inspecting TIFF / DNG metadata...');
+        const result = await probeDngBuffer(buffer);
+        context.assertNotCancelled();
+        context.progress(1, 'DNG probe complete.');
+        context.log('info', `Detected ${result?.probe?.compressionLabel || 'DNG'} source (${result?.probe?.width || 0} x ${result?.probe?.height || 0}, ${result?.probe?.classificationMode || 'unknown'}).`);
+        return result;
+    },
+    async 'prepare-dng-source'(payload = {}, context) {
+        context.assertNotCancelled();
+        if (!(payload.buffer instanceof ArrayBuffer)) {
+            throw new Error('No DNG byte buffer was provided for preparation.');
+        }
+        const previewQuality = payload.previewQuality === 'high' ? 'high' : 'fast';
+        context.log('active', `Preparing DNG preview (${previewQuality}).`);
+        context.progress(0.12, 'Parsing DNG metadata...');
+        const prepared = await prepareDngBuffer(payload.buffer, payload.params, {
+            previewQuality
+        });
+        context.assertNotCancelled();
+        context.progress(1, 'DNG preview ready.');
+        const rgba8 = prepared.rgba8 instanceof Uint8ClampedArray
+            ? prepared.rgba8
+            : new Uint8ClampedArray(prepared.rgba8 || []);
+        const rgba8Buffer = rgba8.buffer.slice(rgba8.byteOffset, rgba8.byteOffset + rgba8.byteLength);
+        return {
+            payload: {
+                ...prepared,
+                rgba8: rgba8Buffer
+            },
+            transfer: [rgba8Buffer]
+        };
+    },
+    async 'export-png16'(payload = {}, context) {
+        context.assertNotCancelled();
+        if (!(payload.buffer instanceof ArrayBuffer)) {
+            throw new Error('No DNG byte buffer was provided for PNG export.');
+        }
+        context.log('active', 'Rendering DNG export to 16-bit PNG.');
+        context.progress(0.14, 'Preparing the high-quality DNG render...');
+        const exported = await exportDngBufferToPng16(payload.buffer, payload.params, {});
+        context.assertNotCancelled();
+        context.progress(1, '16-bit PNG export ready.');
+        const pngBytes = exported.pngBytes instanceof Uint8Array
+            ? exported.pngBytes
+            : new Uint8Array(exported.pngBytes || []);
+        const pngBuffer = pngBytes.buffer.slice(pngBytes.byteOffset, pngBytes.byteOffset + pngBytes.byteLength);
+        return {
+            payload: {
+                ...exported,
+                pngBytes: pngBuffer
+            },
+            transfer: [pngBuffer]
         };
     }
 };

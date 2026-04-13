@@ -4,27 +4,71 @@ import { updateHistogram, updateVectorscope, updateParade } from '../analysis/sc
 import { hasRenderableLayers } from '../state/documentHelpers.js';
 import { getLayerPreviewViews } from './layerPreviewProviders.js';
 import { applyCropTransformToPlacement, getCropTransformMetrics } from './cropTransformShared.js';
+import { encodePng16Rgba } from '../editor/png16.js';
+import { computeDngDevelopGeometry, isDngSource, normalizeDngDevelopParams } from '../editor/dngDevelopShared.js';
+import { computeContainedPlacement } from '../editor/baseCanvas.js';
 
-function createTexture(gl, source, width, height, highPrecision = false) {
+function isImageLikeSource(source) {
+    return !!source && (
+        (typeof HTMLImageElement !== 'undefined' && source instanceof HTMLImageElement)
+        || (typeof HTMLCanvasElement !== 'undefined' && source instanceof HTMLCanvasElement)
+        || (typeof ImageBitmap !== 'undefined' && source instanceof ImageBitmap)
+        || (typeof OffscreenCanvas !== 'undefined' && source instanceof OffscreenCanvas)
+    );
+}
+
+function createCanvasSurface(width = 1, height = 1) {
+    const safeWidth = Math.max(1, Math.round(Number(width) || 1));
+    const safeHeight = Math.max(1, Math.round(Number(height) || 1));
+    if (typeof OffscreenCanvas === 'function' && typeof document === 'undefined') {
+        return new OffscreenCanvas(safeWidth, safeHeight);
+    }
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+        const canvas = document.createElement('canvas');
+        canvas.width = safeWidth;
+        canvas.height = safeHeight;
+        return canvas;
+    }
+    if (typeof OffscreenCanvas === 'function') {
+        return new OffscreenCanvas(safeWidth, safeHeight);
+    }
+    throw new Error('Canvas creation is unavailable in this runtime.');
+}
+
+async function canvasToBlob(canvas, type = 'image/png') {
+    if (canvas?.convertToBlob) {
+        return canvas.convertToBlob({ type });
+    }
+    if (canvas?.toBlob) {
+        return new Promise((resolve) => canvas.toBlob(resolve, type));
+    }
+    throw new Error('This canvas surface cannot export blobs.');
+}
+
+function createTexture(gl, source, width, height, highPrecision = false, options = {}) {
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, options.wrapS ?? gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, options.wrapT ?? gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, options.minFilter ?? gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, options.magFilter ?? gl.LINEAR);
 
-    const internalFormat = highPrecision ? gl.RGBA16F : gl.SRGB8_ALPHA8;
-    const format = gl.RGBA;
-    const type = highPrecision ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+    const internalFormat = options.internalFormat ?? (highPrecision ? gl.RGBA16F : gl.SRGB8_ALPHA8);
+    const format = options.format ?? gl.RGBA;
+    const type = options.type ?? (highPrecision ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE);
 
-    if (source && (source instanceof HTMLImageElement || source instanceof HTMLCanvasElement || source instanceof ImageBitmap)) {
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    if (isImageLikeSource(source)) {
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, options.flipY ?? true);
         gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, format, type, source);
+    } else if (ArrayBuffer.isView(source) || source instanceof ArrayBuffer) {
+        const view = source instanceof ArrayBuffer ? new Uint8Array(source) : source;
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, options.flipY ?? false);
+        gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, Math.max(1, width), Math.max(1, height), 0, format, type, view);
     } else {
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, options.flipY ?? false);
         gl.texImage2D(gl.TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, source || null);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     }
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     return texture;
 }
 
@@ -35,9 +79,34 @@ function createFramebuffer(gl, texture) {
     return fbo;
 }
 
-function makeFbo(gl, width, height, highPrecision = true) {
-    const tex = createTexture(gl, null, width, height, highPrecision);
+function makeFbo(gl, width, height, highPrecision = true, options = {}) {
+    const tex = createTexture(gl, null, width, height, highPrecision, options);
     return { tex, fbo: createFramebuffer(gl, tex) };
+}
+
+function destroyFbo(gl, target) {
+    if (!gl || !target) return;
+    if (target.tex) gl.deleteTexture(target.tex);
+    if (target.fbo) gl.deleteFramebuffer(target.fbo);
+}
+
+function flipPixelRows(pixels, width, height, channels = 4) {
+    const output = pixels instanceof Float32Array
+        ? new Float32Array(pixels.length)
+        : new Uint8Array(pixels.length);
+    const rowSize = width * channels;
+    for (let y = 0; y < height; y += 1) {
+        const srcOffset = (height - 1 - y) * rowSize;
+        const dstOffset = y * rowSize;
+        output.set(pixels.subarray(srcOffset, srcOffset + rowSize), dstOffset);
+    }
+    return output;
+}
+
+function srgbEncode(linear) {
+    const value = Math.min(1, Math.max(0, Number(linear) || 0));
+    if (value <= 0.0031308) return value * 12.92;
+    return (1.055 * Math.pow(value, 1 / 2.4)) - 0.055;
 }
 
 function clampScale(width, height, maxDim) {
@@ -164,7 +233,15 @@ export class NoiseStudioEngine {
             timeSeconds: 0,
             initialRes: { w: 1, h: 1 },
             hasRenderableLayers: false,
-            sourcePlacement: { x: 0, y: 0, w: 1, h: 1 }
+            sourcePlacement: { x: 0, y: 0, w: 1, h: 1 },
+            dngSource: null,
+            dngBaseOutput: null,
+            readbackCanvas: null,
+            readbackCtx: null,
+            readbackPixels: null,
+            readbackClamped: null,
+            pendingRenderState: null,
+            pendingRenderOptions: null
         };
         this.analysisTaskVersion = 0;
         this.analysisAbortController = null;
@@ -183,11 +260,152 @@ export class NoiseStudioEngine {
         this.runtime.programs = programs;
         this.runtime.textures.white = createTexture(gl, new Uint8Array([255, 255, 255, 255]), 1, 1, false);
         this.runtime.textures.black = createTexture(gl, new Uint8Array([0, 0, 0, 255]), 1, 1, false);
+        this.runtime.ensureRenderPool = (width, height) => this.ensurePool(width, height);
         this.allocateStaticBuffers();
     }
 
     attachRefs(refs) {
         this.refs = { ...this.refs, ...refs };
+    }
+
+    clearDngSourceResources() {
+        const { gl } = this.runtime;
+        const current = this.runtime.dngSource;
+        if (!gl || !current) {
+            this.runtime.dngSource = null;
+            this.runtime.dngBaseOutput = null;
+            return;
+        }
+        if (current.rawTexture) gl.deleteTexture(current.rawTexture);
+        if (current.linearizationTexture) gl.deleteTexture(current.linearizationTexture);
+        (current.gainMapTextures || []).forEach((entry) => {
+            if (entry?.texture) gl.deleteTexture(entry.texture);
+        });
+        this.runtime.dngSource = null;
+        this.runtime.dngBaseOutput = null;
+    }
+
+    buildDngRawTexture(source) {
+        const { gl } = this.runtime;
+        const rawRaster = source?.rawRaster || {};
+        const width = Math.max(1, Number(rawRaster.width) || 1);
+        const height = Math.max(1, Number(rawRaster.height) || 1);
+        const samplesPerPixel = Math.max(1, Number(rawRaster.samplesPerPixel) || 1);
+        const rawData = rawRaster.data instanceof Float32Array
+            ? rawRaster.data
+            : new Float32Array(rawRaster.data || []);
+
+        if (samplesPerPixel <= 1) {
+            return {
+                texture: createTexture(gl, rawData, width, height, true, {
+                    internalFormat: gl.R32F,
+                    format: gl.RED,
+                    type: gl.FLOAT,
+                    minFilter: gl.NEAREST,
+                    magFilter: gl.NEAREST,
+                    flipY: false
+                }),
+                width,
+                height
+            };
+        }
+
+        const packed = new Float32Array(width * height * 4);
+        for (let index = 0; index < width * height; index += 1) {
+            const srcOffset = index * samplesPerPixel;
+            const dstOffset = index * 4;
+            packed[dstOffset] = rawData[srcOffset] || 0;
+            packed[dstOffset + 1] = rawData[srcOffset + 1] ?? packed[dstOffset];
+            packed[dstOffset + 2] = rawData[srcOffset + 2] ?? packed[dstOffset + 1];
+            packed[dstOffset + 3] = 1;
+        }
+        return {
+            texture: createTexture(gl, packed, width, height, true, {
+                internalFormat: gl.RGBA32F,
+                format: gl.RGBA,
+                type: gl.FLOAT,
+                minFilter: gl.NEAREST,
+                magFilter: gl.NEAREST,
+                flipY: false
+            }),
+            width,
+            height
+        };
+    }
+
+    buildDngLinearizationTexture(source) {
+        const { gl } = this.runtime;
+        const table = source?.metadata?.linearizationTable;
+        if (!(table instanceof Float32Array) || !table.length) {
+            return null;
+        }
+        return {
+            texture: createTexture(gl, table, table.length, 1, true, {
+                internalFormat: gl.R32F,
+                format: gl.RED,
+                type: gl.FLOAT,
+                minFilter: gl.NEAREST,
+                magFilter: gl.NEAREST,
+                flipY: false
+            }),
+            size: table.length
+        };
+    }
+
+    buildDngGainMapTextures(source) {
+        const { gl } = this.runtime;
+        const maps = Array.isArray(source?.metadata?.gainMaps) ? source.metadata.gainMaps : [];
+        return maps.slice(0, 8).map((entry) => {
+            const gains = entry?.gains instanceof Float32Array
+                ? entry.gains
+                : new Float32Array(entry?.gains || []);
+            const width = Math.max(1, Number(entry?.mapPointsH) || 1);
+            const height = Math.max(1, Number(entry?.mapPointsV) || 1);
+            const mapPlanes = Math.max(1, Number(entry?.mapPlanes) || 1);
+            return {
+                ...entry,
+                texture: createTexture(gl, gains, width, height * mapPlanes, true, {
+                    internalFormat: gl.R32F,
+                    format: gl.RED,
+                    type: gl.FLOAT,
+                    minFilter: gl.LINEAR,
+                    magFilter: gl.LINEAR,
+                    flipY: false
+                }),
+                width,
+                height
+            };
+        });
+    }
+
+    async loadDngSource(decodedSource, sourceMeta = {}) {
+        this.clearDngSourceResources();
+        if (!decodedSource?.rawRaster?.data) {
+            return null;
+        }
+        const rawTexture = this.buildDngRawTexture(decodedSource);
+        const linearizationTexture = this.buildDngLinearizationTexture(decodedSource);
+        const gainMapTextures = this.buildDngGainMapTextures(decodedSource);
+        const metadata = decodedSource?.metadata || {};
+        this.runtime.dngSource = {
+            ...decodedSource,
+            metadata,
+            sourceMeta,
+            rawTexture: rawTexture?.texture || null,
+            rawTextureWidth: rawTexture?.width || Math.max(1, Number(decodedSource?.rawRaster?.width) || 1),
+            rawTextureHeight: rawTexture?.height || Math.max(1, Number(decodedSource?.rawRaster?.height) || 1),
+            linearizationTexture: linearizationTexture?.texture || null,
+            linearizationSize: linearizationTexture?.size || 0,
+            gainMapTextures
+        };
+        this.runtime.dngBaseOutput = null;
+        this.hooks.onSourceLoaded?.({
+            ...sourceMeta,
+            kind: sourceMeta.kind || 'dng',
+            width: Number(sourceMeta.width) || Number(decodedSource?.probe?.width) || Number(decodedSource?.rawRaster?.width) || 1,
+            height: Number(sourceMeta.height) || Number(decodedSource?.probe?.height) || Number(decodedSource?.rawRaster?.height) || 1
+        });
+        return this.runtime.dngSource;
     }
 
     allocateStaticBuffers() {
@@ -248,6 +466,7 @@ export class NoiseStudioEngine {
 
     async loadImage(image, source) {
         const { gl } = this.runtime;
+        this.clearDngSourceResources();
         this.runtime.baseImage = image;
         this.runtime.sourceWidth = image.width;
         this.runtime.sourceHeight = image.height;
@@ -260,23 +479,60 @@ export class NoiseStudioEngine {
         this.runtime.layerLayouts = {};
         this.runtime.selectedLayerContext = null;
         this.runtime.selectedLayerOutput = null;
-        this.hooks.onSourceLoaded?.({
-            ...source,
-            width: image.width,
-            height: image.height
-        });
+        if (!isDngSource(source)) {
+            this.hooks.onSourceLoaded?.({
+                ...source,
+                width: image.width,
+                height: image.height
+            });
+        }
     }
 
     hasImage() {
-        return !!this.runtime.baseImage;
+        return !!(this.runtime.baseImage || this.runtime.dngSource);
     }
 
     requestRender(documentState, options = {}) {
-        if (!this.runtime.baseImage || this.runtime.renderRequested) return;
+        if (!this.hasImage()) return;
+        const pending = this.runtime.pendingRenderOptions || {};
+        const mergedOptions = {
+            ...pending,
+            ...options
+        };
+        if (pending.onComplete && options.onComplete) {
+            mergedOptions.onComplete = () => {
+                try {
+                    pending.onComplete();
+                } finally {
+                    options.onComplete();
+                }
+            };
+        }
+        if (pending.onStart && options.onStart) {
+            mergedOptions.onStart = () => {
+                pending.onStart();
+                options.onStart();
+            };
+        }
+        this.runtime.pendingRenderState = documentState;
+        this.runtime.pendingRenderOptions = mergedOptions;
+        if (this.runtime.renderRequested) return;
         this.runtime.renderRequested = true;
         requestAnimationFrame(() => {
             this.runtime.renderRequested = false;
-            this.render(documentState, options);
+            const nextState = this.runtime.pendingRenderState || documentState;
+            const nextOptions = this.runtime.pendingRenderOptions || {};
+            this.runtime.pendingRenderState = null;
+            this.runtime.pendingRenderOptions = null;
+            nextOptions.onStart?.();
+            try {
+                this.render(nextState, nextOptions);
+            } finally {
+                nextOptions.onComplete?.();
+                if (this.runtime.pendingRenderState) {
+                    this.requestRender(this.runtime.pendingRenderState, this.runtime.pendingRenderOptions || {});
+                }
+            }
         });
     }
 
@@ -296,6 +552,7 @@ export class NoiseStudioEngine {
                 blur2: makeFbo(gl, width, height),
                 preview: makeFbo(gl, width, height),
                 chainCapture: makeFbo(gl, width, height),
+                dngBase: makeFbo(gl, width, height),
                 maskTotal: makeFbo(gl, width, height),
                 writeIdx: 0
             };
@@ -374,6 +631,21 @@ export class NoiseStudioEngine {
                     currentHeightFloat = cropMetrics.cropHeightFloat;
                     currentWidth = cropMetrics.outputWidth;
                     currentHeight = cropMetrics.outputHeight;
+                } else if (instance.layerId === 'dngDevelop' && this.runtime.dngSource) {
+                    const geometry = computeDngDevelopGeometry(this.runtime.dngSource, instance.params);
+                    sourcePlacement = {
+                        x: 0,
+                        y: 0,
+                        w: currentWidthFloat,
+                        h: currentHeightFloat
+                    };
+                    const placement = computeContainedPlacement(currentWidthFloat, currentHeightFloat, geometry.width, geometry.height);
+                    sourcePlacement = {
+                        x: placement.x,
+                        y: placement.y,
+                        w: placement.width,
+                        h: placement.height
+                    };
                 }
                 this.runtime.layerResolutions[instance.instanceId] = { w: currentWidth, h: currentHeight };
                 this.runtime.layerLayouts[instance.instanceId] = {
@@ -406,12 +678,14 @@ export class NoiseStudioEngine {
         this.runtime.fbos.blur2 = pool.blur2.fbo;
         this.runtime.fbos.preview = pool.preview.fbo;
         this.runtime.fbos.chainCapture = pool.chainCapture.fbo;
+        this.runtime.fbos.dngBase = pool.dngBase.fbo;
         this.runtime.fbos.maskTotal = pool.maskTotal.fbo;
         this.runtime.textures.tempNoise = pool.tempNoise.tex;
         this.runtime.textures.blur1 = pool.blur1.tex;
         this.runtime.textures.blur2 = pool.blur2.tex;
         this.runtime.textures.preview = pool.preview.tex;
         this.runtime.textures.chainCapture = pool.chainCapture.tex;
+        this.runtime.textures.dngBase = pool.dngBase.tex;
         this.runtime.textures.maskTotal = pool.maskTotal.tex;
     }
 
@@ -469,6 +743,55 @@ export class NoiseStudioEngine {
         if (this.refs.renderResolutionEl && Number.isFinite(metrics.renderWidth) && Number.isFinite(metrics.renderHeight)) {
             this.refs.renderResolutionEl.textContent = `${metrics.renderWidth} x ${metrics.renderHeight}`;
         }
+    }
+
+    ensureReadbackCanvas(width, height) {
+        const safeWidth = Math.max(1, Math.round(Number(width) || 1));
+        const safeHeight = Math.max(1, Math.round(Number(height) || 1));
+        if (!this.runtime.readbackCanvas) {
+            this.runtime.readbackCanvas = document.createElement('canvas');
+            this.runtime.readbackCtx = this.runtime.readbackCanvas.getContext('2d', { willReadFrequently: true });
+        }
+        if (this.runtime.readbackCanvas.width !== safeWidth || this.runtime.readbackCanvas.height !== safeHeight) {
+            this.runtime.readbackCanvas.width = safeWidth;
+            this.runtime.readbackCanvas.height = safeHeight;
+            this.runtime.readbackPixels = new Uint8Array(safeWidth * safeHeight * 4);
+            this.runtime.readbackClamped = new Uint8ClampedArray(safeWidth * safeHeight * 4);
+        }
+        return this.runtime.readbackCanvas;
+    }
+
+    drawTextureToCanvas(texture, canvas, resolution = null) {
+        if (!texture || !canvas) return;
+        const { gl } = this.runtime;
+        const width = Math.max(1, Number(resolution?.w || canvas.width || this.runtime.renderWidth || 1));
+        const height = Math.max(1, Number(resolution?.h || canvas.height || this.runtime.renderHeight || 1));
+        if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+        }
+        this.ensureReadbackCanvas(width, height);
+        if (!this.runtime.readbackPixels || this.runtime.readbackPixels.length !== width * height * 4) {
+            this.runtime.readbackPixels = new Uint8Array(width * height * 4);
+            this.runtime.readbackClamped = new Uint8ClampedArray(width * height * 4);
+        }
+        const pool = this.ensurePool(width, height);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, pool.preview.fbo);
+        gl.viewport(0, 0, width, height);
+        gl.useProgram(this.runtime.programs.final);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.uniform1i(gl.getUniformLocation(this.runtime.programs.final, 'u_tex'), 0);
+        gl.uniform2f(gl.getUniformLocation(this.runtime.programs.final, 'u_res'), width, height);
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, this.runtime.readbackPixels);
+        for (let y = 0; y < height; y += 1) {
+            const srcOffset = (height - 1 - y) * width * 4;
+            const dstOffset = y * width * 4;
+            this.runtime.readbackClamped.set(this.runtime.readbackPixels.subarray(srcOffset, srcOffset + width * 4), dstOffset);
+        }
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.putImageData(new ImageData(this.runtime.readbackClamped, width, height), 0, 0);
     }
 
     applyScopeAnalysisResult(result = {}) {
@@ -626,7 +949,7 @@ export class NoiseStudioEngine {
     }
 
     render(documentState, options = {}) {
-        if (!this.runtime.baseImage) return;
+        if (!this.hasImage()) return null;
         const isExport = !!options.isExport;
         const { gl } = this.runtime;
         this.runtime.timeSeconds = (performance.now() % 100000) / 1000;
@@ -649,6 +972,7 @@ export class NoiseStudioEngine {
             w: this.runtime.initialRes.w,
             h: this.runtime.initialRes.h
         };
+        this.runtime.dngBaseOutput = null;
 
         if (!this.runtime.hasRenderableLayers) {
             this.runtime.selectedLayerContext = null;
@@ -774,6 +1098,14 @@ export class NoiseStudioEngine {
             currentPlacement = { ...outputPlacement };
             pool.writeIdx = 1 - pool.writeIdx;
 
+            if (instance.enabled && layerDef.layerId === 'dngDevelop') {
+                renderPreviewTexture(gl, this.runtime, currentTex, pool.dngBase.fbo, 0);
+                this.runtime.dngBaseOutput = {
+                    tex: pool.dngBase.tex,
+                    resolution: { ...currentResolution }
+                };
+            }
+
             if (documentState.selection.layerInstanceId === instance.instanceId) {
                 renderPreviewTexture(gl, this.runtime, currentTex, pool.chainCapture.fbo, 0);
                 this.runtime.selectedLayerOutput = pool.chainCapture.tex;
@@ -824,6 +1156,12 @@ export class NoiseStudioEngine {
         } else {
             gl.finish();
         }
+
+        return {
+            finalTexture: currentTex,
+            finalResolution: { w: finalWidth, h: finalHeight },
+            hasRenderableLayers: this.runtime.hasRenderableLayers
+        };
     }
 
     updateScopes(texture) {
@@ -1000,13 +1338,18 @@ export class NoiseStudioEngine {
     }
 
     syncHoverPreview() {
-        if (!this.refs.hoverPreviewCanvas || !this.runtime.baseImage || !this.refs.canvas) return;
+        if (!this.refs.hoverPreviewCanvas || !this.refs.canvas) return;
         const canvas = this.refs.hoverPreviewCanvas;
         const previewResolution = this.getProcessedPreviewResolution();
         if (canvas.width !== previewResolution.w || canvas.height !== previewResolution.h) {
             canvas.width = previewResolution.w;
             canvas.height = previewResolution.h;
         }
+        if (this.runtime.dngSource && this.runtime.dngBaseOutput?.tex) {
+            this.drawTextureToCanvas(this.runtime.dngBaseOutput.tex, canvas, previewResolution);
+            return;
+        }
+        if (!this.runtime.baseImage) return;
         const ctx = canvas.getContext('2d');
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.globalAlpha = 1;
@@ -1108,19 +1451,70 @@ export class NoiseStudioEngine {
 
     async exportPngBlob(documentState) {
         if (!hasRenderableLayers(this.registry, documentState)) {
-            const exportCanvas = document.createElement('canvas');
-            exportCanvas.width = this.runtime.sourceWidth;
-            exportCanvas.height = this.runtime.sourceHeight;
+            const exportCanvas = createCanvasSurface(this.runtime.sourceWidth, this.runtime.sourceHeight);
             const ctx = exportCanvas.getContext('2d');
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
-            ctx.drawImage(this.runtime.baseImage, 0, 0, exportCanvas.width, exportCanvas.height);
-            return new Promise((resolve) => exportCanvas.toBlob(resolve, 'image/png'));
+            if (this.runtime.baseImage) {
+                ctx.drawImage(this.runtime.baseImage, 0, 0, exportCanvas.width, exportCanvas.height);
+            }
+            return canvasToBlob(exportCanvas, 'image/png');
         }
         this.render(documentState, { isExport: true });
-        const blob = await new Promise((resolve) => this.refs.canvas.toBlob(resolve, 'image/png'));
+        const blob = await canvasToBlob(this.refs.canvas, 'image/png');
         this.render(documentState);
         return blob;
+    }
+
+    async exportPng16(documentState) {
+        const renderResult = this.render(documentState, { isExport: true });
+        const finalTexture = renderResult?.finalTexture || null;
+        const resolution = renderResult?.finalResolution || {
+            w: Math.max(1, this.runtime.renderWidth || 1),
+            h: Math.max(1, this.runtime.renderHeight || 1)
+        };
+        if (!finalTexture) {
+            throw new Error('The Editor render pipeline did not expose an exportable DNG texture.');
+        }
+
+        const { gl } = this.runtime;
+        const width = Math.max(1, resolution.w || 1);
+        const height = Math.max(1, resolution.h || 1);
+        const pool = this.ensurePool(width, height);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, pool.preview.fbo);
+        gl.viewport(0, 0, width, height);
+        renderPreviewTexture(gl, this.runtime, finalTexture, pool.preview.fbo, 0);
+        const linearPixels = new Float32Array(width * height * 4);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, linearPixels);
+        const flipped = flipPixelRows(linearPixels, width, height, 4);
+
+        let encodeLinear = false;
+        const dngLayer = (documentState?.layerStack || []).find((instance) => instance?.layerId === 'dngDevelop');
+        if (dngLayer?.params) {
+            const normalizedParams = normalizeDngDevelopParams(dngLayer.params, this.runtime.dngSource?.probe);
+            encodeLinear = normalizedParams.dngWorkingSpace === 'linear';
+        }
+
+        const rgba16 = new Uint16Array(width * height * 4);
+        for (let index = 0; index < width * height; index += 1) {
+            const srcOffset = index * 4;
+            const dstOffset = index * 4;
+            for (let channel = 0; channel < 3; channel += 1) {
+                const linear = Math.min(1, Math.max(0, Number(flipped[srcOffset + channel]) || 0));
+                const encoded = encodeLinear ? linear : srgbEncode(linear);
+                rgba16[dstOffset + channel] = Math.min(65535, Math.max(0, Math.round(encoded * 65535)));
+            }
+            const alpha = Math.min(1, Math.max(0, Number(flipped[srcOffset + 3]) || 0));
+            rgba16[dstOffset + 3] = Math.min(65535, Math.max(0, Math.round(alpha * 65535)));
+        }
+
+        const pngBytes = await encodePng16Rgba(width, height, rgba16);
+        this.render(documentState);
+        return {
+            width,
+            height,
+            pngBytes
+        };
     }
 
     async openCompare(documentState, refs) {
@@ -1137,13 +1531,22 @@ export class NoiseStudioEngine {
         const infoEl = refs.infoEl || refs.compareInfo;
         if (!originalCanvas || !processedCanvas) return;
         originalCanvas.width = 640;
-        originalCanvas.height = Math.round(640 / (this.runtime.sourceWidth / this.runtime.sourceHeight));
+        const originalWidth = this.runtime.dngBaseOutput?.resolution?.w || this.runtime.sourceWidth;
+        const originalHeight = this.runtime.dngBaseOutput?.resolution?.h || this.runtime.sourceHeight;
+        originalCanvas.height = Math.round(640 / (originalWidth / Math.max(1, originalHeight)));
         processedCanvas.width = 640;
         processedCanvas.height = Math.round(640 / (this.runtime.renderWidth / this.runtime.renderHeight));
-        originalCanvas.getContext('2d').drawImage(this.runtime.baseImage, 0, 0, originalCanvas.width, originalCanvas.height);
+        if (this.runtime.dngSource && this.runtime.dngBaseOutput?.tex) {
+            this.drawTextureToCanvas(this.runtime.dngBaseOutput.tex, originalCanvas, {
+                w: originalCanvas.width,
+                h: originalCanvas.height
+            });
+        } else if (this.runtime.baseImage) {
+            originalCanvas.getContext('2d').drawImage(this.runtime.baseImage, 0, 0, originalCanvas.width, originalCanvas.height);
+        }
         processedCanvas.getContext('2d').drawImage(processedLayers ? this.getActiveDisplayCanvas() : this.runtime.baseImage, 0, 0, processedCanvas.width, processedCanvas.height);
         if (infoEl) {
-            infoEl.textContent = `Base ${this.runtime.sourceWidth} x ${this.runtime.sourceHeight} | Render ${this.runtime.renderWidth} x ${this.runtime.renderHeight}`;
+            infoEl.textContent = `Base ${originalWidth} x ${originalHeight} | Render ${this.runtime.renderWidth} x ${this.runtime.renderHeight}`;
         }
         if (processedLayers) this.render(documentState);
     }

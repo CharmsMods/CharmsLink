@@ -1147,10 +1147,13 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         };
     }
 
-    function buildExportBundleForScope(scope, filename) {
+    async function buildExportBundleForScope(scope, filename) {
         const { projects, assets } = getDataForScope(scope);
+        const exportProjects = typeof actions.prepareLibraryProjectsForExport === 'function'
+            ? await actions.prepareLibraryProjectsForExport(projects)
+            : projects;
         return buildLibraryExportBundle({
-            projects,
+            projects: exportProjects,
             assets,
             tagCatalog: getTagCatalogForScope(scope),
             name: stripJsonExtension(filename || getScopeDefaultBaseName(scope)),
@@ -2995,7 +2998,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         );
         if (!filename) return false;
 
-        const bundle = buildExportBundleForScope(exportChoice.scope, filename);
+        const bundle = await buildExportBundleForScope(exportChoice.scope, filename);
         const counts = getExportCounts(exportChoice.scope);
         const summary = formatImportSummary(counts.projectCount, counts.assetCount);
         logLibrary('active', 'library.export', `Preparing a ${exportChoice.scope === 'assets' ? 'Assets' : exportChoice.scope === 'combined' ? 'combined Library + Assets' : 'Library'} export named "${filename}".`);

@@ -1,5 +1,6 @@
 import { saveJsonLocally } from './localSave.js';
 import { normalizeEditorBase, normalizeEditorSource } from '../editor/baseCanvas.js';
+import { isDngSource, stripDngSourceRawPayload } from '../editor/dngDevelopShared.js';
 
 function normalizeStudioPreview(preview) {
     if (!preview || typeof preview !== 'object' || !preview.imageData) {
@@ -15,15 +16,21 @@ function normalizeStudioPreview(preview) {
 
 function buildStudioPayload(state, {
     includeSource = true,
+    includeRawDng = true,
     preview = null
 } = {}) {
     const normalizedSource = normalizeEditorSource(state.source);
+    const serializedSource = includeSource
+        ? (isDngSource(normalizedSource) && includeRawDng === false
+            ? stripDngSourceRawPayload(normalizedSource)
+            : normalizedSource)
+        : null;
     const payload = {
         version: 'mns/v2',
         kind: 'document',
         mode: 'studio',
         workspace: state.workspace,
-        source: includeSource && normalizedSource.imageData ? normalizedSource : null,
+        source: includeSource && (normalizedSource.imageData || normalizedSource.rawData) ? serializedSource : null,
         base: normalizeEditorBase(state.base, normalizedSource),
         palette: state.palette,
         layerStack: state.layerStack,
@@ -58,6 +65,7 @@ export function serializeDocument(state, options = {}) {
         mode: 'studio'
     }, {
         includeSource: true,
+        includeRawDng: options.includeRawDng !== false,
         preview: options.preview || null
     });
 }
@@ -68,6 +76,7 @@ export function serializeState(state, options = {}) {
         : (options || {});
     return buildStudioPayload(state, {
         includeSource: normalizedOptions.includeSource !== false,
+        includeRawDng: normalizedOptions.includeRawDng !== false,
         preview: normalizedOptions.preview || null
     });
 }

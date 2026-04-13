@@ -48,9 +48,9 @@ const DNG_CONTROL_HELP = Object.freeze({
     dngRemosaicMode: 'Rebuilds quad or interleaved sensor layouts into a Bayer-like pattern before demosaic. Standard Bayer and linear files usually should stay on Auto or Off.',
     dngDemosaicQuality: 'Fast uses a smaller reconstruction neighborhood for quicker updates. High uses a wider neighborhood for cleaner detail.',
     dngWhiteBalanceMode: 'As Shot starts from the file camera balance. Custom ignores that baseline and uses the temperature and tint controls directly.',
-    dngTemperatureShift: 'Warms or cools the current baseline without replacing it. On phone-generated linear RGB DNGs, the runtime preserves the embedded balance first and then applies this as an offset.',
+    dngTemperatureShift: 'Warms or cools the file balance without fully replacing the camera white balance.',
     dngTemperatureCustom: 'Sets the color temperature directly when Custom white balance mode is active.',
-    dngTintShift: 'Pushes the current baseline toward green or magenta without replacing it. On phone-generated linear RGB DNGs, this acts as an offset around the preserved embedded balance.',
+    dngTintShift: 'Pushes the camera balance toward green or magenta without replacing the base balance.',
     dngTintCustom: 'Sets the green-magenta balance directly when Custom white balance mode is active.',
     dngApplyCameraMatrix: 'Transforms the sensor color space toward a standard display space using the camera matrix. Turn it off if this path creates unstable color.',
     dngWorkingSpace: 'Chooses the working color space after white balance and camera transform. sRGB is safest, Display P3 is wider, and Linear keeps scene-referred values.',
@@ -61,8 +61,8 @@ const DNG_CONTROL_HELP = Object.freeze({
     dngDenoiseStrength: 'Sets how strongly noise is smoothed before sharpening.',
     dngDetailPreservation: 'Keeps more local contrast when denoise is active. Higher values preserve detail but leave more noise.',
     dngSharpenAmount: 'Adds edge contrast after denoise. Too much will create halos and accentuate sensor artifacts.',
-    dngApplyOpcodeCorrections: 'Standalone opcode execution is not complete in this build. If this toggle is disabled for a file, the runtime detected opcode metadata but does not execute it yet.',
-    dngApplyGainMap: 'Applies parsed gain-map style correction data before tone shaping. Some camera-specific gain maps are still experimental, so leave this off if it causes obvious clipping or color drift.'
+    dngApplyOpcodeCorrections: 'Runs executable DNG opcode corrections from the file metadata. Leave this on unless a file-specific correction causes visible issues.',
+    dngApplyGainMap: 'Applies parsed DNG gain-map corrections in linear space before the final tone shaping.'
 });
 const CONTROL_HELP_DELAY_MS = 1000;
 
@@ -354,11 +354,7 @@ function renderDngDevelopEditor(instance, state) {
             : 'Partial Fidelity';
     const hasLinearization = !!probe.hasLinearizationTable;
     const hasOpcodeList = !!probe.hasOpcodeList;
-    const hasStandaloneOpcodeMetadata = !!probe.hasStandaloneOpcodeMetadata;
-    const hasOnlyGainMapOpcodes = !!probe.hasOnlyGainMapOpcodes;
     const hasGainMap = !!probe.hasGainMap;
-    const hasProfileGainTableMap = !!probe.hasProfileGainTableMap;
-    const usesPhaseAwareGainMaps = !!probe.usesPhaseAwareGainMaps;
     const supportsOrientation = !!probe.supportsOrientationToggle;
     const supportsRemosaic = !!probe.supportsRemosaic;
     const supportsOpcodeCorrections = !!probe.supportsOpcodeCorrections;
@@ -370,16 +366,6 @@ function renderDngDevelopEditor(instance, state) {
     const cameraMatrixLabel = String(probe.make || '').toLowerCase().includes('samsung')
         ? 'Apply Camera Matrix (Experimental)'
         : 'Apply Camera Matrix';
-    const gainMapLabel = !hasGainMap
-        ? 'Apply Gain Map (Not Present)'
-        : supportsGainMapCorrections
-            ? 'Apply Gain Map (Experimental)'
-            : 'Apply Gain Map (Unavailable In This Build)';
-    const opcodeLabel = !hasOpcodeList
-        ? 'Apply Opcode Corrections (Not Present)'
-        : supportsOpcodeCorrections
-            ? 'Apply Opcode Corrections'
-            : 'Apply Opcode Corrections (Unavailable In This Build)';
     const interpretationOptions = [
         { value: 'auto', label: 'Auto' },
         { value: 'linear', label: 'Linear' },
@@ -396,9 +382,6 @@ function renderDngDevelopEditor(instance, state) {
     return `
         <div class="custom-layer-editor dng-develop-editor">
             <div class="info-banner">Changes apply live to the preview. A rendering badge appears on the canvas while heavier DNG updates are rebuilding. Hover any DNG control for a short help tooltip.</div>
-            <div class="button-cluster">
-                <button type="button" class="mini-button" data-action="copy-dng-settings">Copy Current Settings</button>
-            </div>
             <section class="custom-group">
                 <div class="panel-heading">File Info</div>
                 <div class="info-banner is-data"><span>Camera</span><strong>${escapeHtml([probe.make, probe.model].filter(Boolean).join(' ') || source.name || 'DNG Source')}</strong></div>
@@ -450,7 +433,7 @@ function renderDngDevelopEditor(instance, state) {
                     { value: 'as-shot', label: 'As Shot' },
                     { value: 'custom', label: 'Custom' }
                 ], params.dngWhiteBalanceMode, '', DNG_CONTROL_HELP.dngWhiteBalanceMode)}
-                <div class="info-banner">${whiteBalanceUsesOffsets ? (String(probe.classificationMode || '').toLowerCase() === 'linear' && Number(probe.samplesPerPixel || 1) >= 3 ? 'As Shot preserves the embedded RGB balance for this linear phone DNG first. Temperature and tint then act as live offsets around that baseline.' : 'As Shot uses the file neutral balance first. Temperature and tint then act as live offsets around that baseline.') : 'Custom mode uses the temperature and tint controls directly.'}</div>
+                <div class="info-banner">${whiteBalanceUsesOffsets ? 'As Shot uses the file neutral balance first. Temperature and tint then act as live offsets around that baseline.' : 'Custom mode uses the temperature and tint controls directly.'}</div>
                 ${rangeRow(instance, 'dngTemperature', temperatureLabel, 1800, 50000, 10, 6500, false, whiteBalanceUsesOffsets ? DNG_CONTROL_HELP.dngTemperatureShift : DNG_CONTROL_HELP.dngTemperatureCustom)}
                 ${rangeRow(instance, 'dngTint', tintLabel, -100, 100, 1, 0, false, whiteBalanceUsesOffsets ? DNG_CONTROL_HELP.dngTintShift : DNG_CONTROL_HELP.dngTintCustom)}
                 ${checkboxRow(instance, 'dngApplyCameraMatrix', cameraMatrixLabel, params.dngApplyCameraMatrix, '', DNG_CONTROL_HELP.dngApplyCameraMatrix)}
@@ -476,11 +459,10 @@ function renderDngDevelopEditor(instance, state) {
             </section>
             <section class="custom-group">
                 <div class="panel-heading">Corrections</div>
-                ${checkboxRow(instance, 'dngApplyOpcodeCorrections', opcodeLabel, params.dngApplyOpcodeCorrections, (hasOpcodeList && supportsOpcodeCorrections) ? '' : 'disabled', DNG_CONTROL_HELP.dngApplyOpcodeCorrections)}
-                ${checkboxRow(instance, 'dngApplyGainMap', gainMapLabel, params.dngApplyGainMap, (hasGainMap && supportsGainMapCorrections) ? '' : 'disabled', DNG_CONTROL_HELP.dngApplyGainMap)}
-                ${hasStandaloneOpcodeMetadata && !supportsOpcodeCorrections ? '<div class="info-banner">This file carries standalone opcode metadata, but the current runtime does not execute those corrections yet.</div>' : ''}
-                ${hasOnlyGainMapOpcodes ? '<div class="info-banner">This file only carries gain-map opcode entries. There are no separate standalone opcode corrections beyond those gain maps.</div>' : ''}
-                ${hasGainMap && !supportsGainMapCorrections ? `<div class="info-banner">${hasProfileGainTableMap ? 'This file includes a profile gain table. That correction path is still disabled here because it is not reliable on current test files.' : (usesPhaseAwareGainMaps ? 'This file uses phase-aware gain maps. That path is disabled in the current build because it is not color-stable on current Samsung phone test files.' : 'A gain-map payload was detected, but this build does not execute it yet.')}</div>` : ''}
+                ${checkboxRow(instance, 'dngApplyOpcodeCorrections', `Apply Opcode Corrections${!hasOpcodeList ? ' (Not Present)' : supportsOpcodeCorrections ? '' : ' (Pending Build Support)'}`, params.dngApplyOpcodeCorrections, (hasOpcodeList && supportsOpcodeCorrections) ? '' : 'disabled', DNG_CONTROL_HELP.dngApplyOpcodeCorrections)}
+                ${checkboxRow(instance, 'dngApplyGainMap', `Apply Gain Map${!hasGainMap ? ' (Not Present)' : supportsGainMapCorrections ? '' : ' (Pending Build Support)'}`, params.dngApplyGainMap, (hasGainMap && supportsGainMapCorrections) ? '' : 'disabled', DNG_CONTROL_HELP.dngApplyGainMap)}
+                ${hasOpcodeList && !supportsOpcodeCorrections ? '<div class="info-banner">This file carries opcode metadata, but executable opcode support is not finished yet. The toggle stays visible here so the missing capability is explicit instead of silent.</div>' : ''}
+                ${hasGainMap && !supportsGainMapCorrections ? '<div class="info-banner">A gain-map payload was detected, but this build does not execute it yet.</div>' : ''}
                 ${hasOpcodeList || hasGainMap ? '' : '<div class="info-banner">No opcode or gain-map metadata was detected in this file.</div>'}
             </section>
         </div>
@@ -799,8 +781,6 @@ function renderControl(instance, control, state, layerDef) {
             return renderBgPatcherEditor(instance);
         case 'expanderEditor':
             return renderExpanderEditor(instance, state);
-        case 'generatorLayerEditor':
-            return renderGeneratorLayerEditor(instance);
         case 'textLayerEditor':
             return renderTextLayerEditor(instance);
         case 'dngDevelopEditor':
@@ -846,51 +826,6 @@ function renderMask(instance, layerDef) {
         blocks.push(`<label class="check-row"><input type="checkbox" ${instance.params[layerDef.mask.invertKey] ? 'checked' : ''} data-control-instance="${instance.instanceId}" data-control-key="${layerDef.mask.invertKey}"><span>Invert Mask</span></label>`);
     }
     return `<section class="mask-editor"><div class="panel-heading">Mask</div>${blocks.join('')}</section>`;
-}
-
-function renderGeneratorLayerEditor(instance) {
-    return `
-        <div class="control-row">
-            <div class="control-row-top"><label>Generator Type</label></div>
-            <select data-control-instance="${instance.instanceId}" data-control-key="generatorType">
-                <option value="barcode" ${instance.params.generatorType === 'barcode' ? 'selected' : ''}>Bar Code</option>
-            </select>
-        </div>
-        
-        <div class="control-row">
-            <div class="control-row-top"><label>Data</label></div>
-            <input type="text" class="text-input" value="${escapeHtml(instance.params.barcodeData || '123456789')}" data-control-instance="${instance.instanceId}" data-control-key="barcodeData">
-        </div>
-        
-        <div class="control-row control-row-color">
-            <div class="control-row-top">
-                <label>Barcode Color</label>
-                <span class="control-value">${String(instance.params.generatorColor || '#000000').toUpperCase()}</span>
-            </div>
-            <div class="color-row">
-                <input type="color" value="${instance.params.generatorColor || '#000000'}" data-control-instance="${instance.instanceId}" data-control-key="generatorColor">
-            </div>
-        </div>
-        
-        <div class="control-separator"></div>
-        <div class="panel-heading">Placement</div>
-        
-        <div class="button-cluster">
-            <button type="button" class="mini-button ${instance.params.generatorMode === 'fit' ? 'is-active' : ''}" data-action="set-generator-mode" data-instance="${instance.instanceId}" data-mode="fit">Center & Fit</button>
-            <button type="button" class="mini-button ${instance.params.generatorMode === 'free' ? 'is-active' : ''}" data-action="set-generator-mode" data-instance="${instance.instanceId}" data-mode="free">Free Transform</button>
-        </div>
-        
-        ${instance.params.generatorMode === 'free' ? `
-            <div class="info-banner">Drag the asset on canvas to move, or its corners to scale.</div>
-            ${rangeRow(instance, 'generatorX', 'Position X', -4000, 4000, 1, 0, false)}
-            ${rangeRow(instance, 'generatorY', 'Position Y', -4000, 4000, 1, 0, false)}
-            ${rangeRow(instance, 'generatorRotation', 'Rotation', -180, 180, 0.5, 0, false)}
-            ${rangeRow(instance, 'generatorScale', 'Scale', 0.01, 10, 0.01, 1, false)}
-            <div class="button-cluster">
-                <button type="button" class="secondary-button compact-button" data-action="reset-generator-scale" data-instance="${instance.instanceId}">Reset Scale</button>
-            </div>
-        ` : `<div class="info-banner">The generated asset will be centered and uniformly scaled to fit the entire canvas.</div>`}
-    `;
 }
 
 function renderLayerPanel(state, registry) {
@@ -1002,16 +937,7 @@ function renderBasePanel(state) {
                         </div>
                     ` : `
                         <div class="empty-inline">No source image is loaded. The Editor is running directly from the Base canvas.</div>
-                        <div class="control-row">
-                            <div class="control-row-top"><label>Canvas Width</label></div>
-                            <input type="number" class="text-input" value="${canvas.width}" min="1" max="8192" id="tempEmptyCanvasWidth">
-                        </div>
-                        <div class="control-row">
-                            <div class="control-row-top"><label>Canvas Height</label></div>
-                            <input type="number" class="text-input" value="${canvas.height}" min="1" max="8192" id="tempEmptyCanvasHeight">
-                        </div>
                         <div class="button-cluster">
-                            <button type="button" class="secondary-button" data-action="editor-base-apply-custom-res">Apply Resolution</button>
                             <button type="button" class="mini-button" data-action="trigger-image-input">Load Image</button>
                         </div>
                     `}
@@ -2201,13 +2127,11 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
     function getSelectedTextLayerOverlayMetrics(state = getLiveState()) {
         if (!state?.document) return null;
         const current = selectedInstance(state);
-        if (!current || (current.layerId !== 'textOverlay' && current.layerId !== 'generatorOverlay') || current.visible === false || current.enabled === false || !hasEditorCanvas(state?.document) || !refs.editorTextOverlayShell) return null;
-        if (current.layerId === 'generatorOverlay' && current.params?.generatorMode !== 'free') return null;
-        const isGen = current.layerId === 'generatorOverlay';
-        const params = isGen ? (current.params || {}) : normalizeEditorTextParams(current.params || {});
-        const overlayRotation = isGen ? -(params.generatorRotation ?? 0) : -params.textRotation;
-        const layout = isGen ? getGeneratorLayout(params) : measureEditorTextLayout(params);
-        const logicalBounds = isGen ? getGeneratorBounds(params) : getEditorTextBounds(params);
+        if (!current || current.layerId !== 'textOverlay' || current.visible === false || current.enabled === false || !hasEditorCanvas(state?.document) || !refs.editorTextOverlayShell) return null;
+        const params = normalizeEditorTextParams(current.params || {});
+        const overlayRotation = -params.textRotation;
+        const layout = measureEditorTextLayout(params);
+        const logicalBounds = getEditorTextBounds(params);
         const renderMetrics = getTextLayerInputRenderMetrics(state, current.instanceId);
         const bounds = scaleTextBoundsToRender(logicalBounds, renderMetrics);
         const center = getTextBoundsCenter(bounds);
@@ -2289,50 +2213,10 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
         return { ...sized, textX: anchor.x, textY: anchor.y };
     }
 
-    function getGeneratorLayout(params) {
-        const type = params.generatorType || 'barcode';
-        const data = params.barcodeData || '123456789';
-        let cw = 256, ch = 100;
-        if (type === 'barcode' && typeof window !== 'undefined' && window.JsBarcode && data) {
-            try {
-                const tempCanvas = document.createElement('canvas');
-                window.JsBarcode(tempCanvas, data, { format: "CODE128", displayValue: true, margin: 10, background: "#ffffff", lineColor: "#000000" });
-                cw = tempCanvas.width;
-                ch = tempCanvas.height;
-            } catch(e) {}
-        }
-        return { width: cw, height: ch };
-    }
-
-    function getGeneratorBounds(params) {
-        const layout = getGeneratorLayout(params);
-        const scale = Number(params.generatorScale ?? 1.0);
-        const w = layout.width * scale;
-        const h = layout.height * scale;
-        const x = Number(params.generatorX ?? 0);
-        const y = Number(params.generatorY ?? 0);
-        return { x, y, width: w, height: h, right: x + w, bottom: y + h };
-    }
-
-    function buildResizedGeneratorParams(startParams, handle, localPoint) {
-        const startBounds = getGeneratorBounds(startParams);
-        const anchor = getResizeAnchor(startBounds, handle);
-        const scaleX = Math.abs((localPoint.x - anchor.x) / Math.max(1, startBounds.width));
-        const scaleY = Math.abs((localPoint.y - anchor.y) / Math.max(1, startBounds.height));
-        const factor = Math.max(0.01, scaleX, scaleY);
-        const nextScale = (Number(startParams.generatorScale ?? 1.0)) * factor;
-        const sized = { ...startParams, generatorScale: nextScale };
-        const nextBounds = getGeneratorBounds(sized);
-        if (handle === 'nw') return { ...sized, generatorX: anchor.x - nextBounds.width, generatorY: anchor.y - nextBounds.height };
-        if (handle === 'ne') return { ...sized, generatorX: anchor.x, generatorY: anchor.y - nextBounds.height };
-        if (handle === 'sw') return { ...sized, generatorX: anchor.x - nextBounds.width, generatorY: anchor.y };
-        return { ...sized, generatorX: anchor.x, generatorY: anchor.y };
-    }
-
     function updateTextLayerInteraction(clientX, clientY) {
         if (!textLayerInteraction) return;
         const current = currentSelectedInstance();
-        if (!current || current.instanceId !== textLayerInteraction.instanceId || (current.layerId !== 'textOverlay' && current.layerId !== 'generatorOverlay')) {
+        if (!current || current.instanceId !== textLayerInteraction.instanceId || current.layerId !== 'textOverlay') {
             textLayerInteraction = null;
             syncSelectedTextOverlay();
             return;
@@ -2345,33 +2229,25 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             textLayerInteraction.renderMetrics
         );
         if (!documentPoint) return;
-        const isGen = current.layerId === 'generatorOverlay';
-        let nextParams;
-        if (textLayerInteraction.mode === 'drag') {
-            nextParams = isGen ? {
-                ...textLayerInteraction.startParams,
-                generatorX: (textLayerInteraction.startParams.generatorX ?? 0) + (documentPoint.x - textLayerInteraction.startPoint.x),
-                generatorY: (textLayerInteraction.startParams.generatorY ?? 0) + (documentPoint.y - textLayerInteraction.startPoint.y)
-            } : {
+        const nextParams = textLayerInteraction.mode === 'drag'
+            ? {
                 ...textLayerInteraction.startParams,
                 textX: textLayerInteraction.startParams.textX + (documentPoint.x - textLayerInteraction.startPoint.x),
                 textY: textLayerInteraction.startParams.textY + (documentPoint.y - textLayerInteraction.startPoint.y)
-            };
-        } else if (textLayerInteraction.mode === 'rotate') {
-            const angleDelta = (((Math.atan2(documentPoint.y - textLayerInteraction.center.y, documentPoint.x - textLayerInteraction.center.x) - textLayerInteraction.startAngle) * 180) / Math.PI);
-            nextParams = isGen ? {
-                ...textLayerInteraction.startParams,
-                generatorRotation: normalizeDegrees((textLayerInteraction.startParams.generatorRotation ?? 0) - angleDelta)
-            } : {
-                ...textLayerInteraction.startParams,
-                textRotation: normalizeDegrees(textLayerInteraction.startParams.textRotation - angleDelta)
-            };
-        } else {
-            const rotPt = rotatePointAround(documentPoint, textLayerInteraction.center, isGen ? (textLayerInteraction.startParams.generatorRotation ?? 0) : textLayerInteraction.startParams.textRotation);
-            nextParams = isGen 
-                ? buildResizedGeneratorParams(textLayerInteraction.startParams, textLayerInteraction.handle, rotPt)
-                : buildResizedTextParams(textLayerInteraction.startParams, textLayerInteraction.handle, rotPt);
-        }
+            }
+            : textLayerInteraction.mode === 'rotate'
+                ? {
+                    ...textLayerInteraction.startParams,
+                    textRotation: normalizeDegrees(
+                        textLayerInteraction.startParams.textRotation
+                        - (((Math.atan2(documentPoint.y - textLayerInteraction.center.y, documentPoint.x - textLayerInteraction.center.x) - textLayerInteraction.startAngle) * 180) / Math.PI)
+                    )
+                }
+                : buildResizedTextParams(
+                    textLayerInteraction.startParams,
+                    textLayerInteraction.handle,
+                    rotatePointAround(documentPoint, textLayerInteraction.center, textLayerInteraction.startParams.textRotation)
+                );
 
         actions.updateInstance(textLayerInteraction.instanceId, (instance) => ({
             ...instance,
@@ -2740,46 +2616,9 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             'editor-base-resolution-preset': () => actions.applyEditorBaseResolutionPreset?.(parseInt(node.dataset.width, 10), parseInt(node.dataset.height, 10)),
             'editor-base-aspect-preset': () => actions.applyEditorBaseAspectPreset?.(parseInt(node.dataset.width, 10), parseInt(node.dataset.height, 10)),
             'editor-base-swap-dimensions': () => actions.swapEditorBaseDimensions?.(),
-            'editor-base-apply-custom-res': () => {
-                const w = parseInt(document.getElementById('tempEmptyCanvasWidth')?.value, 10);
-                const h = parseInt(document.getElementById('tempEmptyCanvasHeight')?.value, 10);
-                if (w > 0 && h > 0) actions.applyEditorBaseResolutionPreset?.(w, h);
-            },
             'editor-base-background-mode': () => actions.setEditorBaseBackgroundMode?.(node.dataset.mode),
             'editor-remove-image': () => actions.removeEditorSourceImage?.(),
             'add-layer': () => actions.addLayer(node.dataset.layer),
-            'set-generator-mode': () => {
-                const instanceId = node.dataset.instance;
-                const mode = node.dataset.mode;
-                const instance = getLiveState().document.layerStack.find(inst => inst.instanceId === instanceId);
-                if (!instance || (instance.params.generatorMode || 'fit') === mode) return;
-
-                if (mode === 'free') {
-                    const canvas = getEditorCanvasResolution(getLiveState().document);
-                    const layout = getGeneratorLayout(instance.params);
-                    const aspectCenterScale = Math.min(
-                        (canvas.width * 0.8) / Math.max(1, layout.width),
-                        (canvas.height * 0.8) / Math.max(1, layout.height)
-                    );
-                    const bx = (canvas.width - (layout.width * aspectCenterScale)) * 0.5;
-                    const by = (canvas.height - (layout.height * aspectCenterScale)) * 0.5;
-                    
-                    actions.updateInstance(instanceId, inst => ({
-                        ...inst,
-                        params: {
-                            ...inst.params,
-                            generatorMode: 'free',
-                            generatorScale: aspectCenterScale,
-                            generatorX: bx,
-                            generatorY: by,
-                            generatorRotation: 0
-                        }
-                    }));
-                } else {
-                    actions.updateControl(instanceId, 'generatorMode', mode);
-                }
-            },
-            'reset-generator-scale': () => actions.updateControl(node.dataset.instance, 'generatorScale', 1.0),
             'tilt-shift-pick-focus': () => {
                 const instance = getLiveState()?.document.layerStack.find((item) => item.instanceId === node.dataset.instance);
                 actions.updateControl(node.dataset.instance, 'tiltShiftPin', !instance?.params?.tiltShiftPin, { render: true });
@@ -2792,7 +2631,6 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             'toggle-layer-visible': () => actions.toggleLayerVisible(node.dataset.instance),
             'reset-ca-center': () => actions.resetCaCenter(node.dataset.instance),
             'text-layer-center': () => actions.centerTextLayer(node.dataset.instance),
-            'reset-generator-scale': () => actions.updateControl(node.dataset.instance, 'generatorScale', 1.0, { render: true }),
             'set-wheel-neutral': () => actions.updateControl(node.dataset.instance, node.dataset.key, '#ffffff'),
             'save-state': actions.saveState,
             'save-to-library': () => actions.saveProjectToLibrary(),
@@ -2831,7 +2669,6 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             'zoom-in': () => actions.setZoom('in'),
             'zoom-out': () => actions.setZoom('out'),
             'zoom-fit': () => actions.setZoom('fit'),
-            'copy-dng-settings': () => actions.copyDngDevelopDebugSettings?.(),
             'editor-export-bit-depth': () => actions.setEditorExportBitDepth?.(node.dataset.value),
             'palette-add': actions.addPaletteColor,
             'palette-remove': () => actions.removePaletteColor(parseInt(node.dataset.index, 10)),
@@ -2925,7 +2762,7 @@ export function createWorkspaceUI(root, registry, actions, extras = {}) {
             instanceId: metrics.instance.instanceId,
             mode: rotateHandle ? 'rotate' : (handle ? 'resize' : 'drag'),
             handle: handle?.dataset.editorTextHandle || 'se',
-            startParams: metrics.instance.layerId === 'generatorOverlay' ? (metrics.instance.params || {}) : normalizeEditorTextParams(metrics.instance.params || {}),
+            startParams: normalizeEditorTextParams(metrics.instance.params || {}),
             startPoint: documentPoint,
             startAngle: Math.atan2(documentPoint.y - metrics.logicalCenter.y, documentPoint.x - metrics.logicalCenter.x),
             center: metrics.logicalCenter,

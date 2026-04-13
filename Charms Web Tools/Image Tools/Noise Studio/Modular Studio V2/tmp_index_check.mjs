@@ -1,7 +1,7 @@
 import { getCropTransformMetrics, isCropTransformIdentity } from '../cropTransformShared.js';
 import { drawEditorTextToCanvas, measureEditorTextLayout, normalizeEditorTextParams } from '../../editor/textLayerShared.js';
 import { computeContainedPlacement } from '../../editor/baseCanvas.js';
-import { computeDngDevelopGeometry, isEmbeddedLinearRgbProbe, normalizeDngDevelopParams } from '../../editor/dngDevelopShared.js';
+import { computeDngDevelopGeometry, normalizeDngDevelopParams } from '../../editor/dngDevelopShared.js';
 import { getEditorCanvasResolution } from '../../editor/baseCanvas.js';
 
 function toLegacyField(value) {
@@ -1074,198 +1074,6 @@ function renderTextOverlay(gl, runtime, inputTex, outputFbo, instance, options =
     gl.uniform2f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_overlaySize'), inputResolution.w, inputResolution.h);
     gl.uniform1f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_opacity'), asset.params.textOpacity);
     gl.uniform1f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_rotationDegrees'), 0);
-    gl.uniform1f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_rotationDegrees'), 0);
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-}
-
-function ensureGeneratorAsset(gl, runtime, instance) {
-    if (!runtime.generatorLayerAssets) runtime.generatorLayerAssets = {};
-    const params = instance.params || {};
-    const type = params.generatorType || 'barcode';
-    const data = params.barcodeData || '123456789';
-    const color = params.generatorColor || '#000000';
-    const textureKey = `${type}|${data}|${color}`;
-    let asset = runtime.generatorLayerAssets[instance.instanceId];
-    if (!asset) {
-        asset = runtime.generatorLayerAssets[instance.instanceId] = {
-            texture: gl.createTexture(),
-            canvas: null,
-            key: '',
-            layout: null,
-            surfaceTexture: gl.createTexture(),
-            surfaceCanvas: null,
-            surfaceKey: ''
-        };
-        gl.bindTexture(gl.TEXTURE_2D, asset.texture);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-        gl.bindTexture(gl.TEXTURE_2D, asset.surfaceTexture);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    }
-
-    if (asset.key !== textureKey || !asset.layout) {
-        let cw = 256;
-        let ch = 100;
-        asset.canvas = asset.canvas || createTextLayerCanvas(cw, ch);
-        if (!asset.canvas) return null;
-        
-        let validLayout = false;
-        if (type === 'barcode' && typeof window !== 'undefined' && window.JsBarcode && data) {
-            try {
-                const tempCanvas = document.createElement('canvas');
-                window.JsBarcode(tempCanvas, data, {
-                    format: "CODE128",
-                    displayValue: true,
-                    margin: 10,
-                    background: "transparent",
-                    lineColor: color
-                });
-                asset.canvas.width = tempCanvas.width;
-                asset.canvas.height = tempCanvas.height;
-                const ctx = asset.canvas.getContext('2d', { alpha: true });
-                if (ctx) {
-                    ctx.clearRect(0, 0, asset.canvas.width, asset.canvas.height);
-                    ctx.drawImage(tempCanvas, 0, 0);
-                    validLayout = true;
-                }
-            } catch (e) {
-                console.warn('JsBarcode render failed', e);
-            }
-        }
-        
-        asset.layout = validLayout ? { width: asset.canvas.width, height: asset.canvas.height } : { width: 1, height: 1 };
-        asset.key = textureKey;
-        gl.bindTexture(gl.TEXTURE_2D, asset.texture);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        if (validLayout) {
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, asset.canvas);
-        } else {
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0,0,0,0]));
-        }
-    }
-
-    return {
-        texture: asset.texture,
-        layout: asset.layout,
-        params,
-        surfaceTexture: asset.surfaceTexture,
-        surfaceCanvas: asset.surfaceCanvas,
-        surfaceKey: asset.surfaceKey,
-        asset
-    };
-}
-
-function ensureGeneratorLayerSurfaceAsset(gl, runtime, instance, documentState, inputResolution) {
-    const glyphAsset = ensureGeneratorAsset(gl, runtime, instance);
-    if (!glyphAsset?.asset || !glyphAsset?.layout) return null;
-    const logicalResolution = getLogicalEditorResolutionThroughInstance(documentState || {}, instance.instanceId);
-    const scaleX = inputResolution.w / Math.max(1, logicalResolution.width || inputResolution.w || 1);
-    const scaleY = inputResolution.h / Math.max(1, logicalResolution.height || inputResolution.h || 1);
-    
-    const mode = glyphAsset.params.generatorMode || 'fit';
-    
-    let renderWidth, renderHeight, renderX, renderY, rotation;
-    
-    if (mode === 'fit') {
-        const aspectTarget = inputResolution.w / inputResolution.h;
-        const aspectSrc = glyphAsset.layout.width / glyphAsset.layout.height;
-        if (aspectSrc > aspectTarget) {
-            renderWidth = Math.max(1, inputResolution.w * 0.8);
-            renderHeight = Math.max(1, (inputResolution.w * 0.8) / aspectSrc);
-        } else {
-            renderHeight = Math.max(1, inputResolution.h * 0.8);
-            renderWidth = Math.max(1, (inputResolution.h * 0.8) * aspectSrc);
-        }
-        renderX = (inputResolution.w - renderWidth) * 0.5;
-        renderY = (inputResolution.h - renderHeight) * 0.5;
-        rotation = 0;
-    } else {
-        const baseScale = Number(glyphAsset.params.generatorScale ?? 1.0);
-        renderWidth = Math.max(1, glyphAsset.layout.width * scaleX * baseScale);
-        renderHeight = Math.max(1, glyphAsset.layout.height * scaleY * baseScale);
-        renderX = Number(glyphAsset.params.generatorX ?? 0) * scaleX;
-        renderY = Number(glyphAsset.params.generatorY ?? 0) * scaleY;
-        rotation = Number(glyphAsset.params.generatorRotation ?? 0);
-    }
-
-    
-    const surfaceKey = [
-        glyphAsset.asset.key,
-        `${inputResolution.w}x${inputResolution.h}`,
-        `${logicalResolution.width}x${logicalResolution.height}`,
-        renderX,
-        renderY,
-        renderWidth,
-        renderHeight,
-        rotation
-    ].join('|');
-
-    if (glyphAsset.asset.surfaceKey !== surfaceKey || !glyphAsset.asset.surfaceCanvas) {
-        const surfaceCanvas = glyphAsset.asset.surfaceCanvas
-            && glyphAsset.asset.surfaceCanvas.width === inputResolution.w
-            && glyphAsset.asset.surfaceCanvas.height === inputResolution.h
-            ? glyphAsset.asset.surfaceCanvas
-            : createTextLayerCanvas(Math.max(1, inputResolution.w), Math.max(1, inputResolution.h));
-        if (!surfaceCanvas) return null;
-        surfaceCanvas.width = Math.max(1, inputResolution.w);
-        surfaceCanvas.height = Math.max(1, inputResolution.h);
-        const context = surfaceCanvas.getContext('2d', { alpha: true });
-        if (!context) return null;
-        context.clearRect(0, 0, surfaceCanvas.width, surfaceCanvas.height);
-        context.save();
-        context.translate(renderX + (renderWidth * 0.5), renderY + (renderHeight * 0.5));
-        context.rotate((-rotation * Math.PI) / 180);
-        context.drawImage(
-            glyphAsset.asset.canvas,
-            -renderWidth * 0.5,
-            -renderHeight * 0.5,
-            renderWidth,
-            renderHeight
-        );
-        context.restore();
-
-        glyphAsset.asset.surfaceCanvas = surfaceCanvas;
-        glyphAsset.asset.surfaceKey = surfaceKey;
-        gl.bindTexture(gl.TEXTURE_2D, glyphAsset.asset.surfaceTexture);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, surfaceCanvas);
-    }
-
-    return {
-        texture: glyphAsset.asset.surfaceTexture,
-        layout: glyphAsset.layout,
-        params: glyphAsset.params
-    };
-}
-
-function renderGeneratorOverlay(gl, runtime, inputTex, outputFbo, instance, options = {}) {
-    const inputResolution = options.inputResolution || { w: runtime.renderWidth, h: runtime.renderHeight };
-    const asset = ensureGeneratorLayerSurfaceAsset(gl, runtime, instance, options.documentState || {}, inputResolution);
-    if (!asset?.texture) {
-        bindCopy(gl, runtime, inputTex, outputFbo, 0);
-        return;
-    }
-
-    gl.useProgram(runtime.programs.textOverlay);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, outputFbo);
-    gl.viewport(0, 0, inputResolution.w, inputResolution.h);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, inputTex);
-    gl.uniform1i(gl.getUniformLocation(runtime.programs.textOverlay, 'u_base'), 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, asset.texture);
-    gl.uniform1i(gl.getUniformLocation(runtime.programs.textOverlay, 'u_overlay'), 1);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.uniform2f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_res'), inputResolution.w, inputResolution.h);
-    gl.uniform2f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_overlayPos'), 0, 0);
-    gl.uniform2f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_overlaySize'), inputResolution.w, inputResolution.h);
-    gl.uniform1f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_opacity'), 1.0);
-    gl.uniform1f(gl.getUniformLocation(runtime.programs.textOverlay, 'u_rotationDegrees'), 0);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 }
 
@@ -1304,14 +1112,6 @@ function invertMatrix3(matrix) {
         A * inverse, D * inverse, G * inverse,
         B * inverse, E * inverse, H * inverse,
         C * inverse, F * inverse, I * inverse
-    ];
-}
-
-function multiplyMatrix3Vector(matrix, vector) {
-    return [
-        matrix[0] * vector[0] + matrix[1] * vector[1] + matrix[2] * vector[2],
-        matrix[3] * vector[0] + matrix[4] * vector[1] + matrix[5] * vector[2],
-        matrix[6] * vector[0] + matrix[7] * vector[1] + matrix[8] * vector[2]
     ];
 }
 
@@ -1371,14 +1171,6 @@ function getTemperatureTintShiftGains(temperature, tint) {
 }
 
 function getAsShotWhiteBalanceGains(source) {
-    if (
-        isEmbeddedLinearRgbProbe(source?.probe) || 
-        isEmbeddedLinearRgbProbe(source?.metadata) ||
-        source?.preset === 'samsung-pro-mode-mosaic' ||
-        source?.preset === 'samsung-expert-raw-linear'
-    ) {
-        return [1, 1, 1];
-    }
     const neutral = Array.isArray(source?.metadata?.asShotNeutral) && source.metadata.asShotNeutral.length >= 3
         ? source.metadata.asShotNeutral
         : (Array.isArray(source?.probe?.asShotNeutral) ? source.probe.asShotNeutral : []);
@@ -1405,108 +1197,23 @@ function resolveDngWhiteBalanceGains(source, params) {
     ];
 }
 
-function resolveDngColorTransform(source, params, wbGains) {
+function resolveDngColorTransform(source, params) {
     if (params.dngApplyCameraMatrix === false || params.dngWorkingSpace === 'linear') {
         return {
             apply: false,
             matrix: [1, 0, 0, 0, 1, 0, 0, 0, 1]
         };
     }
-
-    const cc = Array.isArray(source?.metadata?.cameraCalibration2) && source.metadata.cameraCalibration2.length >= 9
-        ? source.metadata.cameraCalibration2.slice(0, 9)
-        : Array.isArray(source?.metadata?.cameraCalibration1) && source.metadata.cameraCalibration1.length >= 9
-            ? source.metadata.cameraCalibration1.slice(0, 9)
-            : [1, 0, 0, 0, 1, 0, 0, 0, 1];
-
-    const abFlat = Array.isArray(source?.metadata?.analogBalance) && source.metadata.analogBalance.length >= 3
-        ? source.metadata.analogBalance.slice(0, 3)
-        : [1, 1, 1];
-    
-    const ab = [
-        abFlat[0], 0, 0,
-        0, abFlat[1], 0,
-        0, 0, abFlat[2]
-    ];
-
-    let cameraToXyz = null;
-
-    const wbDiag = [
-        wbGains[0], 0, 0,
-        0, wbGains[1], 0,
-        0, 0, wbGains[2]
-    ];
-
-    const fm = Array.isArray(source?.metadata?.forwardMatrix2) && source.metadata.forwardMatrix2.length >= 9
-        ? source.metadata.forwardMatrix2.slice(0, 9)
-        : Array.isArray(source?.metadata?.forwardMatrix1) && source.metadata.forwardMatrix1.length >= 9
-            ? source.metadata.forwardMatrix1.slice(0, 9)
-            : null;
-
-    if (fm && fm.length === 9) {
-        const ab_cc = multiplyMatrix3(ab, cc);
-        const inv_ab_cc = invertMatrix3(ab_cc);
-        if (inv_ab_cc) {
-            const fm_wb = multiplyMatrix3(fm, wbDiag);
-            cameraToXyz = multiplyMatrix3(fm_wb, inv_ab_cc);
-        }
-    }
-
-    if (!cameraToXyz) {
-        const cm = Array.isArray(source?.metadata?.colorMatrix2) && source.metadata.colorMatrix2.length >= 9
-            ? source.metadata.colorMatrix2.slice(0, 9)
-            : Array.isArray(source?.metadata?.colorMatrix1) && source.metadata.colorMatrix1.length >= 9
-                ? source.metadata.colorMatrix1.slice(0, 9)
-                : Array.isArray(source?.probe?.colorMatrix2) && source.probe.colorMatrix2.length >= 9
-                    ? source.probe.colorMatrix2.slice(0, 9)
-                    : Array.isArray(source?.probe?.colorMatrix1) && source.probe.colorMatrix1.length >= 9
-                        ? source.probe.colorMatrix1.slice(0, 9)
-                        : null;
-
-        if (cm && cm.length === 9) {
-            const cc_cm = multiplyMatrix3(cc, cm);
-            const xyzToCamera = multiplyMatrix3(ab, cc_cm);
-            const inv_xyzToCamera = invertMatrix3(xyzToCamera);
-            if (inv_xyzToCamera) {
-                // If CM defines XYZ to Camera_Unbalanced, calculate the illuminant XYZ.
-                // We map Camera_Neutral to XYZ to find the true adapted whitepoint.
-                const cameraNeutral = [
-                    wbGains[0] > 0 ? 1 / wbGains[0] : 1,
-                    wbGains[1] > 0 ? 1 / wbGains[1] : 1,
-                    wbGains[2] > 0 ? 1 / wbGains[2] : 1
-                ];
-                const illuminantXyz = multiplyMatrix3Vector(inv_xyzToCamera, cameraNeutral);
-                
-                // D50 XYZ White Point reference
-                const d50Xyz = [0.9642, 1.0000, 0.8249];
-                
-                // Construct standard Bradford transformation matrices
-                const BRADFORD = [
-                     0.8951,  0.2664, -0.1614,
-                    -0.7502,  1.7135,  0.0367,
-                     0.0389, -0.0685,  1.0296
-                ];
-                const BRADFORD_INV = [
-                     0.9869929, -0.1470543,  0.1599627,
-                     0.4323145,  0.5183603,  0.0492912,
-                    -0.0085287,  0.0400428,  0.9684867
-                ];
-                
-                // Adapt the cones
-                const srcCone = multiplyMatrix3Vector(BRADFORD, illuminantXyz);
-                const dstCone = multiplyMatrix3Vector(BRADFORD, d50Xyz);
-                const coneRatio = [
-                    srcCone[0] !== 0 ? dstCone[0] / srcCone[0] : 1, 0, 0,
-                    0, srcCone[1] !== 0 ? dstCone[1] / srcCone[1] : 1, 0,
-                    0, 0, srcCone[2] !== 0 ? dstCone[2] / srcCone[2] : 1
-                ];
-                
-                const adaptationMatrix = multiplyMatrix3(BRADFORD_INV, multiplyMatrix3(coneRatio, BRADFORD));
-                cameraToXyz = multiplyMatrix3(adaptationMatrix, inv_xyzToCamera);
-            }
-        }
-    }
-
+    const colorMatrix = Array.isArray(source?.metadata?.colorMatrix2) && source.metadata.colorMatrix2.length >= 9
+        ? source.metadata.colorMatrix2.slice(0, 9)
+        : Array.isArray(source?.metadata?.colorMatrix1) && source.metadata.colorMatrix1.length >= 9
+            ? source.metadata.colorMatrix1.slice(0, 9)
+            : Array.isArray(source?.probe?.colorMatrix2) && source.probe.colorMatrix2.length >= 9
+                ? source.probe.colorMatrix2.slice(0, 9)
+                : Array.isArray(source?.probe?.colorMatrix1) && source.probe.colorMatrix1.length >= 9
+                    ? source.probe.colorMatrix1.slice(0, 9)
+                    : null;
+    const cameraToXyz = invertMatrix3(colorMatrix);
     if (!cameraToXyz) {
         return {
             apply: false,
@@ -1598,7 +1305,7 @@ function renderDngDevelop(gl, runtime, inputTex, outputFbo, instance, documentSt
     const interpretationMode = resolveDngInterpretationMode(source, params);
     const previewQuality = documentState?.view?.highQualityPreview ? params.dngDemosaicQuality : 'fast';
     const wbGains = resolveDngWhiteBalanceGains(source, params);
-    const colorTransform = resolveDngColorTransform(source, params, wbGains);
+    const colorTransform = resolveDngColorTransform(source, params);
     const blackRepeatDim = Array.isArray(source?.metadata?.blackLevelRepeatDim) && source.metadata.blackLevelRepeatDim.length >= 2
         ? source.metadata.blackLevelRepeatDim
         : Array.isArray(source?.probe?.blackLevelRepeatDim) && source.probe.blackLevelRepeatDim.length >= 2
@@ -1648,14 +1355,6 @@ function renderDngDevelop(gl, runtime, inputTex, outputFbo, instance, documentSt
         Math.max(1, Number(source?.probe?.cfaPatternHeight) || 2)
     );
     gl.uniform1iv(gl.getUniformLocation(developProgram, 'u_pattern'), patternArray);
-    
-    const ignoreActiveArea = source?.preset === 'samsung-pro-mode-mosaic' || source?.preset === 'samsung-expert-raw-linear';
-    const activeArea = Array.isArray(source?.probe?.activeArea) && source.probe.activeArea.length >= 4 && !ignoreActiveArea
-        ? source.probe.activeArea
-        : [0, 0, 0, 0];
-    const activeAreaTop = Math.max(0, Math.floor(Number(activeArea[0]) || 0));
-    const activeAreaLeft = Math.max(0, Math.floor(Number(activeArea[1]) || 0));
-    gl.uniform2i(gl.getUniformLocation(developProgram, 'u_activeAreaOrigin'), activeAreaLeft, activeAreaTop);
     gl.uniform2i(
         gl.getUniformLocation(developProgram, 'u_blackRepeatDim'),
         Math.max(1, Number(blackRepeatDim[0]) || 1),
@@ -1672,8 +1371,7 @@ function renderDngDevelop(gl, runtime, inputTex, outputFbo, instance, documentSt
     gl.uniform1f(gl.getUniformLocation(developProgram, 'u_highlightStrength'), clamp(Number(params.dngHighlightRecovery || 0) / 100, 0, 1));
     gl.uniform1f(gl.getUniformLocation(developProgram, 'u_toneAmount'), clamp(Number(params.dngToneMappingAmount || 0) / 100, 0, 1));
     gl.uniform1i(gl.getUniformLocation(developProgram, 'u_partialFidelity'), source?.fidelity !== 'supported' ? 1 : 0);
-    const applyGainMap = params.dngApplyGainMap !== false;
-    const gainMaps = applyGainMap && Array.isArray(source.gainMapTextures) ? source.gainMapTextures : [];
+    const gainMaps = Array.isArray(source.gainMapTextures) ? source.gainMapTextures : [];
     gl.uniform1i(gl.getUniformLocation(developProgram, 'u_gainMapCount'), Math.min(8, gainMaps.length));
     const gainRegion = new Float32Array(8 * 4);
     const gainGrid = new Float32Array(8 * 4);
@@ -1705,10 +1403,8 @@ function renderDngDevelop(gl, runtime, inputTex, outputFbo, instance, documentSt
     gl.uniform4fv(gl.getUniformLocation(developProgram, 'u_gainGrid'), gainGrid);
     gl.uniform4fv(gl.getUniformLocation(developProgram, 'u_gainSpacing'), gainSpacing);
     gl.uniform4fv(gl.getUniformLocation(developProgram, 'u_gainMapInfo'), gainMapInfo);
-    const canApplyOpcodeCorrections = params.dngApplyOpcodeCorrections !== false && !!source?.probe?.supportsOpcodeCorrections;
-    const canApplyGainMap = params.dngApplyGainMap !== false && !!source?.probe?.supportsGainMapCorrections;
-    gl.uniform1i(gl.getUniformLocation(developProgram, 'u_applyOpcodeCorrections'), canApplyOpcodeCorrections ? 1 : 0);
-    gl.uniform1i(gl.getUniformLocation(developProgram, 'u_applyGainMap'), canApplyGainMap ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(developProgram, 'u_applyOpcodeCorrections'), params.dngApplyOpcodeCorrections !== false ? 1 : 0);
+    gl.uniform1i(gl.getUniformLocation(developProgram, 'u_applyGainMap'), params.dngApplyGainMap !== false ? 1 : 0);
     gl.uniform1i(gl.getUniformLocation(developProgram, 'u_orientation'), Math.round(Number(geometry.orientation) || 1));
     gl.uniform2f(gl.getUniformLocation(developProgram, 'u_cropOrigin'), Number(geometry.cropLeft || 0), Number(geometry.cropTop || 0));
     gl.uniform2f(gl.getUniformLocation(developProgram, 'u_cropSize'), Number(geometry.cropWidth || source?.probe?.width || developedWidth), Number(geometry.cropHeight || source?.probe?.height || developedHeight));
@@ -1792,12 +1488,6 @@ export function renderLayer(gl, runtime, layerDef, instance, inputTex, outputFbo
             break;
         case 'textOverlay':
             renderTextOverlay(gl, runtime, inputTex, outputFbo, instance, {
-                ...options,
-                documentState
-            });
-            break;
-        case 'generatorOverlay':
-            renderGeneratorOverlay(gl, runtime, inputTex, outputFbo, instance, {
                 ...options,
                 documentState
             });

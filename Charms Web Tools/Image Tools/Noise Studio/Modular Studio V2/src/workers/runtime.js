@@ -221,6 +221,7 @@ export function createBackgroundTaskBroker(options = {}) {
         }
         const shouldRestartWorker = wasActive
             && options.restartWorker !== false
+            && domainState.config.restartWorkerOnActiveCancel !== false
             && !!domainState.worker;
         if (shouldRestartWorker) {
             clearWorkerState(domainState);

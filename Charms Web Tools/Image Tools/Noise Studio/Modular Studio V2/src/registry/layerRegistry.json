@@ -2,6 +2,60 @@
   "version": "mns-layer-registry/v2",
   "layers": [
     {
+      "layerId": "dngDevelop",
+      "label": "DNG Develop",
+      "technicalLabel": "DNG Develop",
+      "group": "base",
+      "description": "Develops embedded DNG raw sources into the Editor raster pipeline.",
+      "executor": "manual",
+      "programKey": "dngDevelop",
+      "shader": "Shaders/dngDevelop.frag",
+      "animated": false,
+      "supportsMultiInstance": false,
+      "enableKey": "dngDevelopEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "dngDevelopEditor",
+          "defaults": {
+            "dngDevelopEnable": true,
+            "dngPreset": "auto",
+            "dngInterpretationMode": "auto",
+            "dngAutoBlackLevel": true,
+            "dngBlackLevel": 0,
+            "dngAutoWhiteLevel": true,
+            "dngWhiteLevel": 65535,
+            "dngApplyLinearization": true,
+            "dngApplyOrientation": true,
+            "dngRemosaicMode": "auto",
+            "dngDemosaicQuality": "high",
+            "dngWhiteBalanceMode": "as-shot",
+            "dngTemperature": 6500,
+            "dngTint": 0,
+            "dngApplyCameraMatrix": true,
+            "dngWorkingSpace": "srgb",
+            "dngExposure": 0,
+            "dngHighlightRecovery": 22,
+            "dngToneMappingAmount": 18,
+            "dngDenoiseMode": "auto",
+            "dngDenoiseStrength": 14,
+            "dngDetailPreservation": 62,
+            "dngSharpenAmount": 10,
+            "dngApplyOpcodeCorrections": true,
+            "dngApplyGainMap": true
+          }
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": [
+        {
+          "key": "dngComposite",
+          "shader": "Shaders/dngComposite.frag"
+        }
+      ]
+    },
+    {
       "layerId": "scale",
       "label": "Resolution Scale",
       "technicalLabel": "Resolution Scale",
@@ -221,6 +275,36 @@
             "textRotation": 0,
             "textX": 0,
             "textY": 0
+          }
+        }
+      ],
+      "mask": null,
+      "bindings": [],
+      "extraPrograms": []
+    },
+    {
+      "layerId": "generatorOverlay",
+      "label": "Generator",
+      "technicalLabel": "Generator Overlay",
+      "group": "base",
+      "description": "Generates arbitrary assets like Barcodes, which can be fit to the canvas or freely transformed.",
+      "executor": "manual",
+      "animated": false,
+      "supportsMultiInstance": true,
+      "enableKey": "generatorOverlayEnable",
+      "enableDefault": true,
+      "controls": [
+        {
+          "type": "generatorLayerEditor",
+          "defaults": {
+            "generatorType": "barcode",
+            "barcodeData": "123456789",
+            "generatorColor": "#000000",
+            "generatorMode": "fit",
+            "generatorX": 0,
+            "generatorY": 0,
+            "generatorScale": 1.0,
+            "generatorRotation": 0
           }
         }
       ],

@@ -1541,6 +1541,36 @@ code {
     letter-spacing: 0.01em;
 }
 
+.dng-develop-editor [data-help] {
+    cursor: help;
+}
+
+.hover-help-tooltip {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 1400;
+    width: min(320px, calc(100vw - 24px));
+    padding: 11px 13px;
+    border: 1px solid color-mix(in srgb, var(--studio-neu-line) 84%, transparent);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--studio-neu-surface) 92%, white 8%);
+    color: var(--studio-neu-text);
+    box-shadow: var(--studio-neu-shadow-panel-soft);
+    font-size: 12px;
+    line-height: 1.45;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -100%) scale(0.98);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    white-space: normal;
+}
+
+.hover-help-tooltip.is-visible {
+    opacity: 1;
+    transform: translate(-50%, -100%) scale(1);
+}
+
 .app-shell[data-active-section='editor'] .mini-button {
     min-width: 30px;
     min-height: 30px;
@@ -1795,6 +1825,56 @@ code {
     box-shadow: var(--studio-neu-shadow-inset);
 }
 
+.app-shell[data-active-section='editor'] .preview-render-status {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 6;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    min-width: 200px;
+    max-width: min(280px, calc(100% - 36px));
+    padding: 10px 14px;
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--studio-neu-surface) 92%, white 8%);
+    box-shadow: var(--studio-neu-shadow-button-soft);
+    color: var(--studio-neu-text);
+    pointer-events: none;
+}
+
+.app-shell[data-active-section='editor'] .preview-render-status.is-active {
+    display: inline-flex;
+}
+
+.app-shell[data-active-section='editor'] .preview-render-status-spinner {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--studio-neu-line) 70%, transparent);
+    border-top-color: var(--studio-accent);
+    animation: studio-preview-render-spin 0.82s linear infinite;
+}
+
+.app-shell[data-active-section='editor'] .preview-render-status-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.app-shell[data-active-section='editor'] .preview-render-status-copy strong {
+    font-size: 12px;
+    line-height: 1.1;
+}
+
+.app-shell[data-active-section='editor'] .preview-render-status-copy span {
+    font-size: 10px;
+    line-height: 1.35;
+    color: var(--studio-neu-muted);
+}
+
 .app-shell[data-active-section='editor'] .preview-shell.checker-active .preview-stage {
     background:
         linear-gradient(45deg, rgba(0, 0, 0, 0.06) 25%, transparent 25%, transparent 75%, rgba(0, 0, 0, 0.06) 75%),
@@ -1829,6 +1909,15 @@ code {
 
 .app-shell[data-active-section='editor'] .preview-loupe {
     border-radius: 20px;
+}
+
+@keyframes studio-preview-render-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .app-shell[data-active-section='editor'] .grade-wheel-surface {

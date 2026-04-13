@@ -74,6 +74,17 @@ import {
     normalizeEditorBase,
     normalizeEditorSource
 } from './editor/baseCanvas.js';
+import {
+    createDefaultDngDevelopParams,
+    DNG_ATTACHMENT_KIND,
+    DNG_SOURCE_KIND,
+    getDngPresetForProbe,
+    isDngSource,
+    normalizeDngDevelopParams,
+    normalizeDngSourceState,
+    stripDngSourceRawPayload
+} from './editor/dngDevelopShared.js';
+import { decodeDngBuffer, probeDngBuffer } from './editor/dngProcessing.js';
 import { getEditorTextBounds, normalizeEditorTextParams } from './editor/textLayerShared.js';
 import { extractPaletteFromImageSource } from './editor/palette.js';
 import { APP_ASSET_VERSION, withAssetVersion } from './appAssetVersion.js';
@@ -89,16 +100,19 @@ import {
 } from './library/secureTransfer.js';
 
 const DB_NAME = 'ModularStudioDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'LibraryProjects';
+const ATTACHMENT_STORE_NAME = 'LibraryProjectAttachments';
 const LIBRARY_META_ID = '__library_meta__';
 let backgroundTasks = null;
 let workerCapabilities = null;
 let graphicsCapabilities = null;
 let view = null;
 let appStore = null;
+let dngRuntimeRegistry = null;
 const COMPOSITE_AUTO_WORKER_THRESHOLD_MEGAPIXELS = 16;
 const COMPOSITE_AUTO_WORKER_THRESHOLD_EDGE = 4096;
+const dngDecodedSourceCache = new Map();
 
 function initDB() {
     return new Promise((resolve, reject) => {
@@ -109,10 +123,15 @@ function initDB() {
             if (!db.objectStoreNames.contains(STORE_NAME)) {
                 db.createObjectStore(STORE_NAME, { keyPath: 'id' });
             }
+            if (!db.objectStoreNames.contains(ATTACHMENT_STORE_NAME)) {
+                const store = db.createObjectStore(ATTACHMENT_STORE_NAME, { keyPath: 'id' });
+                store.createIndex('projectId', 'projectId', { unique: false });
+                store.createIndex('kind', 'kind', { unique: false });
+            }
         };
         request.onsuccess = (e) => {
             const db = e.target.result;
-            if (db.objectStoreNames.contains(STORE_NAME)) {
+            if (db.objectStoreNames.contains(STORE_NAME) && db.objectStoreNames.contains(ATTACHMENT_STORE_NAME)) {
                 resolve(db);
                 return;
             }
@@ -125,6 +144,11 @@ function initDB() {
                 const repairDb = repairEvent.target.result;
                 if (!repairDb.objectStoreNames.contains(STORE_NAME)) {
                     repairDb.createObjectStore(STORE_NAME, { keyPath: 'id' });
+                }
+                if (!repairDb.objectStoreNames.contains(ATTACHMENT_STORE_NAME)) {
+                    const store = repairDb.createObjectStore(ATTACHMENT_STORE_NAME, { keyPath: 'id' });
+                    store.createIndex('projectId', 'projectId', { unique: false });
+                    store.createIndex('kind', 'kind', { unique: false });
                 }
             };
             repairRequest.onsuccess = (repairEvent) => resolve(repairEvent.target.result);
@@ -180,6 +204,81 @@ function getAllFromLibraryDB() {
     }));
 }
 
+function getLibraryProjectRecordsByCursor(options = {}) {
+    const filterRecord = typeof options.filterRecord === 'function' ? options.filterRecord : null;
+    const mapRecord = typeof options.mapRecord === 'function' ? options.mapRecord : null;
+    return initDB().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const req = tx.objectStore(STORE_NAME).openCursor();
+        const results = [];
+        req.onsuccess = (event) => {
+            const cursor = event.target.result;
+            if (!cursor) {
+                resolve(results);
+                return;
+            }
+            try {
+                const entry = cursor.value;
+                if (isLibraryProjectRecord(entry) && (!filterRecord || filterRecord(entry))) {
+                    const mapped = mapRecord ? mapRecord(entry) : entry;
+                    if (mapped != null) {
+                        results.push(mapped);
+                    }
+                }
+            } catch (error) {
+                reject(error);
+                return;
+            }
+            cursor.continue();
+        };
+        req.onerror = (event) => reject(event.target.error);
+    }));
+}
+
+function saveLibraryAttachment(record) {
+    return initDB().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ATTACHMENT_STORE_NAME, 'readwrite');
+        const req = tx.objectStore(ATTACHMENT_STORE_NAME).put(record);
+        req.onsuccess = () => resolve(record);
+        req.onerror = (e) => reject(e.target.error);
+    }));
+}
+
+function getLibraryAttachment(id) {
+    return initDB().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ATTACHMENT_STORE_NAME, 'readonly');
+        const req = tx.objectStore(ATTACHMENT_STORE_NAME).get(id);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = (e) => reject(e.target.error);
+    }));
+}
+
+function getLibraryAttachmentsByProjectId(projectId) {
+    return initDB().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ATTACHMENT_STORE_NAME, 'readonly');
+        const index = tx.objectStore(ATTACHMENT_STORE_NAME).index('projectId');
+        const req = index.getAll(String(projectId || ''));
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = (e) => reject(e.target.error);
+    }));
+}
+
+function deleteLibraryAttachment(id) {
+    return initDB().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(ATTACHMENT_STORE_NAME, 'readwrite');
+        const req = tx.objectStore(ATTACHMENT_STORE_NAME).delete(id);
+        req.onsuccess = () => resolve();
+        req.onerror = (e) => reject(e.target.error);
+    }));
+}
+
+async function deleteLibraryAttachmentsByProjectId(projectId) {
+    const attachments = await getLibraryAttachmentsByProjectId(projectId);
+    for (const attachment of attachments) {
+        await deleteLibraryAttachment(attachment.id);
+    }
+}
+
 function stableSerialize(value) {
     if (Array.isArray(value)) {
         return `[${value.map((entry) => stableSerialize(entry)).join(',')}]`;
@@ -213,6 +312,23 @@ function stripProjectFingerprintMetadata(payload) {
         delete cloned.preview.imageData;
         delete cloned.preview.updatedAt;
     }
+    if (isDngSource(cloned.source)) {
+        cloned.source = normalizeEditorSource({
+            ...stripDngSourceRawPayload(cloned.source),
+            imageData: null,
+            dng: {
+                sourceSignature: cloned.source?.dng?.sourceSignature || '',
+                attachmentId: '',
+                lastPreparedParamsHash: '',
+                lastPreparedAt: 0,
+                prepareQuality: 'fast',
+                preset: cloned.source?.dng?.preset || '',
+                fidelity: cloned.source?.dng?.fidelity || 'partial',
+                warnings: [],
+                probe: null
+            }
+        });
+    }
     if (isThreeDDocumentPayload(cloned)) {
         if (cloned.render && typeof cloned.render === 'object') {
             cloned.render = { ...cloned.render };
@@ -229,6 +345,16 @@ function makeProjectFingerprint(payload) {
 
 function createLibraryProjectId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+function createLibraryAttachmentId() {
+    return `attachment-${createLibraryProjectId()}`;
+}
+
+function isDngFile(file) {
+    const name = String(file?.name || '').trim().toLowerCase();
+    const type = String(file?.type || '').trim().toLowerCase();
+    return name.endsWith('.dng') || type === 'image/x-adobe-dng' || type === 'image/dng';
 }
 
 function stripProjectExtension(name) {
@@ -552,6 +678,7 @@ function applyAttachedTextTransforms(items = [], changedItemId = null) {
 function buildLibraryPayload(documentState, preview = null) {
     return serializeState(documentState, {
         includeSource: true,
+        includeRawDng: false,
         preview
     });
 }
@@ -727,6 +854,23 @@ function blobToDataUrl(blob) {
     });
 }
 
+function arrayBufferToDataUrl(buffer, mimeType = 'application/octet-stream') {
+    const bytes = buffer instanceof Uint8Array
+        ? buffer
+        : new Uint8Array(buffer instanceof ArrayBuffer
+            ? buffer
+            : (ArrayBuffer.isView(buffer)
+                ? buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+                : new ArrayBuffer(0)));
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        const chunk = bytes.subarray(offset, offset + chunkSize);
+        binary += String.fromCharCode(...chunk);
+    }
+    return `data:${mimeType};base64,${btoa(binary)}`;
+}
+
 function isAbortError(error) {
     return error?.name === 'AbortError';
 }
@@ -736,6 +880,172 @@ async function buildWorkerFileListRequest(files = [], options = {}) {
     return {
         payload: { fileEntries },
         transfer
+    };
+}
+
+async function buildWorkerSingleBinaryRequest(file) {
+    const { fileEntry, transfer } = await createWorkerSingleFileEntry(file);
+    return {
+        payload: { fileEntry },
+        transfer
+    };
+}
+
+function collectDecodedDngTransfers(decodedSource = null) {
+    const transfers = [];
+    if (decodedSource?.rawRaster?.data instanceof Float32Array) {
+        transfers.push(decodedSource.rawRaster.data.buffer);
+    }
+    if (decodedSource?.metadata?.linearizationTable instanceof Float32Array) {
+        transfers.push(decodedSource.metadata.linearizationTable.buffer);
+    }
+    if (Array.isArray(decodedSource?.metadata?.gainMaps)) {
+        decodedSource.metadata.gainMaps.forEach((entry) => {
+            if (entry?.gains instanceof Float32Array) {
+                transfers.push(entry.gains.buffer);
+            }
+        });
+    }
+    return transfers;
+}
+
+async function runEditorDngTask(task, payload, options = {}) {
+    if (backgroundTasks) {
+        return backgroundTasks.runTask('dng', task, payload, {
+            processId: options.processId || 'editor.dng',
+            priority: options.priority || 'user-visible',
+            scope: options.scope || 'section:editor',
+            transfer: options.transfer || [],
+            replaceKey: options.replaceKey || null,
+            replaceActive: options.replaceActive !== false
+        });
+    }
+
+    if (task === 'probe-dng-source') {
+        return probeDngBuffer(payload.buffer);
+    }
+    if (task === 'decode-dng-source') {
+        return decodeDngBuffer(payload.buffer);
+    }
+    throw new Error(`Unknown editor DNG task "${task}".`);
+}
+
+async function readDngBufferFromSource(source) {
+    if (source instanceof Blob) {
+        return source.arrayBuffer();
+    }
+    const normalized = normalizeEditorSource(source);
+    if (normalized.rawData) {
+        const blob = await dataUrlToBlob(normalized.rawData);
+        return blob.arrayBuffer();
+    }
+    throw new Error('This DNG source is missing its original raw payload.');
+}
+
+async function probeDngFileInBackground(file, options = {}) {
+    if (!(file instanceof Blob)) {
+        throw new Error('A DNG file is required.');
+    }
+    if (backgroundTasks) {
+        const request = await createWorkerSingleFileEntry(file);
+        return backgroundTasks.runTask('dng', 'probe-dng-source', {
+            file,
+            fileEntry: request.fileEntry
+        }, {
+            processId: options.processId || 'editor.dng',
+            priority: options.priority || 'user-visible',
+            scope: options.scope || 'section:editor',
+            transfer: request.transfer,
+            replaceKey: options.replaceKey || `probe-dng:${file.name}`,
+            replaceActive: true
+        });
+    }
+    return probeDngBuffer(await file.arrayBuffer());
+}
+
+async function decodeDngSourceInBackground(source, options = {}) {
+    const buffer = await readDngBufferFromSource(source);
+    const sourceSignature = String(source?.dng?.sourceSignature || '');
+    if (sourceSignature && dngDecodedSourceCache.has(sourceSignature)) {
+        return structuredClone(dngDecodedSourceCache.get(sourceSignature));
+    }
+    const result = await runEditorDngTask('decode-dng-source', {
+        buffer
+    }, {
+        processId: options.processId || 'editor.dng',
+        priority: options.priority || 'user-visible',
+        scope: options.scope || 'section:editor',
+        transfer: [buffer],
+        replaceKey: options.replaceKey || `decode-dng:${sourceSignature || source?.name || 'source'}`,
+        replaceActive: true
+    });
+    if (sourceSignature) {
+        dngDecodedSourceCache.set(sourceSignature, structuredClone(result));
+    }
+    return result;
+}
+
+function createCanvasFromRgba(width, height, rgba) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(Number(width) || 1));
+    canvas.height = Math.max(1, Math.round(Number(height) || 1));
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+        throw new Error('Could not create a preview canvas for the DNG render.');
+    }
+    const pixels = rgba instanceof Uint8ClampedArray ? rgba : new Uint8ClampedArray(rgba || []);
+    ctx.putImageData(new ImageData(pixels, canvas.width, canvas.height), 0, 0);
+    return canvas;
+}
+
+function summarizeDngWarnings(warnings = []) {
+    const list = (warnings || []).filter(Boolean);
+    if (!list.length) return '';
+    return list[0];
+}
+
+async function ensureDngSourceDecoded(documentState, options = {}) {
+    const normalizedDocument = normalizeStudioDocumentForDng(
+        applyEditorSettingsToDocument(documentState, options.settings || appStore?.getState?.().settings || activeSettings)
+    );
+    const source = normalizeEditorSource(normalizedDocument.source);
+    if (!isDngSource(source)) {
+        return {
+            document: normalizedDocument,
+            decoded: null
+        };
+    }
+
+    const decoded = await decodeDngSourceInBackground(source, {
+        processId: options.processId || 'editor.dng',
+        priority: options.priority || 'user-visible',
+        scope: options.scope || 'section:editor',
+        replaceKey: options.replaceKey || `dng-decode:${source.dng?.sourceSignature || source.name || 'source'}`
+    });
+    const nextSource = normalizeEditorSource({
+        ...source,
+        imageData: null,
+        width: Number(decoded?.probe?.width || source.width || 0),
+        height: Number(decoded?.probe?.height || source.height || 0),
+        dng: normalizeDngSourceState({
+            ...source.dng,
+            sourceSignature: decoded?.sourceSignature || source?.dng?.sourceSignature || '',
+            lastPreparedParamsHash: '',
+            lastPreparedAt: Date.now(),
+            prepareQuality: normalizedDocument.view?.highQualityPreview ? 'high' : 'fast',
+            preset: decoded?.preset || getDngPresetForProbe(decoded?.probe),
+            fidelity: decoded?.fidelity || source?.dng?.fidelity || 'partial',
+            warnings: decoded?.warnings || source?.dng?.warnings || [],
+            probe: decoded?.probe || source?.dng?.probe || null
+        })
+    });
+    return {
+        document: normalizeStudioDocumentForDng({
+            ...normalizedDocument,
+            source: nextSource,
+            base: normalizeEditorBase(normalizedDocument.base, nextSource)
+        }),
+        decoded
     };
 }
 
@@ -1102,31 +1412,52 @@ function clearStudioEngineImage(studioEngine) {
 
 async function syncStudioEngineToDocument(studioEngine, documentState, options = {}) {
     if (!studioEngine) return null;
-    const normalizedSource = normalizeEditorSource(documentState?.source);
     const resolvedSettings = options.settings
         || appStore?.getState?.().settings
         || activeSettings;
-    const normalizedDocument = applyEditorSettingsToDocument({
+    let normalizedDocument = normalizeStudioDocumentForDng(applyEditorSettingsToDocument({
         ...(documentState || {}),
-        source: normalizedSource,
-        base: normalizeEditorBase(documentState?.base, normalizedSource)
-    }, resolvedSettings);
+        source: normalizeEditorSource(documentState?.source),
+        base: normalizeEditorBase(documentState?.base, documentState?.source),
+        export: normalizeEditorExportState(documentState?.export, documentState)
+    }, resolvedSettings));
     let sourceImage = options.sourceImage || null;
-    if (!sourceImage && normalizedSource.imageData) {
-        sourceImage = await loadImageFromDataUrl(normalizedSource.imageData);
+    let decodedDngSource = null;
+    if (isDngSource(normalizedDocument.source)) {
+        const decodedSource = await ensureDngSourceDecoded(normalizedDocument, {
+            settings: resolvedSettings,
+            processId: options.processId || 'editor.dng',
+            priority: options.priority || 'user-visible',
+            scope: options.scope || 'section:editor',
+            replaceKey: options.replaceKey || 'editor-dng-sync'
+        });
+        normalizedDocument = decodedSource.document;
+        decodedDngSource = decodedSource.decoded;
+    } else if (!sourceImage && normalizedDocument.source.imageData) {
+        sourceImage = await loadImageFromDataUrl(normalizedDocument.source.imageData);
     }
     const surface = createEditorBaseSurface(normalizedDocument, sourceImage);
     await studioEngine.loadImage(surface, {
-        ...normalizedSource,
+        ...normalizeEditorSource(normalizedDocument.source),
         width: surface.width,
         height: surface.height,
         canvasWidth: surface.width,
         canvasHeight: surface.height
     });
+    if (decodedDngSource) {
+        await studioEngine.loadDngSource(decodedDngSource, {
+            ...normalizeEditorSource(normalizedDocument.source),
+            width: surface.width,
+            height: surface.height,
+            canvasWidth: surface.width,
+            canvasHeight: surface.height
+        });
+    }
     return {
         document: normalizedDocument,
         surface,
-        sourceImage
+        sourceImage,
+        decodedDngSource
     };
 }
 
@@ -1358,6 +1689,38 @@ function normalizeLibraryHoverSource(source) {
     };
 }
 
+function hasPersistableEditorSource(source) {
+    const normalized = normalizeEditorSource(source);
+    return !!(normalized.imageData || normalized.rawData);
+}
+
+function createLibraryProjectListPayload(record) {
+    const payload = normalizeLegacyDocumentPayload(record?.payload);
+    if (!payload || typeof payload !== 'object') return payload;
+    if (getLibraryProjectType(record) !== 'studio') return payload;
+
+    const source = normalizeEditorSource(payload.source);
+    if (!isDngSource(source)) return payload;
+
+    const nextPayload = {
+        ...payload,
+        source: normalizeEditorSource({
+            ...stripDngSourceRawPayload(source),
+            imageData: null,
+            dng: {
+                ...source.dng,
+                lastPreparedParamsHash: '',
+                lastPreparedAt: 0
+            }
+        })
+    };
+    if (nextPayload.preview && typeof nextPayload.preview === 'object' && record?.blob instanceof Blob) {
+        nextPayload.preview = { ...nextPayload.preview };
+        delete nextPayload.preview.imageData;
+    }
+    return nextPayload;
+}
+
 function buildLibraryProjectRecord({
     id,
     name,
@@ -1391,6 +1754,70 @@ function buildLibraryProjectRecord({
         sourceCount: Math.max(0, Number(sourceCount) || 0),
         renderWidth: Math.max(0, Number(renderWidth) || 0),
         renderHeight: Math.max(0, Number(renderHeight) || 0)
+    };
+}
+
+function buildLibraryAttachmentRecord({
+    id,
+    projectId,
+    kind,
+    fileName = '',
+    mimeType = 'application/octet-stream',
+    byteLength = 0,
+    dataUrl = '',
+    timestamp = Date.now()
+}) {
+    return {
+        id: id || createLibraryAttachmentId(),
+        projectId: String(projectId || ''),
+        kind: String(kind || ''),
+        fileName: String(fileName || ''),
+        mimeType: String(mimeType || 'application/octet-stream'),
+        byteLength: Math.max(0, Number(byteLength) || 0),
+        dataUrl: String(dataUrl || ''),
+        timestamp: Math.max(0, Number(timestamp) || Date.now())
+    };
+}
+
+async function saveStudioDngAttachment(projectId, source) {
+    const normalized = normalizeEditorSource(source);
+    if (!projectId || !isDngSource(normalized) || !normalized.rawData) return null;
+    const record = buildLibraryAttachmentRecord({
+        id: normalized.dng?.attachmentId || null,
+        projectId,
+        kind: DNG_ATTACHMENT_KIND,
+        fileName: normalized.name,
+        mimeType: normalized.rawMimeType || normalized.type || 'image/x-adobe-dng',
+        byteLength: normalized.rawByteLength || 0,
+        dataUrl: normalized.rawData
+    });
+    await saveLibraryAttachment(record);
+    return record;
+}
+
+async function hydrateStudioDngPayloadFromAttachment(payload, projectId) {
+    const normalizedPayload = payload && typeof payload === 'object' ? { ...payload } : payload;
+    const source = normalizeEditorSource(normalizedPayload?.source);
+    if (!isDngSource(source)) return normalizedPayload;
+    if (source.rawData) return normalizedPayload;
+    const attachmentId = source.dng?.attachmentId;
+    let attachment = attachmentId ? await getLibraryAttachment(attachmentId).catch(() => null) : null;
+    if (!attachment && projectId) {
+        attachment = (await getLibraryAttachmentsByProjectId(projectId).catch(() => [])).find((entry) => entry.kind === DNG_ATTACHMENT_KIND) || null;
+    }
+    if (!attachment?.dataUrl) return normalizedPayload;
+    return {
+        ...normalizedPayload,
+        source: normalizeEditorSource({
+            ...source,
+            rawData: attachment.dataUrl,
+            rawMimeType: attachment.mimeType || source.rawMimeType,
+            rawByteLength: attachment.byteLength || source.rawByteLength,
+            dng: {
+                ...source.dng,
+                attachmentId: attachment.id
+            }
+        })
     };
 }
 
@@ -1624,7 +2051,7 @@ function syncSectionUrl(section) {
 function createInitialState(settings = createDefaultAppSettings()) {
     const normalizedSettings = normalizeAppSettings(settings);
     return {
-        document: applyEditorSettingsToDocument({
+        document: normalizeStudioDocumentForDng(applyEditorSettingsToDocument({
             version: 'mns/v2',
             kind: 'document',
             mode: 'studio',
@@ -1635,9 +2062,9 @@ function createInitialState(settings = createDefaultAppSettings()) {
             layerStack: [],
             selection: { layerInstanceId: null },
             view: createDefaultViewState(),
-            export: { keepFolderStructure: false, playFps: 10 },
+            export: { keepFolderStructure: false, playFps: 10, pngBitDepth: '8-bit' },
             batch: createEmptyBatchState()
-        }, normalizedSettings),
+        }, normalizedSettings)),
         compositeDocument: createSettingsDrivenCompositeDocument(normalizedSettings),
         stitchDocument: createSettingsDrivenStitchDocument(normalizedSettings),
         threeDDocument: createSettingsDrivenThreeDDocument(normalizedSettings),
@@ -1685,6 +2112,164 @@ function reindexStack(registry, layerStack) {
         const siblings = normalized.filter((item) => item.layerId === instance.layerId);
         return relabelInstance(instance, registry, siblings);
     });
+}
+
+function getDngDevelopInstance(document) {
+    return (document?.layerStack || []).find((instance) => instance.layerId === 'dngDevelop') || null;
+}
+
+function getDngDevelopParamsFromDocument(document) {
+    const source = normalizeEditorSource(document?.source);
+    return normalizeDngDevelopParams(
+        getDngDevelopInstance(document)?.params || createDefaultDngDevelopParams(),
+        source.dng?.probe || null
+    );
+}
+
+function buildDngDebugSnapshot(document) {
+    const normalizedDocument = normalizeStudioDocumentForDng(document || createInitialState().document);
+    const source = normalizeEditorSource(normalizedDocument.source);
+    if (!isDngSource(source)) return null;
+    const probe = source.dng?.probe || {};
+    const params = getDngDevelopParamsFromDocument(normalizedDocument);
+    return {
+        capturedAt: new Date().toISOString(),
+        source: {
+            name: source.name || '',
+            sourceSignature: source.dng?.sourceSignature || '',
+            fidelity: source.dng?.fidelity || 'partial',
+            warnings: Array.isArray(source.dng?.warnings) ? source.dng.warnings : [],
+            make: probe.make || '',
+            model: probe.model || '',
+            preset: probe.preset || source.dng?.preset || '',
+            classificationMode: probe.classificationMode || '',
+            compression: probe.compressionLabel || '',
+            dimensions: {
+                width: Number(probe.width || source.width || 0) || 0,
+                height: Number(probe.height || source.height || 0) || 0
+            },
+            supports: {
+                remosaic: !!probe.supportsRemosaic,
+                orientationToggle: !!probe.supportsOrientationToggle,
+                opcodeCorrections: !!probe.supportsOpcodeCorrections,
+                gainMapCorrections: !!probe.supportsGainMapCorrections,
+                linearization: !!probe.supportsLinearization
+            },
+            flags: {
+                hasOpcodeList: !!probe.hasOpcodeList,
+                hasGainMap: !!probe.hasGainMap,
+                hasProfileGainTableMap: !!probe.hasProfileGainTableMap,
+                hasLinearizationTable: !!probe.hasLinearizationTable
+            }
+        },
+        controls: params,
+        editorView: {
+            highQualityPreview: !!normalizedDocument.view?.highQualityPreview,
+            hoverCompareOriginal: !!normalizedDocument.view?.hoverCompareOriginal,
+            renderToActiveLayer: !!normalizedDocument.view?.renderToActiveLayer
+        }
+    };
+}
+
+function reconcileDngDevelopLayer(document) {
+    const registryRef = dngRuntimeRegistry;
+    if (!document || !registryRef?.byId?.dngDevelop) return document;
+    const source = normalizeEditorSource(document.source);
+    const isDng = isDngSource(source);
+    const currentStack = Array.isArray(document.layerStack) ? document.layerStack : [];
+    const existing = currentStack.find((instance) => instance.layerId === 'dngDevelop') || null;
+
+    if (!isDng) {
+        if (!existing) return document;
+        const nextStack = reindexStack(registryRef, currentStack.filter((instance) => instance.layerId !== 'dngDevelop'));
+        const nextSelection = document.selection?.layerInstanceId === existing.instanceId
+            ? { layerInstanceId: nextStack[0]?.instanceId || null }
+            : document.selection;
+        return {
+            ...document,
+            layerStack: nextStack,
+            selection: nextSelection
+        };
+    }
+
+    const currentSourceSignature = String(source.dng?.sourceSignature || '');
+    const existingSourceSignature = String(existing?.meta?.dngSourceSignature || '');
+    const resetForNewSource = !!existing
+        && !!currentSourceSignature
+        && !!existingSourceSignature
+        && existingSourceSignature !== currentSourceSignature;
+    const normalizedParams = normalizeDngDevelopParams(
+        resetForNewSource ? createDefaultDngDevelopParams() : (existing?.params || createDefaultDngDevelopParams()),
+        source.dng?.probe || null
+    );
+    if (existing) {
+        const nextStack = reindexStack(registryRef, currentStack.map((instance) => (
+            instance.instanceId === existing.instanceId
+                ? {
+                    ...instance,
+                    enabled: true,
+                    visible: true,
+                    meta: {
+                        ...(instance.meta || {}),
+                        dngSourceSignature: currentSourceSignature
+                    },
+                    params: {
+                        ...instance.params,
+                        ...normalizedParams
+                    }
+                }
+                : instance
+        )));
+        const dngIndex = nextStack.findIndex((instance) => instance.layerId === 'dngDevelop');
+        if (dngIndex > 0) {
+            const ordered = [...nextStack];
+            const [dngLayer] = ordered.splice(dngIndex, 1);
+            ordered.unshift(dngLayer);
+            return { ...document, layerStack: reindexStack(registryRef, ordered) };
+        }
+        return { ...document, layerStack: nextStack };
+    }
+
+    const created = applyEditorSettingsToLayerInstance(
+        createLayerInstance(registryRef, 'dngDevelop', currentStack),
+        appStore?.getState?.().settings || createDefaultAppSettings()
+    );
+    created.params = { ...created.params, ...normalizedParams };
+    created.meta = {
+        ...(created.meta || {}),
+        dngSourceSignature: currentSourceSignature
+    };
+    const nextStack = reindexStack(registryRef, [created, ...currentStack]);
+    const hasValidSelection = !!document.selection?.layerInstanceId
+        && nextStack.some((instance) => instance.instanceId === document.selection.layerInstanceId);
+    return {
+        ...document,
+        layerStack: nextStack,
+        selection: hasValidSelection ? document.selection : { layerInstanceId: created.instanceId }
+    };
+}
+
+function normalizeEditorExportState(exportState = null, document = null) {
+    const source = normalizeEditorSource(document?.source);
+    const current = exportState && typeof exportState === 'object' ? exportState : {};
+    const defaultBitDepth = isDngSource(source) ? '16-bit' : '8-bit';
+    const bitDepth = String(current.pngBitDepth || current.bitDepth || defaultBitDepth).trim().toLowerCase() === '16-bit'
+        ? '16-bit'
+        : '8-bit';
+    return {
+        ...current,
+        keepFolderStructure: !!current.keepFolderStructure,
+        playFps: clamp(Number(current.playFps || 10), 1, 60),
+        pngBitDepth: isDngSource(source) ? bitDepth : '8-bit'
+    };
+}
+
+function normalizeStudioDocumentForDng(document) {
+    const reconciled = reconcileDngDevelopLayer(document);
+    return {
+        ...reconciled,
+        export: normalizeEditorExportState(reconciled.export, reconciled)
+    };
 }
 
 function computeEditorResolutionThroughStack(documentState, stopInstanceId = null) {
@@ -1869,6 +2454,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         'settings.3d': '3D Settings',
         'settings.logs': 'Logs Settings',
         'editor.files': 'Editor Files',
+        'editor.dng': 'Editor DNG',
         'editor.export': 'Editor Export',
         'composite.workspace': 'Composite Workspace',
         'composite.layers': 'Composite Layers',
@@ -1908,6 +2494,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     view = null;
     let paletteExtractionImage = null;
     let paletteExtractionOwner = null;
+    let dngPreviewRefreshToken = 0;
+    let dngPreviewStatusToken = 0;
+    let dngPreviewStatusTimer = null;
+    let dngPreviewScheduleTimer = null;
+    let dngPreviewScheduledDocument = null;
+    let dngPreviewScheduledOptions = null;
+    let dngPreviewScheduledResolves = [];
     let stitchAnalysisToken = 0;
     let lastPersistedSettings = JSON.stringify(activeSettings);
     const logAutoClearTimers = new Map();
@@ -2135,6 +2728,33 @@ window.addEventListener('DOMContentLoaded', async () => {
         view?.setEditorProgress?.(payload);
     }
 
+    function beginDngPreviewRenderStatus(options = {}) {
+        const token = ++dngPreviewStatusToken;
+        const payload = {
+            active: true,
+            title: String(options.title || 'Rendering'),
+            message: String(options.message || 'Updating the DNG preview...')
+        };
+        const delayMs = Math.max(0, Number(options.delayMs) || 0);
+        clearTimeout(dngPreviewStatusTimer);
+        if (view?.getEditorPreviewRenderStatus?.()?.active) {
+            view?.setEditorPreviewRenderStatus?.(payload);
+            return token;
+        }
+        dngPreviewStatusTimer = setTimeout(() => {
+            if (token !== dngPreviewStatusToken) return;
+            view?.setEditorPreviewRenderStatus?.(payload);
+        }, delayMs);
+        return token;
+    }
+
+    function endDngPreviewRenderStatus(token) {
+        if (token !== dngPreviewStatusToken) return;
+        clearTimeout(dngPreviewStatusTimer);
+        dngPreviewStatusTimer = null;
+        view?.setEditorPreviewRenderStatus?.(null);
+    }
+
     function setStitchProgress(payload = null) {
         view?.setStitchProgress?.(payload);
     }
@@ -2313,6 +2933,25 @@ window.addEventListener('DOMContentLoaded', async () => {
                     return extractPaletteFromFileFallback(payload.file, payload.count);
                 }
                 throw new Error(`Unknown editor task "${task}".`);
+            }
+        });
+        backgroundTasks.registerDomain('dng', {
+            workerUrl: withAssetVersion(new URL('./workers/dng.worker.js', import.meta.url)),
+            restartWorkerOnActiveCancel: false,
+            fallback(task, payload) {
+                if (task === 'probe-dng-source') {
+                    if (payload.buffer) return probeDngBuffer(payload.buffer);
+                    if (payload.fileEntry?.buffer instanceof ArrayBuffer) {
+                        return probeDngBuffer(payload.fileEntry.buffer);
+                    }
+                    if (payload.file instanceof Blob) {
+                        return payload.file.arrayBuffer().then((buffer) => probeDngBuffer(buffer));
+                    }
+                }
+                if (task === 'decode-dng-source') {
+                    return decodeDngBuffer(payload.buffer);
+                }
+                throw new Error(`Unknown dng task "${task}".`);
             }
         });
         backgroundTasks.registerDomain('stitch', {
@@ -2517,6 +3156,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         replayOnWorkerCrash: true,
         maxCrashReplays: 2
     });
+    dngRuntimeRegistry = registry;
     store = createStore(createInitialState(activeSettings));
     appStore = store;
     engine = new NoiseStudioEngine(registry, {
@@ -2599,8 +3239,33 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    async function copyTextToClipboard(text) {
+        const value = String(text ?? '');
+        if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+        const textArea = document.createElement('textarea');
+        textArea.value = value;
+        textArea.setAttribute('readonly', 'readonly');
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        textArea.style.top = '0';
+        document.body.appendChild(textArea);
+        textArea.select();
+        const copied = document.execCommand('copy');
+        textArea.remove();
+        if (!copied) {
+            throw new Error('Clipboard access is not available in this environment.');
+        }
+        return true;
+    }
+
     function updateDocument(mutator, meta = { render: true }) {
-        store.setState((state) => ({ ...state, document: mutator(state.document) }), meta);
+        store.setState((state) => ({
+            ...state,
+            document: normalizeStudioDocumentForDng(mutator(state.document))
+        }), meta);
     }
 
     function updateCompositeDocument(mutator, meta = { renderComposite: true }) {
@@ -2683,10 +3348,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             source: nextSource,
             base: nextBase
         }, store.getState().settings);
-        await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
-        updateDocument(() => nextDocument, { render: false });
-        engine.requestRender(nextDocument);
-        return nextDocument;
+        const synced = await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
+        const syncedDocument = synced?.document || nextDocument;
+        updateDocument(() => syncedDocument, { render: false });
+        engine.requestRender(syncedDocument);
+        return syncedDocument;
     }
 
     async function loadBatchImage(file, index) {
@@ -2719,20 +3385,85 @@ window.addEventListener('DOMContentLoaded', async () => {
     async function commitEditorBaseDocument(nextDocument, options = {}) {
         try {
             const normalizedDocument = applyEditorSettingsToDocument(nextDocument, store.getState().settings);
-            await syncStudioEngineToDocument(engine, normalizedDocument, {
+            const synced = await syncStudioEngineToDocument(engine, normalizedDocument, {
                 sourceImage: options.sourceImage || null
             });
-            updateDocument(() => normalizedDocument, { render: false });
+            const syncedDocument = synced?.document || normalizedDocument;
+            updateDocument(() => syncedDocument, { render: false });
             if (options.clearLibraryOrigin !== false) {
                 clearActiveLibraryOrigin('studio');
             }
-            engine.requestRender(normalizedDocument);
-            return normalizedDocument;
+            engine.requestRender(syncedDocument);
+            return syncedDocument;
         } catch (error) {
             logProcess('error', 'editor.base', error?.message || 'Could not update the Editor base canvas.');
             setNotice(error?.message || 'Could not update the Editor base canvas.', 'error', 7000);
             return null;
         }
+    }
+
+    async function refreshEditorDngPreview(nextDocument, options = {}) {
+        const normalizedDocument = normalizeStudioDocumentForDng(
+            applyEditorSettingsToDocument(nextDocument, store.getState().settings)
+        );
+        if (!isDngSource(normalizedDocument.source)) {
+            return normalizedDocument;
+        }
+        const token = ++dngPreviewRefreshToken;
+        const statusToken = options.showRenderStatus === false
+            ? 0
+            : beginDngPreviewRenderStatus({
+                title: options.renderStatusTitle || 'Rendering',
+                message: options.renderStatusMessage || 'Updating the DNG preview...',
+                delayMs: options.renderStatusDelayMs ?? 150
+            });
+        updateDocument(() => normalizedDocument, { render: false });
+        return new Promise((resolve) => {
+            engine.requestRender(normalizedDocument, {
+                onComplete: () => {
+                    if (statusToken) {
+                        endDngPreviewRenderStatus(statusToken);
+                    }
+                    if (token !== dngPreviewRefreshToken) {
+                        resolve(null);
+                        return;
+                    }
+                    resolve(normalizedDocument);
+                }
+            });
+        });
+    }
+
+    function scheduleEditorDngPreviewRefresh(nextDocument, options = {}) {
+        const delayMs = Math.max(0, Number(options.delayMs) || 0);
+        if (delayMs <= 0) {
+            const pendingResolves = dngPreviewScheduledResolves.splice(0, dngPreviewScheduledResolves.length);
+            clearTimeout(dngPreviewScheduleTimer);
+            dngPreviewScheduleTimer = null;
+            dngPreviewScheduledDocument = null;
+            dngPreviewScheduledOptions = null;
+            return refreshEditorDngPreview(nextDocument, options).then((result) => {
+                pendingResolves.forEach((complete) => complete(result));
+                return result;
+            });
+        }
+
+        dngPreviewScheduledDocument = nextDocument;
+        dngPreviewScheduledOptions = { ...options, delayMs: 0 };
+        return new Promise((resolve) => {
+            dngPreviewScheduledResolves.push(resolve);
+            clearTimeout(dngPreviewScheduleTimer);
+            dngPreviewScheduleTimer = setTimeout(async () => {
+                const scheduledDocument = dngPreviewScheduledDocument;
+                const scheduledOptions = dngPreviewScheduledOptions || {};
+                const scheduledResolves = dngPreviewScheduledResolves.splice(0, dngPreviewScheduledResolves.length);
+                dngPreviewScheduledDocument = null;
+                dngPreviewScheduledOptions = null;
+                dngPreviewScheduleTimer = null;
+                const result = await refreshEditorDngPreview(scheduledDocument, scheduledOptions);
+                scheduledResolves.forEach((complete) => complete(result));
+            }, delayMs);
+        });
     }
 
     function stopPlayback() {
@@ -2836,7 +3567,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     let imageAssetPreviewBackfillPromise = null;
 
     async function getAllLibraryProjectRecords() {
-        return (await getAllFromLibraryDB()).filter((entry) => isLibraryProjectRecord(entry));
+        return getLibraryProjectRecordsByCursor();
     }
 
     async function getAllLibraryAssetRecords() {
@@ -2849,8 +3580,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     async function restoreActiveStudioRender() {
         const liveDocument = store.getState().document;
         if (liveDocument) {
-            await syncStudioEngineToDocument(engine, liveDocument);
-            engine.requestRender(liveDocument);
+            const synced = await syncStudioEngineToDocument(engine, liveDocument);
+            updateDocument(() => synced.document, { render: false });
+            engine.requestRender(synced.document);
             return true;
         }
         clearStudioEngineImage(engine);
@@ -3081,9 +3813,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                             source: normalizeEditorSource(validated.source),
                             base: normalizeEditorBase(validated.base, validated.source)
                         };
-                        await syncStudioEngineToDocument(engine, tempDoc);
-                        const capture = await captureStudioDocumentSnapshot(engine, tempDoc, validated);
-                        const nextPayload = capture.payload || buildLibraryPayload(tempDoc, capture.preview || null);
+                        const synced = await syncStudioEngineToDocument(engine, tempDoc);
+                        const syncedDocument = synced?.document || tempDoc;
+                        const capture = await captureStudioDocumentSnapshot(engine, syncedDocument, validated);
+                        const nextPayload = capture.payload || buildLibraryPayload(syncedDocument, capture.preview || null);
                         const baseResolution = getEditorCanvasResolution(nextPayload);
                         const nextRecord = buildLibraryProjectRecord({
                             id: projectRecord.id,
@@ -3097,7 +3830,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                             sourceWidth: Number(projectRecord.sourceWidth || baseResolution.width || 0),
                             sourceHeight: Number(projectRecord.sourceHeight || baseResolution.height || 0),
                             sourceArea: Number(projectRecord.sourceAreaOverride || ((baseResolution.width || 0) * (baseResolution.height || 0)) || 0),
-                            sourceCount: Number(projectRecord.sourceCount || (nextPayload.source?.imageData ? 1 : 0) || 0),
+                            sourceCount: Number(projectRecord.sourceCount || (hasPersistableEditorSource(nextPayload.source) ? 1 : 0) || 0),
                             renderWidth: Number(capture.preview?.width || projectRecord.renderWidth || baseResolution.width || 0),
                             renderHeight: Number(capture.preview?.height || projectRecord.renderHeight || baseResolution.height || 0)
                         });
@@ -3618,7 +4351,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             sourceWidth: Number(baseResolution.width || 0),
             sourceHeight: Number(baseResolution.height || 0),
             sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
-            sourceCount: payload.source?.imageData ? 1 : 0,
+            sourceCount: hasPersistableEditorSource(payload.source) ? 1 : 0,
             renderWidth: Number(capture.preview?.width || payload.preview?.width || baseResolution.width || 0),
             renderHeight: Number(capture.preview?.height || payload.preview?.height || baseResolution.height || 0)
         });
@@ -3694,8 +4427,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         const preparedPayload = await syncEmbeddedEditorPayloadImageDimensions(rawPayload);
         const editorDocument = buildEditorDocumentFromPayload(preparedPayload);
         const hiddenEngine = await ensureCompositeEditorRenderEngineReady();
-        await syncStudioEngineToDocument(hiddenEngine, editorDocument);
-        const capture = await captureStudioDocumentSnapshot(hiddenEngine, editorDocument, preparedPayload);
+        const synced = await syncStudioEngineToDocument(hiddenEngine, editorDocument);
+        const syncedDocument = synced?.document || editorDocument;
+        const capture = await captureStudioDocumentSnapshot(hiddenEngine, syncedDocument, preparedPayload);
         const payload = await syncEmbeddedEditorPayloadImageDimensions(capture.payload || preparedPayload);
         return {
             ...capture,
@@ -3793,11 +4527,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
 
         const editorDocument = buildEditorDocumentFromPayload(selectedLayer.embeddedEditorDocument);
-        await syncStudioEngineToDocument(engine, editorDocument);
+        const synced = await syncStudioEngineToDocument(engine, editorDocument);
+        const syncedDocument = synced?.document || editorDocument;
         stopPlayback();
         paletteExtractionImage = null;
         paletteExtractionOwner = null;
-        updateDocument(() => editorDocument, { render: false });
+        updateDocument(() => syncedDocument, { render: false });
         if (selectedLayer.source?.generatedFromCompositeImage && selectedLayer.source?.originalLibraryId) {
             setActiveLibraryOrigin('studio', selectedLayer.source.originalLibraryId, selectedLayer.source.originalLibraryName);
         } else {
@@ -3810,7 +4545,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             originalLibraryName: selectedLayer.source?.originalLibraryName || null
         });
         commitActiveSection('editor');
-        engine.requestRender(store.getState().document);
+        engine.requestRender(syncedDocument);
         logProcess('success', 'composite.link', matchingCompositeLayer
             ? `Switched Editor from Composite-linked layer "${matchingCompositeLayer.name || 'Layer'}" to "${selectedLayer.name || 'Layer'}" without an extra save prompt.`
             : `Opened "${selectedLayer.name || 'Layer'}" in Editor from Composite.`);
@@ -4207,10 +4942,13 @@ window.addEventListener('DOMContentLoaded', async () => {
             clearCompositeBridgeState();
             return false;
         }
+        let editorDocument = state.document;
         if (!engine.hasImage()) {
-            await syncStudioEngineToDocument(engine, state.document);
+            const synced = await syncStudioEngineToDocument(engine, state.document);
+            editorDocument = synced?.document || state.document;
+            updateDocument(() => editorDocument, { render: false });
         }
-        const capture = await captureStudioDocumentSnapshot(engine, state.document);
+        const capture = await captureStudioDocumentSnapshot(engine, editorDocument);
         const renderSize = resolveCompositeEditorLayerRenderSize({
             payload: capture.payload,
             preview: capture.preview,
@@ -4792,11 +5530,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     async function getMatchingLibraryEntries(payload, projectType = null) {
         const fingerprint = makeProjectFingerprint(payload);
         try {
-            const existing = await getAllFromLibraryDB();
-            return existing.filter((entry) => {
-                if (!entry.payload || isLibraryMetaRecord(entry)) return false;
-                if (projectType && getLibraryProjectType(entry) !== projectType) return false;
-                return makeProjectFingerprint(entry.payload) === fingerprint;
+            return await getLibraryProjectRecordsByCursor({
+                filterRecord(entry) {
+                    if (!entry.payload || isLibraryMetaRecord(entry)) return false;
+                    if (projectType && getLibraryProjectType(entry) !== projectType) return false;
+                    return makeProjectFingerprint(entry.payload) === fingerprint;
+                },
+                mapRecord(entry) {
+                    return {
+                        id: entry.id,
+                        name: entry.name,
+                        projectType: getLibraryProjectType(entry)
+                    };
+                }
             });
         } catch (_error) {
             return [];
@@ -6356,14 +7102,17 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!confirmed) return false;
             try {
                 const state = store.getState();
+                let editorDocument = state.document;
                 if (!engine.hasImage()) {
-                    await syncStudioEngineToDocument(engine, state.document);
+                    const synced = await syncStudioEngineToDocument(engine, state.document);
+                    editorDocument = synced?.document || state.document;
+                    updateDocument(() => editorDocument, { render: false });
                 }
                 const existingRecord = await getFromLibraryDB(bridge.originalLibraryId);
                 if (!existingRecord || getLibraryProjectType(existingRecord) !== 'studio') {
                     throw new Error('The original Editor Library project could not be found.');
                 }
-                const capture = await captureStudioDocumentSnapshot(engine, state.document);
+                const capture = await captureStudioDocumentSnapshot(engine, editorDocument);
                 const renderSize = resolveCompositeEditorLayerRenderSize({
                     payload: capture.payload,
                     preview: capture.preview
@@ -6381,7 +7130,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     sourceWidth: Number(baseResolution.width || 0),
                     sourceHeight: Number(baseResolution.height || 0),
                     sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
-                    sourceCount: capture.payload.source?.imageData ? 1 : 0,
+                    sourceCount: hasPersistableEditorSource(capture.payload.source) ? 1 : 0,
                     renderWidth: Number(capture.preview?.width || baseResolution.width || 0),
                     renderHeight: Number(capture.preview?.height || baseResolution.height || 0)
                 });
@@ -6510,6 +7259,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         addLayer(layerId) {
             updateDocument((document) => {
                 const layer = registry.byId[layerId];
+                if (layerId === 'dngDevelop' && !isDngSource(document.source)) {
+                    return document;
+                }
                 if (layer?.supportsMultiInstance === false) {
                     const existing = document.layerStack.find((instance) => instance.layerId === layerId);
                     if (existing) {
@@ -6789,10 +7541,33 @@ window.addEventListener('DOMContentLoaded', async () => {
                 params: structuredClone(layer?.defaults || instance.params)
             }));
         },
+        async copyDngDevelopDebugSettings() {
+            const snapshot = buildDngDebugSnapshot(store.getState().document);
+            if (!snapshot) {
+                setNotice('Load a DNG source before copying DNG debug settings.', 'warning', 5200);
+                return false;
+            }
+            try {
+                await copyTextToClipboard(JSON.stringify(snapshot, null, 2));
+                logProcess('success', 'editor.dng', 'Copied the current DNG settings snapshot to the clipboard.', {
+                    dedupeKey: `editor-dng-copy:${snapshot.source.sourceSignature || snapshot.source.name || 'source'}`,
+                    dedupeWindowMs: 300
+                });
+                setNotice('Copied the current DNG settings to the clipboard.', 'success', 4200);
+                return true;
+            } catch (error) {
+                logProcess('error', 'editor.dng', error?.message || 'Could not copy the DNG settings snapshot.');
+                setNotice(error?.message || 'Could not copy the DNG settings snapshot.', 'error', 7000);
+                return false;
+            }
+        },
         updateControl(instanceId, key, rawValue, meta) {
-            updateDocument((document) => ({
-                ...document,
-                layerStack: document.layerStack.map((instance) => {
+            const currentDocument = store.getState().document;
+            const currentInstance = currentDocument.layerStack.find((instance) => instance.instanceId === instanceId) || null;
+            const layerId = String(currentInstance?.layerId || '');
+            const nextDocument = normalizeStudioDocumentForDng({
+                ...currentDocument,
+                layerStack: currentDocument.layerStack.map((instance) => {
                     if (instance.instanceId !== instanceId) return instance;
                     const current = instance.params[key];
                     const layer = registry.byId[instance.layerId];
@@ -6810,8 +7585,25 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }),
                 palette: key === 'extractCount' && paletteExtractionImage && paletteExtractionOwner === instanceId
                     ? createPaletteFromImage(paletteExtractionImage, Number(rawValue))
-                    : document.palette
-            }), meta);
+                    : currentDocument.palette
+            });
+            const nextMeta = meta || { render: true };
+            if (layerId === 'dngDevelop' && isDngSource(currentDocument.source)) {
+                const statusToken = beginDngPreviewRenderStatus({
+                    title: 'Rendering',
+                    message: 'Updating the DNG preview...',
+                    delayMs: nextMeta.dngImmediateRefresh ? 0 : 120
+                });
+                updateDocument(() => nextDocument, {
+                    render: false,
+                    skipViewRender: nextMeta.skipViewRender ?? false
+                });
+                engine.requestRender(nextDocument, {
+                    onComplete: () => endDngPreviewRenderStatus(statusToken)
+                });
+                return;
+            }
+            updateDocument(() => nextDocument, nextMeta);
         },
         setZoom(mode) {
             updateDocument((document) => {
@@ -6828,7 +7620,20 @@ window.addEventListener('DOMContentLoaded', async () => {
             }, { render: false });
         },
         setHighQualityPreview(enabled) {
-            return actions.updateAppSetting('editor.defaultHighQualityPreview', !!enabled);
+            return actions.updateAppSetting('editor.defaultHighQualityPreview', !!enabled).then(async (result) => {
+                const nextDocument = store.getState().document;
+                if (isDngSource(nextDocument.source)) {
+                    const statusToken = beginDngPreviewRenderStatus({
+                        title: 'Rendering',
+                        message: 'Rebuilding the DNG preview quality...',
+                        delayMs: 120
+                    });
+                    engine.requestRender(nextDocument, {
+                        onComplete: () => endDngPreviewRenderStatus(statusToken)
+                    });
+                }
+                return result;
+            });
         },
         setHoverCompareEnabled(enabled) {
             return actions.updateAppSetting('editor.hoverCompareOriginal', !!enabled);
@@ -7589,6 +8394,26 @@ window.addEventListener('DOMContentLoaded', async () => {
                         progress: 0.58
                     });
                 }
+                let studioDngAttachment = null;
+                if (projectType === 'studio') {
+                    const currentSource = normalizeEditorSource(currentDocument.source);
+                    if (isDngSource(currentSource) && currentSource.rawData) {
+                        studioDngAttachment = await saveStudioDngAttachment(saveId, currentSource);
+                        if (studioDngAttachment) {
+                            capturePayload = {
+                                ...capturePayload,
+                                source: normalizeEditorSource({
+                                    ...capturePayload?.source,
+                                    rawData: null,
+                                    dng: {
+                                        ...(capturePayload?.source?.dng || {}),
+                                        attachmentId: studioDngAttachment.id
+                                    }
+                                })
+                            };
+                        }
+                    }
+                }
                 const projectData = buildLibraryProjectRecord({
                     id: saveId,
                     timestamp: Date.now(),
@@ -7641,40 +8466,64 @@ window.addEventListener('DOMContentLoaded', async () => {
         async getLibraryProjects() {
             try {
                 await ensureStudioProjectPayloadPreviewsBackfilled();
-                return (await getAllFromLibraryDB())
-                    .filter((entry) => isLibraryProjectRecord(entry))
-                    .map((entry) => ({
-                        ...entry,
-                        projectType: getLibraryProjectType(entry),
-                        tags: normalizeLibraryTags(entry.tags || extractLibraryProjectMeta(entry.payload).tags || []),
-                        hoverSource: normalizeLibraryHoverSource(entry.hoverSource || extractLibraryProjectMeta(entry.payload).hoverSource || entry.payload?.source || null),
-                        sourceWidth: Number(entry.sourceWidth
-                            || entry.hoverSource?.width
-                            || extractLibraryProjectMeta(entry.payload).hoverSource?.width
-                            || (getLibraryProjectType(entry) === 'studio' ? getEditorCanvasResolution(entry.payload).width : 0)
-                            || entry.payload?.source?.width
-                            || 0),
-                        sourceHeight: Number(entry.sourceHeight
-                            || entry.hoverSource?.height
-                            || extractLibraryProjectMeta(entry.payload).hoverSource?.height
-                            || (getLibraryProjectType(entry) === 'studio' ? getEditorCanvasResolution(entry.payload).height : 0)
-                            || entry.payload?.source?.height
-                            || 0),
-                        sourceAreaOverride: Number(entry.sourceAreaOverride || extractLibraryProjectMeta(entry.payload).sourceArea || 0),
-                        sourceCount: Number(
-                            entry.sourceCount
-                            || extractLibraryProjectMeta(entry.payload).sourceCount
-                            || (entry.payload?.kind === 'composite-document' || entry.payload?.mode === 'composite'
-                                ? entry.payload?.layers?.length || 0
-                                : entry.payload?.kind === 'stitch-document'
-                                    ? entry.payload?.inputs?.length || 0
-                                    : (entry.payload?.source?.imageData ? 1 : 0))
-                            || 0
-                        )
-                    }));
+                return await getLibraryProjectRecordsByCursor({
+                    mapRecord(entry) {
+                        const payload = createLibraryProjectListPayload(entry);
+                        const projectMeta = extractLibraryProjectMeta(payload);
+                        const projectType = getLibraryProjectType(entry);
+                        return {
+                            ...entry,
+                            payload,
+                            projectType,
+                            tags: normalizeLibraryTags(entry.tags || projectMeta.tags || []),
+                            hoverSource: normalizeLibraryHoverSource(entry.hoverSource || projectMeta.hoverSource || payload?.source || null),
+                            sourceWidth: Number(entry.sourceWidth
+                                || entry.hoverSource?.width
+                                || projectMeta.hoverSource?.width
+                                || (projectType === 'studio' ? getEditorCanvasResolution(payload).width : 0)
+                                || payload?.source?.width
+                                || 0),
+                            sourceHeight: Number(entry.sourceHeight
+                                || entry.hoverSource?.height
+                                || projectMeta.hoverSource?.height
+                                || (projectType === 'studio' ? getEditorCanvasResolution(payload).height : 0)
+                                || payload?.source?.height
+                                || 0),
+                            sourceAreaOverride: Number(entry.sourceAreaOverride || projectMeta.sourceArea || 0),
+                            sourceCount: Number(
+                                entry.sourceCount
+                                || projectMeta.sourceCount
+                                || (payload?.kind === 'composite-document' || payload?.mode === 'composite'
+                                    ? payload?.layers?.length || 0
+                                    : payload?.kind === 'stitch-document'
+                                        ? payload?.inputs?.length || 0
+                                        : ((isDngSource(payload?.source) || hasPersistableEditorSource(payload?.source)) ? 1 : 0))
+                                || 0
+                            )
+                        };
+                    }
+                });
             } catch (_error) {
                 return [];
             }
+        },
+        async prepareLibraryProjectsForExport(projects = []) {
+            const sourceProjects = Array.isArray(projects) ? projects : [];
+            const preparedProjects = [];
+            for (const project of sourceProjects) {
+                const record = project?.id ? await getFromLibraryDB(project.id).catch(() => null) : null;
+                const baseRecord = isLibraryProjectRecord(record) ? record : project;
+                if (!baseRecord || !isLibraryProjectRecord(baseRecord)) continue;
+                let payload = baseRecord.payload;
+                if (getLibraryProjectType(baseRecord) === 'studio') {
+                    payload = await hydrateStudioDngPayloadFromAttachment(baseRecord.payload, baseRecord.id);
+                }
+                preparedProjects.push({
+                    ...baseRecord,
+                    payload
+                });
+            }
+            return preparedProjects;
         },
         async getLibraryAssets() {
             try {
@@ -7764,6 +8613,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (!id) return;
             const existing = await getFromLibraryDB(id).catch(() => null);
             await deleteFromLibraryDB(id);
+            await deleteLibraryAttachmentsByProjectId(id);
             await deleteDerivedStudioAssetsByProjectIds([id]);
             const projectType = getLibraryProjectType(existing);
             if (getActiveLibraryOrigin(projectType).id === id) {
@@ -7777,6 +8627,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             for (const id of targetIds) {
                 const existing = await getFromLibraryDB(id).catch(() => null);
                 await deleteFromLibraryDB(id);
+                await deleteLibraryAttachmentsByProjectId(id);
                 const projectType = getLibraryProjectType(existing);
                 if (getActiveLibraryOrigin(projectType).id === id) {
                     clearActiveLibraryOrigin(projectType);
@@ -7792,6 +8643,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (!isLibraryProjectRecord(entry)) continue;
                 clearedProjectIds.push(entry.id);
                 await deleteFromLibraryDB(entry.id);
+                await deleteLibraryAttachmentsByProjectId(entry.id);
             }
             await deleteDerivedStudioAssetsByProjectIds(clearedProjectIds);
             clearActiveLibraryOrigin();
@@ -8041,9 +8893,15 @@ window.addEventListener('DOMContentLoaded', async () => {
         },
         async loadLibraryProject(payload, libraryId = null, libraryName = null) {
             try {
-                const parsedPayload = typeof payload === 'string'
+                let parsedPayload = typeof payload === 'string'
                     ? JSON.parse(payload)
                     : payload;
+                if (libraryId) {
+                    const authoritativeRecord = await getFromLibraryDB(libraryId).catch(() => null);
+                    if (isLibraryProjectRecord(authoritativeRecord) && authoritativeRecord.payload) {
+                        parsedPayload = authoritativeRecord.payload;
+                    }
+                }
                 const rawState = normalizeLegacyDocumentPayload(parsedPayload);
                 const projectMeta = extractLibraryProjectMeta(rawState);
                 const adapter = projectAdapters?.getAdapterForPayload(rawState, projectMeta.projectType);
@@ -8074,10 +8932,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                 workspace: { ...currentDocument.workspace, batchOpen: false, studioView: 'edit' },
                 batch: createEmptyBatchState()
             }, store.getState().settings);
-            await syncStudioEngineToDocument(engine, nextDocument);
-            updateDocument(() => nextDocument, { render: false });
+            const synced = await syncStudioEngineToDocument(engine, nextDocument);
+            const syncedDocument = synced?.document || nextDocument;
+            updateDocument(() => syncedDocument, { render: false });
             clearActiveLibraryOrigin('studio');
-            engine.requestRender(nextDocument);
+            engine.requestRender(syncedDocument);
             logProcess('success', 'editor.files', 'Started a new Editor project.');
             setNotice('Started a new project.', 'success');
         },
@@ -8097,10 +8956,122 @@ window.addEventListener('DOMContentLoaded', async () => {
                 const currentDocument = store.getState().document;
                 const shouldAskAboutCanvasOverride = !hasEditorSourceImage(currentDocument)
                     && !isDefaultEditorBase(currentDocument.base);
+                const isDngImport = isDngFile(file);
+                const currentSource = normalizeEditorSource(currentDocument.source);
                 logProcess('info', 'editor.files', `Reading file bytes for "${file.name}".`, {
                     dedupeKey: `editor-load-image-read:${file.name}`,
                     dedupeWindowMs: 120
                 });
+                if (isDngImport) {
+                    setEditorProgress({
+                        active: true,
+                        title: 'Loading DNG',
+                        message: `Inspecting "${file.name}" and classifying the raw source...`,
+                        progress: 0.26
+                    });
+                    const probeResult = await probeDngFileInBackground(file, {
+                        processId: 'editor.dng',
+                        priority: 'user-visible',
+                        replaceKey: `editor-dng-probe:${file.name}`
+                    });
+                    const probe = probeResult?.probe || {};
+                    if (Array.isArray(probe.warnings) && probe.warnings.length) {
+                        probe.warnings.forEach((warning, index) => {
+                            logProcess('warning', 'editor.dng', warning, {
+                                dedupeKey: `editor-dng-warning:${file.name}:${index}`,
+                                dedupeWindowMs: 400
+                            });
+                        });
+                    }
+                    setEditorProgress({
+                        active: true,
+                        title: 'Loading DNG',
+                        message: `Embedding the original DNG payload for "${file.name}"...`,
+                        progress: 0.46
+                    });
+                    const rawData = await fileToDataUrl(file);
+                    const nextSource = normalizeEditorSource({
+                        kind: DNG_SOURCE_KIND,
+                        name: file.name,
+                        type: file.type || 'image/x-adobe-dng',
+                        imageData: null,
+                        rawData,
+                        rawMimeType: file.type || 'image/x-adobe-dng',
+                        rawByteLength: Number(file.size || 0),
+                        width: probe.width,
+                        height: probe.height,
+                        dng: normalizeDngSourceState({
+                            sourceSignature: probeResult?.sourceSignature || '',
+                            preset: getDngPresetForProbe(probe),
+                            fidelity: probe.fidelity || 'partial',
+                            warnings: probe.warnings || [],
+                            probe
+                        })
+                    });
+                    const existingDngLayer = getDngDevelopInstance(currentDocument);
+                    const shouldResetDngLayerForImport = String(currentSource?.dng?.sourceSignature || '') !== String(nextSource?.dng?.sourceSignature || '')
+                        || String(existingDngLayer?.meta?.dngSourceSignature || '') !== String(nextSource?.dng?.sourceSignature || '');
+                    let nextBase = normalizeEditorBase({
+                        ...currentDocument.base,
+                        width: probe.width,
+                        height: probe.height
+                    }, nextSource);
+                    if (shouldAskAboutCanvasOverride) {
+                        const useImageResolution = await requestAppConfirmDialog(view, {
+                            title: 'Canvas Resolution',
+                            text: `The current Base canvas is ${currentDocument.base?.width || 0} x ${currentDocument.base?.height || 0}. Use "${file.name}" at ${probe.width || 0} x ${probe.height || 0} instead?`,
+                            confirmLabel: 'Use Image Resolution',
+                            cancelLabel: 'Keep Current Canvas'
+                        });
+                        if (!useImageResolution) {
+                            nextBase = normalizeEditorBase(currentDocument.base, nextSource);
+                        }
+                    }
+                    const nextDocument = applyEditorSettingsToDocument({
+                        ...currentDocument,
+                        source: nextSource,
+                        base: nextBase,
+                        layerStack: shouldResetDngLayerForImport
+                            ? currentDocument.layerStack.filter((instance) => instance.layerId !== 'dngDevelop')
+                            : currentDocument.layerStack,
+                        view: { ...currentDocument.view, zoom: 1 },
+                        workspace: { ...currentDocument.workspace, batchOpen: false },
+                        export: {
+                            ...(currentDocument.export || {}),
+                            pngBitDepth: '16-bit'
+                        },
+                        batch: createEmptyBatchState()
+                    }, store.getState().settings);
+                    setEditorProgress({
+                        active: true,
+                        title: 'Loading DNG',
+                        message: `Developing the initial preview for "${file.name}"...`,
+                        progress: 0.68
+                    });
+                    const synced = await syncStudioEngineToDocument(engine, nextDocument, {
+                        processId: 'editor.dng',
+                        priority: 'user-visible',
+                        replaceKey: `editor-dng-load:${file.name}`
+                    });
+                    updateDocument(() => synced.document, { render: false });
+                    clearActiveLibraryOrigin('studio');
+                    engine.requestRender(synced.document);
+                    setEditorProgress({
+                        active: true,
+                        title: 'Loading DNG',
+                        message: `Saving "${file.name}" into the Library for quick recall...`,
+                        progress: 0.86
+                    });
+                    await actions.saveProjectToLibrary(stripProjectExtension(file.name), {
+                        preferExisting: true,
+                        projectType: 'studio',
+                        suppressWorkspaceOverlay: true
+                    });
+                    clearWorkspaceProgress('studio');
+                    logProcess('success', 'editor.files', `Loaded DNG "${file.name}" into the Editor.`);
+                    setNotice(`Loaded ${file.name}.`, 'success', 4200);
+                    return;
+                }
                 const dataUrl = await fileToDataUrl(file);
                 setEditorProgress({
                     active: true,
@@ -8140,11 +9111,12 @@ window.addEventListener('DOMContentLoaded', async () => {
                     workspace: { ...currentDocument.workspace, batchOpen: false },
                     batch: createEmptyBatchState()
                 }, store.getState().settings);
-                await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
-                updateDocument(() => nextDocument, { render: false });
+                const synced = await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
+                const syncedDocument = synced?.document || nextDocument;
+                updateDocument(() => syncedDocument, { render: false });
 
                 clearActiveLibraryOrigin('studio');
-                engine.requestRender(nextDocument);
+                engine.requestRender(syncedDocument);
                 if (store.getState().settings.editor.autoExtractPaletteOnLoad) {
                     logProcess('info', 'settings.editor', `Auto-extracting a palette from "${file.name}" because Editor auto palette extraction is enabled.`, {
                         dedupeKey: `auto-palette:${file.name}`,
@@ -8217,7 +9189,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                     : { layerInstanceId: layerStack[0]?.instanceId || null };
                 const state = store.getState();
                 const shouldLoadImage = !!state.ui.loadImageOnOpen;
-                const embeddedSource = payload.source?.imageData ? normalizeEditorSource(payload.source) : null;
+                const embeddedSource = hasPersistableEditorSource(payload.source) ? normalizeEditorSource(payload.source) : null;
                 const payloadWithoutPreview = stripStudioPreview(payload);
                 const preservedSource = normalizeEditorSource(state.document.source);
                 const hasExplicitSourceField = Object.prototype.hasOwnProperty.call(payloadWithoutPreview || {}, 'source');
@@ -8248,18 +9220,23 @@ window.addEventListener('DOMContentLoaded', async () => {
                     setEditorProgress({
                         active: true,
                         title: 'Loading State',
-                        message: `Restoring the embedded source image from "${file.name}"...`,
+                        message: isDngSource(embeddedSource)
+                            ? `Restoring the embedded DNG source from "${file.name}"...`
+                            : `Restoring the embedded source image from "${file.name}"...`,
                         progress: 0.54
                     });
-                    logProcess('info', 'editor.files', `Restoring the embedded source image from "${file.name}".`, {
-                        dedupeKey: `editor-state-embedded-source:${file.name}`,
+                    logProcess('info', 'editor.files', `${isDngSource(embeddedSource) ? 'Restoring the embedded DNG source' : 'Restoring the embedded source image'} from "${file.name}".`, {
+                        dedupeKey: `editor-state-embedded-source:${isDngSource(embeddedSource) ? 'dng' : 'raster'}:${file.name}`,
                         dedupeWindowMs: 120
                     });
-                    sourceImage = await loadImageFromDataUrl(embeddedSource.imageData);
+                    if (!isDngSource(embeddedSource) && embeddedSource.imageData) {
+                        sourceImage = await loadImageFromDataUrl(embeddedSource.imageData);
+                    }
                 }
-                await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
-                updateDocument(() => nextDocument, { render: false });
-                engine.requestRender(nextDocument);
+                const synced = await syncStudioEngineToDocument(engine, nextDocument, { sourceImage });
+                const syncedDocument = synced?.document || nextDocument;
+                updateDocument(() => syncedDocument, { render: false });
+                engine.requestRender(syncedDocument);
 
                 if (shouldLoadImage && embeddedSource) {
                     setEditorProgress({
@@ -8410,17 +9387,51 @@ window.addEventListener('DOMContentLoaded', async () => {
         setSaveToLibrary(value) {
             store.setState((state) => ({ ...state, ui: { ...state.ui, saveToLibrary: value } }), { render: false });
         },
+        setEditorExportBitDepth(value) {
+            const normalized = String(value || '').trim().toLowerCase() === '16-bit' ? '16-bit' : '8-bit';
+            updateDocument((document) => ({
+                ...document,
+                export: {
+                    ...(document.export || {}),
+                    pngBitDepth: normalized
+                }
+            }), { render: false });
+        },
         async exportCurrent() {
             if (!engine.hasImage()) return setNotice('The Editor canvas is not ready yet.', 'warning');
             const state = store.getState();
+            const source = normalizeEditorSource(state.document.source);
+            const exportBitDepth = String(state.document.export?.pngBitDepth || '8-bit').trim().toLowerCase();
+            const useDngPng16 = isDngSource(source) && exportBitDepth === '16-bit';
             await showWorkspaceProgress('studio', {
                 title: 'Exporting PNG',
-                message: 'Rendering the current Editor canvas to PNG...',
+                message: useDngPng16
+                    ? 'Rendering the current Editor canvas to 16-bit PNG...'
+                    : 'Rendering the current Editor canvas to PNG...',
                 progress: 0.16
             });
-            logProcess('active', 'editor.export', 'Rendering the current Editor canvas to PNG.');
+            logProcess('active', 'editor.export', useDngPng16
+                ? 'Rendering the current Editor canvas to 16-bit PNG.'
+                : 'Rendering the current Editor canvas to PNG.');
             try {
-                const blob = await engine.exportPngBlob(state.document);
+                const exportResult = useDngPng16
+                    ? await engine.exportPng16(state.document)
+                    : null;
+                if (Array.isArray(exportResult?.warnings) && exportResult.warnings.length) {
+                    exportResult.warnings.forEach((warning, index) => {
+                        logProcess('warning', 'editor.export', warning, {
+                            dedupeKey: `editor-export-dng-warning:${source.name || 'source'}:${index}`,
+                            dedupeWindowMs: 400
+                        });
+                    });
+                }
+                const blob = useDngPng16
+                    ? new Blob([
+                        exportResult?.pngBytes instanceof ArrayBuffer
+                            ? new Uint8Array(exportResult.pngBytes)
+                            : (exportResult?.pngBytes instanceof Uint8Array ? exportResult.pngBytes : new Uint8Array())
+                    ], { type: 'image/png' })
+                    : await engine.exportPngBlob(state.document);
                 const baseName = stripProjectExtension(state.document.source.name || getSuggestedProjectName(state.document) || 'editor-canvas');
                 setEditorProgress({
                     active: true,
@@ -8785,9 +9796,10 @@ window.addEventListener('DOMContentLoaded', async () => {
                 }
             }
             if (state.document.batch.imageFiles[originalIndex]) {
-                await syncStudioEngineToDocument(engine, originalDocument);
-                updateDocument(() => originalDocument, { render: false });
-                engine.requestRender(originalDocument);
+                const synced = await syncStudioEngineToDocument(engine, originalDocument);
+                const syncedDocument = synced?.document || originalDocument;
+                updateDocument(() => syncedDocument, { render: false });
+                engine.requestRender(syncedDocument);
             }
             setNotice('Batch export complete.', 'success');
         },
@@ -8846,6 +9858,24 @@ window.addEventListener('DOMContentLoaded', async () => {
                     });
                     await saveToLibraryDB(projectData);
                     if (adapter.type === 'studio') {
+                        const importedSource = normalizeEditorSource(projectData.payload?.source);
+                        if (isDngSource(importedSource) && importedSource.rawData) {
+                            const attachment = await saveStudioDngAttachment(projectData.id, importedSource);
+                            if (attachment) {
+                                projectData.payload = {
+                                    ...projectData.payload,
+                                    source: normalizeEditorSource({
+                                        ...projectData.payload?.source,
+                                        rawData: null,
+                                        dng: {
+                                            ...(projectData.payload?.source?.dng || {}),
+                                            attachmentId: attachment.id
+                                        }
+                                    })
+                                };
+                                await saveToLibraryDB(projectData);
+                            }
+                        }
                         await upsertDerivedStudioAsset(projectData);
                     }
                     knownFingerprints.add(fingerprintKey);
@@ -10150,17 +11180,19 @@ window.addEventListener('DOMContentLoaded', async () => {
             validatePayload(rawPayload) {
                 const normalized = stripLibraryEnvelopeMetadata(normalizeLegacyDocumentPayload(rawPayload));
                 const validated = validateImportPayload(normalized, 'document');
-                return applyEditorSettingsToDocument({
+                return normalizeStudioDocumentForDng(applyEditorSettingsToDocument({
                     ...validated,
                     layerStack: reindexStack(registry, validated.layerStack || []).map((instance) => applyEditorSettingsToLayerInstance(instance, store.getState().settings))
-                }, store.getState().settings);
+                }, store.getState().settings));
             },
             async captureDocument(document, payload = null) {
                 const basePayload = payload || buildLibraryPayload(document);
+                let syncedDocument = document;
                 if (!engine.hasImage()) {
-                    await syncStudioEngineToDocument(engine, document);
+                    const synced = await syncStudioEngineToDocument(engine, document);
+                    syncedDocument = synced?.document || document;
                 }
-                const capture = await captureStudioDocumentSnapshot(engine, document, basePayload);
+                const capture = await captureStudioDocumentSnapshot(engine, syncedDocument, basePayload);
                 const finalPayload = capture.payload;
                 const baseResolution = getEditorCanvasResolution(finalPayload);
                 return {
@@ -10171,7 +11203,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         sourceWidth: Number(baseResolution.width || 0),
                         sourceHeight: Number(baseResolution.height || 0),
                         sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
-                        sourceCount: finalPayload.source?.imageData ? 1 : 0,
+                        sourceCount: hasPersistableEditorSource(finalPayload.source) ? 1 : 0,
                         renderWidth: Number(engine.runtime.renderWidth || baseResolution.width || 0),
                         renderHeight: Number(engine.runtime.renderHeight || baseResolution.height || 0)
                     }
@@ -10186,8 +11218,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                     source: normalizeEditorSource(validated.source),
                     base: normalizeEditorBase(validated.base, validated.source)
                 };
-                await syncStudioEngineToDocument(engine, tempDoc);
-                const capture = await captureStudioDocumentSnapshot(engine, tempDoc, validated);
+                const synced = await syncStudioEngineToDocument(engine, tempDoc);
+                const syncedDocument = synced?.document || tempDoc;
+                const capture = await captureStudioDocumentSnapshot(engine, syncedDocument, validated);
                 const baseResolution = getEditorCanvasResolution(capture.payload);
                 return {
                     payload: capture.payload,
@@ -10197,7 +11230,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                         sourceWidth: Number(baseResolution.width || 0),
                         sourceHeight: Number(baseResolution.height || 0),
                         sourceArea: Number(baseResolution.width || 0) * Number(baseResolution.height || 0),
-                        sourceCount: capture.payload.source?.imageData ? 1 : 0,
+                        sourceCount: hasPersistableEditorSource(capture.payload.source) ? 1 : 0,
                         renderWidth: Number(engine.runtime.renderWidth || baseResolution.width || 0),
                         renderHeight: Number(engine.runtime.renderHeight || baseResolution.height || 0)
                     }
@@ -10207,10 +11240,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                 stopPlayback();
                 paletteExtractionImage = null;
                 paletteExtractionOwner = null;
-                const validated = this.validatePayload(rawPayload);
+                const hydratedPayload = await hydrateStudioDngPayloadFromAttachment(rawPayload, libraryId);
+                const validated = this.validatePayload(hydratedPayload);
                 const runtimePayload = stripStudioPreview(validated);
                 const baseDocument = store.getState().document;
-                const nextDocument = applyEditorSettingsToDocument({
+                const nextDocument = normalizeStudioDocumentForDng(applyEditorSettingsToDocument({
                     ...baseDocument,
                     ...runtimePayload,
                     layerStack: runtimePayload.layerStack,
@@ -10219,10 +11253,11 @@ window.addEventListener('DOMContentLoaded', async () => {
                         : normalizeEditorSource(baseDocument.source),
                     base: normalizeEditorBase(runtimePayload.base, runtimePayload.source),
                     workspace: normalizeWorkspace('studio', runtimePayload.workspace || baseDocument.workspace, !!runtimePayload.selection?.layerInstanceId)
-                }, store.getState().settings);
-                await syncStudioEngineToDocument(engine, nextDocument);
-                updateDocument(() => nextDocument, { render: false });
-                engine.requestRender(nextDocument);
+                }, store.getState().settings));
+                const synced = await syncStudioEngineToDocument(engine, nextDocument);
+                const syncedDocument = synced?.document || nextDocument;
+                updateDocument(() => syncedDocument, { render: false });
+                engine.requestRender(syncedDocument);
                 setActiveLibraryOrigin('studio', libraryId, libraryName);
                 commitActiveSection('editor');
                 logProcess('success', 'library.projects', `Loaded "${libraryName || 'project'}" from the Library into Editor.`);
@@ -10519,7 +11554,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     setBootStage('editor engine init', 'Initializing the Editor render engine.');
     await engine.init(view.getRenderRefs().canvas);
     engine.attachRefs(view.getRenderRefs());
-    await syncStudioEngineToDocument(engine, store.getState().document);
+    const bootSynced = await syncStudioEngineToDocument(engine, store.getState().document);
+    if (bootSynced?.document) {
+        appStore.setState((state) => ({
+            ...state,
+            document: bootSynced.document
+        }));
+    }
     ensureCompositeEditorRenderEngineReady().catch((error) => {
         console.warn('Could not prewarm the hidden Composite Editor render engine.', error);
         compositeEditorRenderEngine = null;

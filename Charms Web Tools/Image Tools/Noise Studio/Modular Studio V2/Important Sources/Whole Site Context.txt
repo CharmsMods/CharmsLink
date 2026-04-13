@@ -14,7 +14,7 @@ If the code and this file disagree, the code is authoritative and this file shou
 
 ## Reading Guide
 
-Last audited against the workspace code on 2026-04-08.
+Last audited against the workspace code on 2026-04-12.
 
 If you only need the current runtime model first, read these sections in order:
 
@@ -57,13 +57,13 @@ Logging is now a first-class system in this app.
 
 Modular Studio V2 is now a single-page app with seven top-level sections, in current UI order:
 
-1. `Editor`
-2. `Composite`
-3. `Library`
-4. `Stitch`
-5. `3D`
-6. `Settings`
-7. `Logs`
+1. `Library`
+2. `Editor`
+3. `Composite`
+4. `3D`
+5. `Stitch`
+6. `Logs`
+7. `Settings`
 
 All seven sections live inside the same page and same JS runtime.
 
@@ -72,21 +72,32 @@ Important historical note:
 - The old separate-window Library workflow was retired from the main path because it was unreliable on GitHub Pages even when it seemed fine on local hosting.
 - `library.html` is now only a redirect to `index.html?section=library`.
 
+Current shell/style note:
+
+- `Library`, `Editor`, `Composite`, `Stitch`, `Logs`, and `Settings` now share one tuned neumorphic shell and token system.
+- `Settings > Personalization` recolors that shared shell for both light and dark theme palettes.
+- `3D` intentionally keeps its own separate near-black interface and is not currently driven by the shared personalization palette.
+
 Current section responsibilities:
 
 - `Editor`
   - The original modular image-processing engine.
   - Uses the registry-driven layer stack and the WebGL pipeline.
   - Now boots with a persistent `Base` canvas even when no source image is loaded.
-  - The Editor sidebar now has `Edit`, `Base`, `Layer`, `Pipeline`, and `Scopes` views.
+  - The Editor sidebar now has `Layers`, `Canvas`, `Selected`, `Pipeline`, and `Scopes` views.
+  - The old bar above the preview canvas was removed; preview/options/export/zoom controls now live in the `Canvas` sidebar tab.
+  - The preview stage is now aspect-fitted into a rounded inset surface instead of stretching to the full panel width.
   - Now also includes a real `Text Overlay` Editor layer that lives inside the normal Editor registry/render path.
+  - Now also supports DNG-backed source documents through a source-aware `DNG Develop` base layer, dedicated worker-side DNG probe/decode, GPU-side live develop rendering inside the Editor WebGL pipeline, and optional 16-bit PNG export from GPU readback + PNG16 encode.
   - Owns normal state-file save/load for studio documents.
   - Newly saved Editor JSON files are now self-contained around the current canvas state: they always save `base`, they save `source` only when an embedded image exists, and they may also embed a `preview` object containing the latest rendered PNG plus dimensions/timestamp.
+  - DNG-backed local JSON saves can embed the raw source payload directly; Library saves strip the raw payload out of the main project record and store it in the dedicated attachment store instead.
 
 - `Library`
   - Integrated project browser backed by IndexedDB.
   - Can hold mixed project types from `Editor`, `Composite`, `Stitch`, and `3D`, plus a separate asset catalog for images and reusable 3D models.
   - The Library page now has its own local `Library` and `Assets` page tabs.
+  - The Library shell now uses the same shared neumorphic styling system as the Editor/Composite/Stitch/Logs/Settings shell.
   - Owns Library/Asset import-export, tag catalog, selection workflows, secure bundle save/load, asset-folder exchange, preview gallery, and detail inspection.
   - Quietly backfills older saved Editor Library records that are missing embedded `preview` data by re-rendering them with the Editor engine and logging that repair work in `Logs`.
 
@@ -104,10 +115,11 @@ Current section responsibilities:
 - `Composite`
   - A separate rendering tab (`src/composite/`) allowing users to lay out multiple saved Editor projects, imported images, text objects, and simple shape objects into one scene.
   - Features its own 2D rendering engine, world-space/infinite-canvas style stage, local interaction session for drag/pan/zoom work, very loose zoom/scale bounds for deep canvas work, and robust draggable UI bounds-based exporter.
-  - The current Composite sidebar has `Layers`, `Transform`, `Blend`, and `Export` views.
+  - The current Composite sidebar labels are `Layers`, `Selected`, `View`, and `Export`.
   - Composite-specific persistent preferences live in the top-level `Settings` tab under the `Composite` category, while the Composite sidebar itself stays focused on document/layer/export controls.
   - Supports self-contained Composite JSON save/load, Library save/load, and a bridge flow for updating the original Editor Library project when Composite was opened from that project.
   - Plain uploaded Composite image layers can now be converted into linked Editor-project layers, opened directly in the Editor tab, and later persisted as their own normal Editor Library projects when the Composite project saves to the Library.
+  - The current Composite UI also includes selected-layer replacement (`Replace With`), non-destructive crop mode for image/editor-project layers, shared Editor font choices for Composite text layers, and stage-space deselect on empty click.
   - Composite Library saves are supposed to keep a visible thumbnail even if live preview capture fails, by falling back to the captured export blob instead of clearing the saved preview image.
   - If the current Editor tab already matches one of the Composite-linked Editor layers, jumping back into Editor for another linked layer should not trigger an extra "save current Editor project" prompt first.
 - Composite export currently renders through CPU 2D canvas in both the worker path and the main-thread fallback path; there is still not a separate GPU/WebGL export renderer yet.
@@ -118,7 +130,8 @@ Current section responsibilities:
   - Integrated with the Library and has a "Pixel Match" logic allowing exports to render perfectly at the explicit resolution of bounded items.
 
 - `Settings`
-  - Top-level app settings surface for theme, worker limits, Library defaults/maintenance, Editor defaults, Composite viewport preferences, Stitch defaults/diagnostics, 3D preferences/defaults, and Logs behavior.
+  - Top-level app settings surface for theme, shared UI personalization, worker limits, Library defaults/maintenance, Editor defaults, Composite viewport/export preferences, Stitch defaults/diagnostics, 3D preferences/defaults, and Logs behavior.
+  - Visible settings categories are currently `General`, `Personalization`, `Library`, `Editor`, `Composite`, `Stitch`, `3D`, and `Logs`.
   - Owns app-level settings export/import plus maintenance actions that are intentionally separate from normal project payloads.
 
 - `Logs`
@@ -158,10 +171,12 @@ Current section responsibilities:
 - Creates the shared logging engine used by the `Logs` section.
 - Owns the normalized Composite and 3D document actions plus adapter-backed Library persistence for mixed project types.
 - Owns IndexedDB helpers.
-- Owns both Library project records and Library asset records in the same IndexedDB store.
+- Owns both Library project records and Library asset records in IndexedDB, plus the separate project-attachment store used for raw DNG source payloads.
 - Quietly derives Editor render assets for the Asset Library, deduplicates imported 3D assets by fingerprint, auto-generates low-res previews for image assets, and syncs Library asset updates back into the 3D content drawer.
 - Missing image-asset previews are backfilled once per page reload in the background, and Library change notifications are coalesced before refreshing the Library page plus the 3D content drawer.
 - Loads, normalizes, persists, imports, and exports app-level settings.
+- Applies the live shared personalization palette to the app shell.
+- Owns worker-brokered DNG probe / decode tasks, GPU-backed DNG source hydration into the Editor engine, GPU-backed 16-bit PNG export orchestration, and DNG source/attachment hydration during Library save/load.
 - Owns app-level actions.
 - Owns the project adapter registry that lets the Library save/load mixed engine types.
 
@@ -181,6 +196,18 @@ Current section responsibilities:
   - integrated Settings panel
   - integrated Logs panel
   - integrated 3D workspace
+- The current top section order is `Library`, `Editor`, `Composite`, `3D`, `Stitch`, `Logs`, `Settings`.
+- The current Editor shell now includes the fitted inset preview stage, in-canvas DNG rendering badge, `Canvas` sidebar tab, DNG Develop controls, and the Editor-side 8-bit / 16-bit PNG export controls.
+- DNG control changes no longer rebuild a worker-prepared preview canvas. Once the source is decoded, live DNG control changes rerender directly through the GPU path.
+
+### `src/workers/dng.worker.js` / `src/workers/tasks/dng.js`
+
+- Dedicated broker-managed DNG worker domain.
+- Owns:
+  - `probe-dng-source`
+  - `decode-dng-source`
+- The DNG worker domain is now configured to stay warm across replace-active cancellations so slider-driven DNG work does not keep tearing down the worker process.
+- The `editor` worker domain now stays focused on analysis/diff/palette work rather than also carrying the DNG decode path.
 
 ### `src/ui/libraryPanel.js`
 
@@ -292,9 +319,11 @@ Current section responsibilities:
 
 - `ui.js`
   - Composite workspace UI.
-  - Owns layer ingest from saved Editor projects or local images, transform/blend controls, export-bounds editing, project-picker overlay behavior, and Composite progress overlay wiring.
+  - Owns layer ingest from saved Editor projects or local images, transform/view/export controls, export-bounds editing, project-picker overlay behavior, and Composite progress overlay wiring.
   - Uses a local interaction session so live drag/pan/zoom/bounds editing do not commit to the global store on every pointer move.
   - Composite sidebar controls are supposed to stay stable during active typing or slider drags, so the panel DOM should not rebuild mid-interaction.
+  - Current sidebar labels are `Layers`, `Selected`, `View`, and `Export` even though some internal ids still use older `transform` / `blend` names.
+  - Owns the selected-layer `Replace With` flow, shared Editor-font text controls, and non-destructive crop-mode controls for eligible image/editor-project layers.
   - Custom export seeding now prefers the union of currently visible clipped layer coverage inside the viewport, and can ignore giant background-like layers for that seed when smaller visible layers are also on screen.
   - Composite "Frame" and custom export seeding should follow the live decoded layer bounds seen on canvas, including imported Editor-backed layers.
   - Resize modes in the `Transform` panel are surfaced as explicit buttons so center-scale, opposite-side-scale, and stretch behavior are visible before the user drags canvas handles.
@@ -304,16 +333,22 @@ Current section responsibilities:
 ### `src/settings/`
 
 - `defaults.js`
-  - Canonical app-setting defaults for General, Library, Editor, Composite, Stitch, 3D, Logs, and diagnostics fields.
+  - Canonical app-setting defaults for General, Personalization, Library, Editor, Composite, Stitch, 3D, Logs, and diagnostics fields.
 
 - `schema.js`
   - Settings normalization and category validation helpers.
+  - Important distinction:
+    - visible Settings UI categories use ids like `3d`
+    - the persisted settings object still uses the `threeD` key
 
 - `persistence.js`
   - Settings save/load/export/import helpers for the app-level settings domain.
 
 - `apply.js`
-  - Applies app settings into Editor, Stitch, and 3D runtime/document state.
+  - Applies app settings into Editor, Composite, Stitch, and 3D runtime/document state.
+
+- `personalization.js`
+  - Shared light/dark palette defaults plus CSS-variable application for the non-3D shell.
 
 ### `src/io/projectAdapters.js`
 
@@ -411,6 +446,30 @@ Important fields:
 - `view`
 - `export`
 - `batch`
+
+Important current Studio source model:
+
+- `state.document.source` is now a discriminated source object.
+- Raster-backed documents use:
+  - `source.kind: 'raster'`
+  - `source.imageData`
+- DNG-backed documents use:
+  - `source.kind: 'dng'`
+  - `source.rawData`
+  - `source.rawMimeType`
+  - `source.rawByteLength`
+  - `source.dng`
+    - cached probe/classification metadata
+    - source signature / attachment id
+    - last prepared hash / quality / timestamp
+    - fidelity state and warnings
+- Both source kinds still carry `name`, `type`, `width`, and `height`.
+
+Important current Studio export field:
+
+- `state.document.export.pngBitDepth`
+  - `'8-bit' | '16-bit'`
+  - `16-bit` is only enabled for DNG-backed Editor projects
 
 Studio document mode:
 
@@ -709,14 +768,29 @@ This is the app-level settings domain.
 Important categories:
 
 - `general`
+- `personalization`
 - `library`
 - `editor`
+- `composite`
 - `stitch`
 - `threeD`
 - `logs`
 - `diagnostics`
 
 These settings are persisted separately from project payloads and are not the same thing as saved Editor / Composite / Stitch / 3D document state.
+
+Important category-id note:
+
+- visible Settings UI tabs use:
+  - `general`
+  - `personalization`
+  - `library`
+  - `editor`
+  - `composite`
+  - `stitch`
+  - `3d`
+  - `logs`
+- the persisted settings object still uses `threeD` for the 3D branch.
 
 ## 6. Studio Engine Architecture
 
@@ -729,6 +803,8 @@ The Editor side is still the original modular image-processing app:
 - batch folder processing
 - selected `Text Overlay` layers now also expose a preview box with direct drag and corner-handle resize interaction
 - the Editor engine now always renders from a generated base surface canvas, so text-only and source-less projects still run through the normal pipeline/export/save flow
+- the main Editor shell now uses `Layers`, `Canvas`, `Selected`, `Pipeline`, and `Scopes` tabs instead of the older `Edit` / `Base` / `Layer` naming
+- the preview stage is now an aspect-fitted rounded inset surface, and heavy DNG rebuilds now surface an in-canvas rendering badge instead of looking idle
 
 Normal flow:
 
@@ -751,13 +827,42 @@ Current Editor text-layer behavior:
 - The text layer still stores `textX` / `textY` as top-left Editor-space params, but the live shader path now translates them into the engine's render-space origin before compositing so large-canvas preview downscaling does not make the visible text drift away from the box/picker coordinates.
 - The current live text pass now rasterizes text into a full preview-sized surface first, then composites that surface as a normal overlay layer. That is meant to keep large-canvas preview placement consistent with the Editor overlay box even when the live preview is downscaled below the saved base resolution.
 
-Current Editor base-canvas behavior:
+Current Editor canvas behavior:
 
 - `state.document.base` is now part of the saved Editor payload and stores the base canvas width/height plus `backgroundMode: 'transparent' | 'solid'` and `backgroundColor`.
-- The new `Base` tab owns blank-canvas resolution controls, common resolution presets, aspect presets, background mode/color, and the "remove image" action.
+- The `Canvas` tab now owns canvas info, preview options, export bit depth, zoom controls, background mode/color, and the source-image replace/remove actions.
+- Direct base-canvas resolution/aspect editing is no longer the primary Canvas-tab workflow; users are pointed to `Crop / Rotate / Flip` and `Resolution Scale` layers for framing/output-size changes.
 - Removing the source image does not destroy the Editor canvas; it clears `state.document.source` and keeps the current base canvas dimensions/background settings.
 - Loading an image into a source-less Editor with custom Base settings prompts whether the canvas should switch to the image's native resolution or keep the user-defined Base size.
 - If the user keeps the current Base size, the source image is fit inside that canvas before the rest of the Editor layer stack runs.
+
+Current Editor DNG behavior:
+
+- Editor now accepts `.dng` files in addition to normal raster image files.
+- DNG-backed documents auto-insert a single-instance `DNG Develop` layer at the front of the base stack.
+- The current DNG path is source-aware and worker-backed:
+  - `probe-dng-source`
+  - `decode-dng-source`
+  - GPU-backed Editor render / PNG16 export orchestration from the main runtime
+- The current DNG preview path is no longer a worker-prepared raster preview. Raw/container parsing still happens on the worker side, but the live `DNG Develop` preview is now rendered in the Editor WebGL pipeline.
+- Current DNG UI groups include:
+  - `File Info`
+  - `Interpretation`
+  - `Normalize`
+  - `Remosaic / Demosaic`
+  - `Color / WB`
+  - `Tone`
+  - `Noise / Detail`
+  - `Corrections`
+- `Canvas > Export` now exposes `8-bit PNG` and `16-bit PNG`, with `16-bit` enabled only for DNG-backed projects.
+- The `High Quality` preview toggle now switches the live DNG GPU path between the faster and higher-quality demosaic settings instead of rebuilding a prepared preview raster.
+- The DNG control rows now expose delayed hover-help tooltips so the new controls are discoverable without adding more static copy into the panel.
+- The DNG panel now also includes a `Copy Current Settings` debug action so the current source flags, support flags, and live DNG Develop params can be copied to the clipboard as JSON during debugging.
+- DNG Develop now tracks the current DNG `sourceSignature` on the layer instance so a newly loaded DNG does not inherit stale temperature / tint / gain-map / camera-matrix params from the previously loaded raw file.
+- Current DNG limitations are intentionally surfaced, not hidden:
+  - standalone opcode corrections are not actually executed yet, so that control is now treated as unavailable instead of pretending to work
+  - gain-map execution is still file-dependent and intentionally disabled for cases such as profile gain tables that are not yet reliable
+  - some files currently remain `partial` fidelity instead of pretending to be fully supported
 
 ## 7. Stitch Engine Architecture
 
@@ -1020,7 +1125,9 @@ This adapter layer is what makes mixed Library storage possible without hard-cod
 The Library is backed by IndexedDB:
 
 - DB name: `ModularStudioDB`
-- object store: `LibraryProjects`
+- object stores:
+  - `LibraryProjects`
+  - `LibraryProjectAttachments`
 
 There is also a reserved metadata record:
 
@@ -1031,6 +1138,21 @@ tags: [...]
 ```
 
 That record stores the persistent tag catalog so tags can exist even if no current project is using them.
+
+### Current Library attachment store
+
+`LibraryProjectAttachments` is now used for project-linked binary attachments that should not live inline inside the main project record.
+
+Current attachment use:
+
+- raw DNG source payloads for Editor projects
+
+Current DNG attachment behavior:
+
+- the Library project record keeps the normal Editor payload plus preview/render metadata
+- the raw DNG payload is stored separately as an attachment record keyed to the project id
+- Library load/import/export paths hydrate that attachment back into the live Editor payload when needed
+- this keeps mixed Library browsing lighter than dragging full embedded raw payloads through every project-card refresh
 
 ### Current Library project record shape
 
@@ -1161,6 +1283,10 @@ Important Studio payload rules:
 - Newly saved Editor JSON files save `source` only when there is an embedded source image to preserve.
 - Newly saved Editor JSON files still try to save `preview.imageData` so Library/local save flows can reuse the latest rendered PNG.
 - Studio runtime restore ignores `preview` as authoritative render state; the actual editable state still comes from `base` + optional `source` + `layerStack` + normal document fields.
+- `source.kind` is now important:
+  - raster documents primarily persist `source.imageData`
+  - DNG documents can persist `source.rawData` locally, or `source.dng.attachmentId` plus hydrated attachment metadata through Library-backed flows
+- `export.pngBitDepth` is now part of the current Editor export model, with DNG-backed documents allowed to opt into `16-bit`.
 
 ### Stitch project payload
 
@@ -1322,6 +1448,7 @@ These fields are for Library round-tripping. They are stripped before normal eng
 - Editor `Save` now captures the current rendered PNG and embeds it into `payload.preview`.
 - The old Editor `Save Image` toggle was removed; Editor JSON saves are now intended to be self-contained by default.
 - The save path now supports source-less Editor projects: `base` is still saved, `preview` is still captured when possible, and Library sync can still run even if `source` is absent.
+- DNG-backed local Editor JSON saves can stay self-contained by embedding the raw DNG source in `payload.source.rawData`.
 
 ### Save Composite state JSON
 
@@ -1346,9 +1473,10 @@ Flow:
 7. If the draft originated from a Library record, prompt for overwrite-vs-new behavior.
 8. Ask the adapter to render a preview blob and summary metadata.
 9. For Studio projects, embed that freshly captured render into `payload.preview` before persistence while still storing the normal Library preview blob separately.
-10. Save the resulting mixed-engine record into IndexedDB.
-11. Preserve tags on overwrite.
-12. If the saved project is an Editor project, upsert its derived Asset Library image record too.
+10. If the Studio project is DNG-backed, strip the raw payload from the main project record and save it into the attachment store keyed to the Library project id.
+11. Save the resulting mixed-engine record into IndexedDB.
+12. Preserve tags on overwrite.
+13. If the saved project is an Editor project, upsert its derived Asset Library image record too.
 
 ### Load from Library
 
@@ -1357,9 +1485,10 @@ Flow:
 1. inspects the payload
 2. chooses the correct adapter
 3. runs the engine-specific replacement guard
-4. restores the payload through that adapter
-5. updates the correct active Library origin
-6. switches to the correct top-level section
+4. hydrates any project-linked attachments needed by that engine (for example raw DNG source payloads)
+5. restores the payload through that adapter
+6. updates the correct active Library origin
+7. switches to the correct top-level section
 
 ### Library project preview backfill
 
@@ -1628,18 +1757,27 @@ If a future AI needs to understand the app quickly, start with:
 1. `src/main.js`
 2. `src/ui/workspaces.js`
 3. `src/ui/libraryPanel.js`
-4. `src/stitch/document.js`
-5. `src/stitch/engine.js`
-6. `src/3d/document.js`
-7. `src/3d/ui.js`
-8. `src/3d/engine.js`
-9. `src/stitch/opencv-worker.js`
+4. `src/editor/baseCanvas.js`
+5. `src/editor/dngDevelopShared.js`
+6. `src/editor/dngProcessing.js`
+7. `src/editor/dngTiff.js`
+8. `src/ui/settingsPanel.js`
+9. `src/settings/personalization.js`
 10. `src/io/projectAdapters.js`
 
 Then branch into:
 
+- `src/composite/ui.js`
+- `src/composite/document.js`
+- `src/composite/engine.js`
 - `src/stitch/analysis.js`
 - `src/stitch/classifier.js`
+- `src/stitch/document.js`
+- `src/stitch/engine.js`
+- `src/stitch/opencv-worker.js`
+- `src/3d/document.js`
+- `src/3d/ui.js`
+- `src/3d/engine.js`
 - `src/engine/pipeline.js`
 - `src/engine/layerPreviewProviders.js`
 - `src/registry/`
@@ -1704,6 +1842,10 @@ When touching app shell or Library logic, check:
 10. Secure bundle export/import preserves all three project types.
 11. ZIP export still writes one JSON per project.
 12. Studio state save/load still behaves as before, except newly saved Editor JSON files now embed both source and rendered preview data.
+13. DNG import still inserts `DNG Develop`, shows current warnings honestly, and preserves raw payloads across local save/load and Library round-trips.
+14. `Settings > Personalization` still recolors the shared non-3D shell without affecting the dedicated 3D black UI.
+15. Editor preview/options/export/zoom controls still live in the `Canvas` sidebar tab and the preview stage stays aspect-fitted into the inset surface.
+16. Composite still keeps its current sidebar labels (`Layers`, `Selected`, `View`, `Export`) plus selected-layer replace/crop flows.
 
 ## 19. Electron Bundling and Standalone App
 
@@ -1818,6 +1960,39 @@ Current capability registry fields:
 
 - `worker`
 - `moduleWorker`
+
+## 22. Recent 2026-04-12 UI and DNG Notes
+
+Several cross-section UI and runtime assumptions changed after the earlier audit.
+
+Shared UI shell:
+
+- `Library`, `Editor`, `Composite`, `Stitch`, `Logs`, and `Settings` now use the same tuned neumorphic token system instead of section-specific skins.
+- Header trays and extra wrapper cards were flattened in many places so actual controls/items are the inset surfaces rather than big nested boxes.
+- Pressed/toggled buttons should no longer pop back up just because the pointer is hovering them.
+- The shared shell is now recolorable through `Settings > Personalization`.
+
+Editor-specific shell updates:
+
+- The Editor action-row wrapper was removed; the buttons now sit directly on the page.
+- The old top preview bar was removed; its functions moved into the `Canvas` sidebar tab.
+- The preview stage now sizes to the image/canvas aspect ratio and is the inset surface itself.
+- The Editor sidebar currently uses `Layers`, `Canvas`, `Selected`, `Pipeline`, and `Scopes`.
+- The `Pipeline` tab now reads more like inset rows in the page background rather than raised cards.
+- The Editor sidebar uses a custom styled scrollbar.
+
+Composite-specific shell updates:
+
+- Composite now follows the same shared shell language as the Editor instead of its older separate black styling.
+- The current visible sidebar labels are `Layers`, `Selected`, `View`, and `Export`.
+- Composite includes selected-layer replacement, crop-mode handle workflows, and shared font options for text layers.
+
+DNG-specific runtime notes:
+
+- The current DNG path is functional but still transitional.
+- The live develop path is now GPU-backed after worker decode, but the runtime still keeps the older CPU reference/oracle code around for parity work and fallback validation.
+- UI changes to DNG params are much more immediate than the earlier CPU-prepare path, but heavier files can still show the in-canvas rendering badge while the GPU rebuild finishes.
+- Unsupported DNG correction features are supposed to stay visible as partial-fidelity warnings instead of being silently ignored.
 - `wasm`
 - `offscreenCanvas2d`
 - `offscreenCanvasWebgl2`
@@ -1914,6 +2089,7 @@ The shared worker runtime has now been hardened beyond the first bootstrap pass.
 
 - per-attempt worker request materialization through `options.createRequest`
 - active-task cancellation that restarts the worker process for that domain instead of only posting `cancel`
+- domains can now opt out of that restart behavior (`restartWorkerOnActiveCancel: false`), which is currently used by the dedicated `dng` worker domain so decode state stays warm during replace-on-newer-task behavior
 - section/domain cancellation through the existing broker API, now used by the UI on workspace switches
 - replay-safe worker request rebuilding, which matters for file-based tasks that transfer `ArrayBuffer` payloads
 
@@ -3035,3 +3211,57 @@ Current Library UI integration behavior:
 - users can drag the slider as before or type exact numeric values directly into the paired box
 - the mirror inputs respect the original slider min/max/step values and stay disabled whenever the owning slider is disabled
 - implementation lives in `src/3d/ui.js`
+
+## 2026-04-12 GPU DNG migration
+
+### Live DNG runtime model
+
+- The old live DNG path was:
+  - worker probe
+  - CPU prepare to RGBA preview
+  - temporary preview canvas creation
+  - load that preview canvas into the Editor engine as if it were a normal raster source
+- That old assumption is now wrong.
+- The current live DNG path is:
+  - dedicated `dng` worker probe
+  - dedicated `dng` worker decode of raw raster + metadata
+  - runtime caching of the decoded source in memory
+  - upload of raw / linearization / gain-map state into the Editor WebGL runtime
+  - live `DNG Develop` rendering inside the Editor GPU layer chain
+
+### Current GPU ownership
+
+- `src/editor/dngProcessing.js`
+  - still owns probe/decode plus the retained CPU reference/oracle path
+  - the decode path is now the live runtime input
+- `src/engine/pipeline.js`
+  - now owns DNG runtime textures and GPU-backed 16-bit export readback
+- `src/engine/executors/index.js`
+  - now owns the real `dngDevelop` executor instead of a no-op copy pass
+  - currently compiles through:
+    - `Shaders/dngDevelop.frag`
+    - `Shaders/dngComposite.frag`
+- `src/main.js`
+  - now syncs DNG documents by loading the Editor base canvas plus decoded DNG runtime state, instead of creating a prepared preview canvas first
+
+### Current DNG GPU behavior
+
+- DNG control changes rerender on the GPU path after the source has been decoded.
+- The in-canvas `Rendering` badge now reflects GPU-side DNG rerenders instead of a worker-side preview rebuild.
+- Hover/original and compare view now use a captured GPU `DNG Develop` base output instead of assuming the source original must be a DOM image/canvas.
+- 16-bit DNG PNG export now renders through the Editor engine, reads back the final linear texture, then encodes PNG16 on CPU.
+- The DNG shader path now samples raw sensor rows in top-left sensor order before mapping them into WebGL texture coordinates, so orientation and CFA row parity stay aligned with TIFF/DNG metadata.
+- The current DNG shader path also includes an extra bright-highlight chroma guard to reduce magenta highlight spill on unstable camera-matrix / high-gain regions.
+- The DNG control UI now has one-second delayed hover-help popovers for the major interpretation, normalization, color, tone, detail, and correction controls.
+- Samsung Pro Mode mosaic defaults are intentionally conservative right now:
+  - camera matrix off by default
+  - gain map off by default
+  - standalone opcode corrections off by default
+- Probe/support flags are now stricter:
+  - standalone opcode corrections are only marked supported when there is a real executable opcode path, not just opcode metadata
+  - gain-map correction is no longer marked supported when the file includes a `ProfileGainTableMap` path that the current runtime does not handle reliably
+
+### Current limitation
+
+- The migration did not yet add a separate OffscreenCanvas/WebGL2 export worker that runs the full GPU render off the main thread.
+- The live preview path is GPU-backed, and the dedicated `dng` worker stays warm for probe/decode work, but final GPU export still runs through the main Editor engine.

@@ -130,3 +130,6 @@ add a tiling layer to the editor tab
 
 
 add the ability to warp text on the editor tab, and blend them with whatever is behind them
+
+
+do some digging on the biggest code files currently in the site, to see if any of them are worth breaking down into smaller files for better organization and managment

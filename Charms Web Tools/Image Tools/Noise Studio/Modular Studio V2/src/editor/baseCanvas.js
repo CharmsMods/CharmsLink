@@ -1,3 +1,5 @@
+import { createEmptyDngSourceState, DNG_SOURCE_KIND, isDngSource, normalizeDngSourceState } from './dngDevelopShared.js';
+
 const DEFAULT_EDITOR_BASE_WIDTH = 1024;
 const DEFAULT_EDITOR_BASE_HEIGHT = 1024;
 const MAX_EDITOR_BASE_DIMENSION = 32768;
@@ -33,17 +35,28 @@ function normalizeHexColor(color, fallback = '#000000') {
 export function normalizeEditorSource(source = null) {
     if (!source || typeof source !== 'object') {
         return {
+            kind: 'raster',
             name: '',
             type: '',
             imageData: null,
+            rawData: null,
+            rawMimeType: '',
+            rawByteLength: 0,
+            dng: createEmptyDngSourceState(),
             width: 0,
             height: 0
         };
     }
+    const kind = isDngSource(source) ? DNG_SOURCE_KIND : 'raster';
     return {
+        kind,
         name: String(source.name || ''),
         type: String(source.type || ''),
         imageData: source.imageData ? String(source.imageData) : null,
+        rawData: kind === DNG_SOURCE_KIND && source.rawData ? String(source.rawData) : null,
+        rawMimeType: kind === DNG_SOURCE_KIND ? String(source.rawMimeType || source.type || 'image/x-adobe-dng') : '',
+        rawByteLength: kind === DNG_SOURCE_KIND ? Math.max(0, Math.round(Number(source.rawByteLength) || 0)) : 0,
+        dng: kind === DNG_SOURCE_KIND ? normalizeDngSourceState(source.dng) : createEmptyDngSourceState(),
         width: Math.max(0, Math.round(Number(source.width) || 0)),
         height: Math.max(0, Math.round(Number(source.height) || 0))
     };
@@ -61,10 +74,12 @@ export function createDefaultEditorBase() {
 export function normalizeEditorBase(base = null, source = null) {
     const normalizedSource = normalizeEditorSource(source);
     const defaults = createDefaultEditorBase();
-    const fallbackWidth = normalizedSource.imageData
+    const hasSource = !!normalizedSource.imageData || (normalizedSource.kind === DNG_SOURCE_KIND && !!normalizedSource.rawData)
+        || (normalizedSource.width > 0 && normalizedSource.height > 0);
+    const fallbackWidth = hasSource
         ? clampDimension(normalizedSource.width || defaults.width, defaults.width)
         : defaults.width;
-    const fallbackHeight = normalizedSource.imageData
+    const fallbackHeight = hasSource
         ? clampDimension(normalizedSource.height || defaults.height, defaults.height)
         : defaults.height;
 
@@ -82,7 +97,8 @@ export function hasEditorCanvas(documentState = {}) {
 }
 
 export function hasEditorSourceImage(documentState = {}) {
-    return !!normalizeEditorSource(documentState?.source).imageData;
+    const source = normalizeEditorSource(documentState?.source);
+    return !!source.imageData || (source.kind === DNG_SOURCE_KIND && !!source.rawData);
 }
 
 export function getEditorCanvasResolution(documentState = {}) {
