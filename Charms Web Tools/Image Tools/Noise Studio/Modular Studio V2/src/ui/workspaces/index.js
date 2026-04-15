@@ -1,15 +1,15 @@
-import { getLayerInstancesByGroup } from '../registry/index.js';
-import { hasRenderableLayers, MAX_PREVIEW_ZOOM } from '../state/documentHelpers.js';
-import { createLibraryPanel } from './libraryPanel.js';
-import { clientToImageUv, computePreviewTransform, getPointerRatio } from './previewViewport.js';
-import { createCompositeWorkspace } from '../composite/ui.js';
-import { createStitchWorkspace } from '../stitch/ui.js';
-import { createThreeDWorkspace } from '../3d/ui.js';
-import { createLogsPanel } from './logsPanel.js';
-import { createSettingsPanel } from './settingsPanel.js';
-import { createProgressOverlayController } from './progressOverlay.js';
-import { getCropTransformMetrics } from '../engine/cropTransformShared.js';
-import { applyPersonalizationTheme } from '../settings/personalization.js';
+import { getLayerInstancesByGroup } from '../../registry/index.js';
+import { hasRenderableLayers, MAX_PREVIEW_ZOOM } from '../../state/documentHelpers.js';
+import { createLibraryPanel } from '../libraryPanel/index.js';
+import { clientToImageUv, computePreviewTransform, getPointerRatio } from '../previewViewport.js';
+import { createCompositeWorkspace } from '../../composite/ui.js';
+import { createStitchWorkspace } from '../../stitch/ui.js';
+import { createThreeDWorkspace } from '../../3d/ui.js';
+import { createLogsPanel } from '../logsPanel.js';
+import { createSettingsPanel } from '../settingsPanel.js';
+import { createProgressOverlayController } from '../progressOverlay.js';
+import { getCropTransformMetrics } from '../../engine/cropTransformShared.js';
+import { applyPersonalizationTheme } from '../../settings/personalization.js';
 import {
     getEditorCanvasLabel,
     getEditorCanvasResolution,
@@ -17,9 +17,9 @@ import {
     hasEditorSourceImage,
     normalizeEditorBase,
     normalizeEditorSource
-} from '../editor/baseCanvas.js';
-import { DNG_UNSUPPORTED_TEXT, getDngPresetLabel, isDngSource, normalizeDngDevelopParams } from '../editor/dngDevelopShared.js';
-import { EDITOR_TEXT_FONT_OPTIONS, getEditorTextBounds, measureEditorTextLayout, normalizeEditorTextParams } from '../editor/textLayerShared.js';
+} from '../../editor/baseCanvas.js';
+import { DNG_UNSUPPORTED_TEXT, getDngPresetLabel, isDngSource, normalizeDngDevelopParams } from '../../editor/dngDevelopShared.js';
+import { EDITOR_TEXT_FONT_OPTIONS, getEditorTextBounds, measureEditorTextLayout, normalizeEditorTextParams } from '../../editor/textLayerShared.js';
 
 const GROUP_LABELS = {
     base: 'Base',

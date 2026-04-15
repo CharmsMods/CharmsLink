@@ -13,6 +13,7 @@ import { createGradientEnvironmentTexture, createSolidEnvironmentTexture } from 
 import { createExtrudedTextObject, createFlatTextObject } from './text.js';
 import { alignCameraToLockedView, getLockedViewForward, resolveAttachmentTransform } from './viewMath.js';
 import { saveBlobLocally } from '../io/localSave.js';
+import { dataUrlToArrayBuffer, dataUrlToBlob, dataUrlToText } from '../utils/dataUrl.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
@@ -115,21 +116,6 @@ function disposeObject3D(root) {
             }
         }
     });
-}
-
-async function dataUrlToArrayBuffer(dataUrl) {
-    const response = await fetch(dataUrl);
-    return response.arrayBuffer();
-}
-
-async function dataUrlToText(dataUrl) {
-    const response = await fetch(dataUrl);
-    return response.text();
-}
-
-async function dataUrlToBlob(dataUrl) {
-    const response = await fetch(dataUrl);
-    return response.blob();
 }
 
 function createRenderCanvas(width, height) {

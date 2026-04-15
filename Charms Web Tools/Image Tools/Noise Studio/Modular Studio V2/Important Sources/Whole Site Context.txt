@@ -14,7 +14,7 @@ If the code and this file disagree, the code is authoritative and this file shou
 
 ## Reading Guide
 
-Last audited against the workspace code on 2026-04-12.
+Last audited against the workspace code on 2026-04-14.
 
 If you only need the current runtime model first, read these sections in order:
 
@@ -42,6 +42,15 @@ If you are validating an old plan or idea against the live build:
 - Prefer this file plus the codebase first.
 - Treat `Important Sources/Ideas and Fixes for ENTIRE site.md` as a mixed backlog / bug / idea capture file, not the authoritative current-state model.
 - Treat `Plan Files/` as preserved planning history unless a file has been deliberately moved into a clearly current/active folder.
+
+Important current code-location note:
+
+- The app-controller split is now live.
+- `src/main.js` is no longer the giant controller file. It is now a thin entrypoint.
+- Current app-runtime ownership lives primarily in `src/app/bootstrap.js`.
+- Current shell ownership lives in `src/ui/workspaces/index.js`.
+- Current integrated Library UI ownership lives in `src/ui/libraryPanel/index.js`.
+- Historical dated sections below may still mention older pre-split file paths when describing earlier implementation passes. For current ownership, trust the top-level architecture sections first.
 
 ## Critical Development Rule
 
@@ -165,22 +174,34 @@ Current section responsibilities:
 
 ### `src/main.js`
 
-- Main bootstrap.
-- Creates the store.
-- Creates the Studio engine and coordinates the app-wide runtime.
-- Creates the shared logging engine used by the `Logs` section.
-- Owns the normalized Composite and 3D document actions plus adapter-backed Library persistence for mixed project types.
-- Owns IndexedDB helpers.
-- Owns both Library project records and Library asset records in IndexedDB, plus the separate project-attachment store used for raw DNG source payloads.
-- Quietly derives Editor render assets for the Asset Library, deduplicates imported 3D assets by fingerprint, auto-generates low-res previews for image assets, and syncs Library asset updates back into the 3D content drawer.
-- Missing image-asset previews are backfilled once per page reload in the background, and Library change notifications are coalesced before refreshing the Library page plus the 3D content drawer.
-- Loads, normalizes, persists, imports, and exports app-level settings.
-- Applies the live shared personalization palette to the app shell.
-- Owns worker-brokered DNG probe / decode tasks, GPU-backed DNG source hydration into the Editor engine, GPU-backed 16-bit PNG export orchestration, and DNG source/attachment hydration during Library save/load.
-- Owns app-level actions.
-- Owns the project adapter registry that lets the Library save/load mixed engine types.
+- Thin browser entrypoint only.
+- Waits for `DOMContentLoaded`.
+- Locates `#app`.
+- Calls `bootstrapStudioApp(...)` from `src/app/bootstrap.js`.
 
-### `src/ui/workspaces.js`
+### `src/app/bootstrap.js`
+
+- Current main app-controller/runtime file.
+- Owns the app bootstrap sequence, boot-stage logging, worker/runtime capability detection, store wiring, engine init, registry init, and first interactive render path.
+- Owns the normalized app-level action surface assembled from the current action factories.
+- Owns IndexedDB-backed Library project records, Library asset records, and Library project attachments.
+- Owns Library save/load/import/export orchestration for mixed project types through the adapter registry.
+- Owns worker-brokered DNG probe / decode tasks, GPU-backed DNG source hydration into the Editor engine, GPU-backed 16-bit PNG export orchestration, and DNG source/attachment hydration during Library save/load.
+- Owns background Library-derived asset creation, image-preview generation, and Library/3D asset sync notifications.
+- Owns current startup behavior that defers Library priming when another section opens first, instead of force-priming the hidden Library in the background on every launch.
+- Owns current renderer-side uncaught error / rejection logging used to surface future crashes in `Logs`.
+
+### `src/app/context.js`
+
+- Small app-runtime context seam introduced by the controller split.
+- Holds shared runtime references that are merged during bootstrap, including store/actions/project-adapter/view references.
+
+### `src/utils/dataUrl.js`
+
+- Shared data-url/blob/hash helper module.
+- Current canonical place for data-url conversion helpers that were previously duplicated across the app bootstrap, Library UI, and 3D code.
+
+### `src/ui/workspaces/index.js`
 
 - Main shell for the single-page app.
 - Renders:
@@ -199,6 +220,7 @@ Current section responsibilities:
 - The current top section order is `Library`, `Editor`, `Composite`, `3D`, `Stitch`, `Logs`, `Settings`.
 - The current Editor shell now includes the fitted inset preview stage, in-canvas DNG rendering badge, `Canvas` sidebar tab, DNG Develop controls, and the Editor-side 8-bit / 16-bit PNG export controls.
 - DNG control changes no longer rebuild a worker-prepared preview canvas. Once the source is decoded, live DNG control changes rerender directly through the GPU path.
+- The temporary compatibility wrapper file `src/ui/workspaces.js` was removed after the split; current imports should target the folder-backed module directly.
 
 ### `src/workers/dng.worker.js` / `src/workers/tasks/dng.js`
 
@@ -209,7 +231,7 @@ Current section responsibilities:
 - The DNG worker domain is now configured to stay warm across replace-active cancellations so slider-driven DNG work does not keep tearing down the worker process.
 - The `editor` worker domain now stays focused on analysis/diff/palette work rather than also carrying the DNG decode path.
 
-### `src/ui/libraryPanel.js`
+### `src/ui/libraryPanel/index.js`
 
 - Entire integrated Library UI.
 - Owns:
@@ -227,6 +249,7 @@ Current section responsibilities:
   - secure import/export modals
   - drag-safe modal behavior
   - Library-side progress and workflow logging hooks
+- The temporary compatibility wrapper file `src/ui/libraryPanel.js` was removed after the split; current imports should target the folder-backed module directly.
 
 ### `src/ui/logsPanel.js`
 
@@ -1754,16 +1777,19 @@ If future work adds more per-layer custom views, use the provider framework inst
 
 If a future AI needs to understand the app quickly, start with:
 
-1. `src/main.js`
-2. `src/ui/workspaces.js`
-3. `src/ui/libraryPanel.js`
-4. `src/editor/baseCanvas.js`
-5. `src/editor/dngDevelopShared.js`
-6. `src/editor/dngProcessing.js`
-7. `src/editor/dngTiff.js`
-8. `src/ui/settingsPanel.js`
-9. `src/settings/personalization.js`
-10. `src/io/projectAdapters.js`
+1. `src/app/bootstrap.js`
+2. `src/app/context.js`
+3. `src/ui/workspaces/index.js`
+4. `src/ui/libraryPanel/index.js`
+5. `src/editor/baseCanvas.js`
+6. `src/editor/dngDevelopShared.js`
+7. `src/editor/dngProcessing.js`
+8. `src/editor/dngTiff.js`
+9. `src/ui/settingsPanel.js`
+10. `src/settings/personalization.js`
+11. `src/io/projectAdapters.js`
+
+`src/main.js` is still important, but now only as the thin entrypoint.
 
 Then branch into:
 
@@ -3265,3 +3291,74 @@ Current Library UI integration behavior:
 
 - The migration did not yet add a separate OffscreenCanvas/WebGL2 export worker that runs the full GPU render off the main thread.
 - The live preview path is GPU-backed, and the dedicated `dng` worker stays warm for probe/decode work, but final GPU export still runs through the main Editor engine.
+
+## 2026-04-14 App-controller split follow-up and Library stabilization
+
+### Main controller split is now live
+
+- The long-lived `src/main.js` app-controller was split.
+- Current live ownership is:
+  - `src/main.js`
+    - thin entrypoint only
+  - `src/app/bootstrap.js`
+    - current runtime/controller owner
+  - `src/app/context.js`
+    - shared bootstrap context seam
+  - `src/ui/workspaces/index.js`
+    - current shell module
+  - `src/ui/libraryPanel/index.js`
+    - current integrated Library panel module
+- The temporary wrapper files `src/ui/workspaces.js` and `src/ui/libraryPanel.js` were removed after the new imports were wired directly to the folder-backed modules.
+- Shared data-url conversion helpers were consolidated into `src/utils/dataUrl.js` so the bootstrap, Library UI, and 3D code stop carrying local duplicate implementations.
+
+### Current bootstrap/runtime seam
+
+- `bootstrapStudioApp(...)` is now the main runtime entry.
+- The split introduced explicit bootstrap seams for:
+  - app context creation
+  - worker-domain registration
+  - project-adapter creation
+  - store-to-view render wiring
+  - composed app action creation
+- This refactor is meant to make future debugging and module extraction easier, not to change payload formats or Library record schemas.
+
+### Library crash and white-screen findings
+
+- A real post-split bug caused Library project reads to fail with `resolveLibraryProjectType is not defined`.
+- Root cause:
+  - `createLibraryProjectListPayload(...)` lived at module scope
+  - it called `resolveLibraryProjectType(...)`
+  - that resolver had accidentally been left inside `bootstrapStudioApp(...)`
+  - Library project refresh/import paths could therefore throw before project cards rendered
+- Fix:
+  - `resolveLibraryProjectType(...)` was moved to shared module scope
+  - the duplicate inner definition was removed
+- Symptom pattern from this bug:
+  - Assets could still appear
+  - project count could fall to `0`
+  - imports could log as saved while nothing rendered
+  - repeated Library visits could still contribute to instability because the refresh path kept failing partway through
+
+### Library startup/OOM mitigation already applied
+
+- The app previously background-primed the integrated Library even when the user launched directly into another section such as `Editor`.
+- On large local Libraries, that hidden startup work could consume very high memory and contribute to renderer white-screen / OOM failures.
+- Current startup behavior:
+  - if `settings.library.autoLoadOnStartup` is enabled and the active startup section is `library`, the Library primes immediately
+  - if another section opens first, Library priming is deferred instead of force-running in the background
+- Current read behavior:
+  - `getLibraryProjects()` and `getLibraryAssets()` now act as read paths
+  - they no longer silently perform repair/backfill work during normal list reads
+- This was done to make Library debugging more deterministic and to avoid hidden refresh loops or heavy background repair work during basic navigation.
+
+### Current diagnostics added during this pass
+
+- Renderer-side uncaught errors and unhandled promise rejections are now logged through the app logging system.
+- Electron main-process diagnostics were expanded so renderer failures are more visible in the terminal during `npm start`.
+- This means future Library/load/save regressions should be easier to localize from `Logs` plus terminal output instead of failing silently.
+
+### Current caution / likely next pressure point
+
+- The project-path scope failure above is fixed.
+- However, the integrated Library panel still materializes full asset records during refresh, including large inline asset payloads.
+- If the renderer still shows high memory pressure after the project-path fixes, the next place to inspect is the asset-list refresh/model-preview path rather than the project-type resolver path.

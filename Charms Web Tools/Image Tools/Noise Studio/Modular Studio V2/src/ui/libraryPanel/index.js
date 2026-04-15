@@ -1,6 +1,7 @@
-import { createThreeDAssetPreview } from '../3d/assetPreview.js';
-import { didSaveFile, saveDataUrlLocally, saveJsonLocally, saveTextLocally, wasSaveCancelled } from '../io/localSave.js';
-import { maybeYieldToUi, nextPaint } from './scheduling.js';
+import { createThreeDAssetPreview } from '../../3d/assetPreview.js';
+import { didSaveFile, saveDataUrlLocally, saveJsonLocally, saveTextLocally, wasSaveCancelled } from '../../io/localSave.js';
+import { maybeYieldToUi, nextPaint } from '../scheduling.js';
+import { blobToDataUrl, dataUrlToBlob } from '../../utils/dataUrl.js';
 import {
     isSecureLibraryCompatibilityError,
     LIBRARY_ASSET_FOLDER_FORMAT,
@@ -8,7 +9,7 @@ import {
     LIBRARY_EXPORT_TYPE,
     LIBRARY_SECURE_EXPORT_FORMAT,
     LEGACY_LIBRARY_EXPORT_FORMAT
-} from '../library/secureTransfer.js';
+} from '../../library/secureTransfer.js';
 
 const SKIP_PARAMS = new Set(['_libraryName', '_libraryTags', '_libraryProjectType', '_libraryHoverSource', '_librarySourceArea', '_librarySourceCount']);
 
@@ -154,8 +155,81 @@ function valuesMatch(a, b) {
     return false;
 }
 
+function createLightweightPayload(payload, projectType) {
+    if (!payload || typeof payload !== 'object') return {};
+    const light = {
+        kind: payload.kind,
+        mode: payload.mode,
+        version: payload.version
+    };
+    if (projectType === 'studio') {
+        light.layerStack = Array.isArray(payload.layerStack)
+            ? payload.layerStack.map((layer) => ({
+                id: layer?.id,
+                typeId: layer?.typeId,
+                label: layer?.label,
+                visible: layer?.visible,
+                opacity: layer?.opacity,
+                blendMode: layer?.blendMode,
+                params: layer?.params
+            }))
+            : [];
+        light.base = payload.base;
+        if (payload.source) {
+            light.source = {
+                kind: payload.source.kind,
+                name: payload.source.name,
+                type: payload.source.type,
+                width: payload.source.width,
+                height: payload.source.height
+            };
+        }
+    } else if (projectType === 'composite') {
+        light.layers = Array.isArray(payload.layers)
+            ? payload.layers.map((layer) => ({
+                id: layer?.id,
+                name: layer?.name,
+                visible: layer?.visible,
+                opacity: layer?.opacity,
+                blendMode: layer?.blendMode,
+                width: layer?.width || layer?.source?.width,
+                height: layer?.height || layer?.source?.height
+            }))
+            : [];
+    } else if (projectType === 'stitch') {
+        light.inputs = Array.isArray(payload.inputs)
+            ? payload.inputs.map((input) => ({
+                id: input?.id,
+                name: input?.name,
+                width: input?.width,
+                height: input?.height
+            }))
+            : [];
+        light.settings = payload.settings;
+        light.activeCandidateId = payload.activeCandidateId;
+    } else if (projectType === '3d') {
+        light.scene = payload.scene ? {
+            items: Array.isArray(payload.scene.items)
+                ? payload.scene.items.map((item) => ({
+                    id: item?.id,
+                    kind: item?.kind,
+                    name: item?.name,
+                    modelName: item?.modelName
+                }))
+                : [],
+            backgroundColor: payload.scene.backgroundColor
+        } : {};
+        light.render = payload.render ? {
+            width: payload.render.width,
+            height: payload.render.height
+        } : {};
+    }
+    return light;
+}
+
 function normalizeLibraryDocumentPayload(payload) {
-    const normalized = JSON.parse(JSON.stringify(payload || {}));
+    const source = payload || {};
+    const normalized = { ...source };
     delete normalized._libraryName;
     delete normalized._libraryTags;
     delete normalized._libraryProjectType;
@@ -329,7 +403,7 @@ function createImportEntryFromPayload(rawPayload, fallbackName, index = 0, expli
         || `Library Project ${index + 1}`
     ) || `Library Project ${index + 1}`;
     const tags = normalizeTagList(explicitTags || rawPayload?._libraryTags || rawPayload?.tags || []);
-    const finalPayload = {
+    const parsedPayload = {
         _libraryName: name,
         _libraryTags: tags,
         _libraryProjectType: rawPayload?._libraryProjectType || inferProjectTypeFromPayload(payload),
@@ -341,7 +415,7 @@ function createImportEntryFromPayload(rawPayload, fallbackName, index = 0, expli
     return {
         name,
         tags,
-        text: JSON.stringify(finalPayload)
+        parsedPayload
     };
 }
 
@@ -538,56 +612,6 @@ function getAssetFileExtension(asset) {
     if (mimeType.includes('svg')) return 'svg';
     if (mimeType.includes('gltf')) return normalizedFormat === 'gltf' ? 'gltf' : 'glb';
     return asset?.assetType === 'model' ? 'glb' : 'png';
-}
-
-async function blobToDataUrl(blob) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ''));
-        reader.onerror = () => reject(new Error('Could not read that file.'));
-        reader.readAsDataURL(blob);
-    });
-}
-
-function parseDataUrl(dataUrl) {
-    const source = String(dataUrl || '');
-    if (!source.startsWith('data:')) return null;
-    const commaIndex = source.indexOf(',');
-    if (commaIndex < 0) {
-        throw new Error('Invalid data URL.');
-    }
-    const meta = source.slice(5, commaIndex);
-    const payload = source.slice(commaIndex + 1);
-    const parts = meta.split(';').filter(Boolean);
-    const isBase64 = parts.some((part) => part.toLowerCase() === 'base64');
-    const mimeType = String(parts.find((part) => part.toLowerCase() !== 'base64') || 'application/octet-stream').trim() || 'application/octet-stream';
-    return {
-        mimeType,
-        isBase64,
-        payload
-    };
-}
-
-function base64ToUint8Array(base64) {
-    const normalized = String(base64 || '').replace(/\s+/g, '');
-    const binary = atob(normalized);
-    const bytes = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index);
-    }
-    return bytes;
-}
-
-async function dataUrlToBlob(dataUrl) {
-    const parsed = parseDataUrl(dataUrl);
-    if (parsed) {
-        const bytes = parsed.isBase64
-            ? base64ToUint8Array(parsed.payload)
-            : new TextEncoder().encode(parsed.payload.includes('%') ? decodeURIComponent(parsed.payload) : parsed.payload);
-        return new Blob([bytes], { type: parsed.mimeType });
-    }
-    const response = await fetch(String(dataUrl || ''));
-    return response.blob();
 }
 
 function inferAssetFileMeta(fileName, mimeType = '') {
@@ -2740,8 +2764,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 let renderWidth = Number(project.renderWidth || 0);
                 let renderHeight = Number(project.renderHeight || 0);
                 const projectType = project.projectType || inferProjectTypeFromPayload(project.payload);
-                const hoverSource = project.hoverSource || project.payload?._libraryHoverSource || project.payload?.source || null;
-                const previewImageData = project.payload?.preview?.imageData || '';
+                const hoverSource = project.hoverSource || project.payload?._libraryHoverSource || null;
                 const sourceWidth = Number(project.sourceWidth || hoverSource?.width || project.payload?.source?.width || project.payload?.preview?.width || 0);
                 const sourceHeight = Number(project.sourceHeight || hoverSource?.height || project.payload?.source?.height || project.payload?.preview?.height || 0);
                 const sourceAreaOverride = Number(project.sourceAreaOverride || project.payload?._librarySourceArea || 0) || 0;
@@ -2758,7 +2781,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                 let previewSignature = getProjectPreviewSignature(project, renderWidth, renderHeight);
                 let url = previous?.previewSignature === previewSignature
                     ? previous.url
-                    : (project.blob ? URL.createObjectURL(project.blob) : (hoverSource?.imageData || previewImageData || ''));
+                    : (project.blob ? URL.createObjectURL(project.blob) : (hoverSource?.imageData || ''));
 
                 if ((!renderWidth || !renderHeight) && previous?.previewSignature === previewSignature) {
                     renderWidth = previous.renderWidth;
@@ -2771,18 +2794,24 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                         renderWidth = measured.width;
                         renderHeight = measured.height;
                     } catch (_error) {
-                        renderWidth = Number(project.payload?.source?.width || 0);
-                        renderHeight = Number(project.payload?.source?.height || 0);
+                        renderWidth = Number(project.sourceWidth || 0);
+                        renderHeight = Number(project.sourceHeight || 0);
                     }
                 }
 
                 previewSignature = getProjectPreviewSignature(project, renderWidth, renderHeight);
                 const recordSignature = getProjectRecordSignature(project, tags, sourceWidth, sourceHeight, renderWidth, renderHeight);
 
+                const lightPayload = createLightweightPayload(project.payload, projectType);
+
                 return {
-                    ...project,
+                    id: project.id,
+                    kind: project.kind,
+                    recordType: project.recordType,
+                    timestamp: project.timestamp,
                     name: String(project.name || 'Untitled Project'),
-                    payload: project.payload || {},
+                    blob: project.blob,
+                    payload: lightPayload,
                     projectType,
                     tags,
                     url,
@@ -3114,7 +3143,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
                             projects: extracted.projectEntries.map((entry) => ({
                                 name: entry.name,
                                 tags: entry.tags,
-                                payload: JSON.parse(entry.text)
+                                payload: entry.parsedPayload || {}
                             })),
                             assets: extracted.assetEntries.map((entry) => ({
                                 ...(entry.asset || {}),
@@ -3274,20 +3303,15 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             if (assignedTags.length) {
                 importedCatalog = normalizeTagList([...importedCatalog, ...assignedTags]);
                 projectEntries = projectEntries.map((entry) => {
-                    try {
-                        const parsed = JSON.parse(entry.text);
-                        const mergedTags = normalizeTagList([...(entry.tags || []), ...assignedTags]);
-                        return {
-                            ...entry,
-                            tags: mergedTags,
-                            text: JSON.stringify({
-                                ...parsed,
-                                _libraryTags: mergedTags
-                            })
-                        };
-                    } catch (_error) {
-                        return entry;
-                    }
+                    const mergedTags = normalizeTagList([...(entry.tags || []), ...assignedTags]);
+                    const updatedPayload = entry.parsedPayload
+                        ? { ...entry.parsedPayload, _libraryTags: mergedTags }
+                        : entry.parsedPayload;
+                    return {
+                        ...entry,
+                        tags: mergedTags,
+                        parsedPayload: updatedPayload
+                    };
                 });
             }
         }
@@ -3297,7 +3321,7 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
             showProgress('Preparing Library import...', `${projectEntries.length} project${projectEntries.length === 1 ? '' : 's'}`, 0.02);
             await nextPaint();
             projectSummary = (await actions.processLibraryPayloads(
-                projectEntries.map((entry) => entry.text),
+                projectEntries.map((entry) => entry.parsedPayload || entry.text),
                 projectEntries.map((entry) => entry.name),
                 ({ phase, count = 0, total = projectEntries.length, filename = '' }) => {
                     if (phase === 'start') {
@@ -3718,6 +3742,10 @@ export function createLibraryPanel(root, { actions, layerDefaults = {}, logger =
         try {
             const loaded = await actions.loadLibraryProject(project.payload, project.id, project.name);
             if (loaded) closeDetail();
+        } catch (error) {
+            console.error(error);
+            logLibrary('error', 'library.projects', error?.message || `Could not load "${project.name || 'project'}" from the Library.`);
+            showAlert(error?.message || `Could not load "${project.name || 'project'}" from the Library.`);
         } finally {
             hideProgress();
         }

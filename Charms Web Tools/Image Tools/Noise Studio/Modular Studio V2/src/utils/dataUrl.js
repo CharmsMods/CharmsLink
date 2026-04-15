@@ -91,3 +91,11 @@ export async function dataUrlToBlob(dataUrl) {
     }
     return response.blob();
 }
+
+export async function dataUrlToArrayBuffer(dataUrl) {
+    return (await dataUrlToBlob(dataUrl)).arrayBuffer();
+}
+
+export async function dataUrlToText(dataUrl) {
+    return (await dataUrlToBlob(dataUrl)).text();
+}

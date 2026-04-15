@@ -1,0 +1,539 @@
+DNG Redirection Loose Implementation Guide
+For Modular Studio V2
+Prepared: 2026-04-13
+
+Purpose
+This file is a planning and direction guide for reworking the site's DNG path so that color, rendering correctness, and overall architecture are more reliable.
+
+This file intentionally separates:
+- verified facts from the provided site context file
+- verified facts from official LibRaw / Emscripten / DNG documentation research
+- recommendations and design direction
+- things that are explicitly unknown unless the code is inspected directly
+
+Do not treat this file as a claim that the current code already behaves exactly as recommended below.
+Use it as a guardrail for a rewrite/refactor while the code is being inspected.
+
+Core honesty / boundary rules
+1) Verified from the context file:
+   - The app already has a DNG worker domain with `probe-dng-source` and `decode-dng-source`.
+   - The Editor currently does live GPU-backed DNG develop rendering after decode.
+   - DNG-backed Editor projects can preserve raw payloads across local save/load and Library round-trips.
+   - The current DNG path is explicitly described as functional but transitional, with partial-fidelity warnings for unsupported features.
+
+2) Verified from official LibRaw sources:
+   - LibRaw is primarily a RAW decoder / metadata extraction library, not a production-quality renderer.
+   - LibRaw can provide raw pixel values, processing metadata, and thumbnails/previews.
+   - LibRaw includes basic RAW conversion inherited from dcraw, but LibRaw's own maintainers explicitly say production-quality rendering is not LibRaw's scope.
+   - LibRaw can optionally be compiled with extra capabilities such as Adobe DNG SDK support and extra demosaic packs, depending on build flags.
+
+3) Not verified from the provided context file alone:
+   - Exact current math in `src/editor/dngProcessing.js`
+   - Exact shader logic in `dngDevelop.frag` or related GLSL files
+   - Exact current metadata interpretation bugs
+   - Exact current Bayer / CFA handling
+   - Exact current color matrix order and white balance order
+   - Exact runtime object shapes returned by the DNG worker
+
+4) Therefore:
+   - Rewrites are acceptable.
+   - Removing broken or confusing legacy DNG code is acceptable.
+   - Keeping only the parts that are proven useful is acceptable.
+   - Any retained logic should justify its existence by correctness, quality, or maintainability.
+
+======================================================================
+A. VERIFIED CURRENT SITE FACTS FROM THE CONTEXT FILE
+======================================================================
+
+A1. Current DNG architecture, as stated in the context file
+- Editor supports DNG-backed source documents through a source-aware `DNG Develop` base layer.
+- DNG handling includes dedicated worker-side probe/decode.
+- Live develop rendering happens in the Editor WebGL pipeline, not by repeatedly building a worker-prepared raster preview.
+- Optional 16-bit PNG export exists for DNG-backed projects.
+- DNG raw payloads can be embedded locally or stored separately in the Library attachment store.
+- The DNG path is currently described as "functional but still transitional".
+- Unsupported corrections are supposed to remain visible as warnings instead of pretending to work.
+- Gain-map execution is intentionally file-dependent and can be disabled when unreliable.
+- Some files remain at partial fidelity instead of being marked fully supported.
+
+A2. Current files called out by the context file as DNG-relevant
+- `src/main.js`
+- `src/workers/dng.worker.js`
+- `src/workers/tasks/dng.js`
+- `src/editor/dngDevelopShared.js`
+- `src/editor/dngProcessing.js`
+- `src/editor/dngTiff.js`
+- DNG-related shader files are implied by the current GPU live path, but exact filenames are not fully verified from the context file alone.
+
+A3. Current app/runtime constraints relevant to DNG work
+- Logging is a first-class architectural requirement.
+- Worker-backed tasks should emit progress/log events through the shared protocol and write into the main-thread log UI.
+- The app must keep browser hosting and Electron support.
+- Relative paths matter for browser + GitHub Pages + Electron portability.
+- The worker runtime already exists and should be used instead of inventing a separate ad hoc background path.
+
+======================================================================
+B. WHAT LIBRAW ACTUALLY IS
+======================================================================
+
+B1. What LibRaw is good at
+LibRaw is best understood as a RAW file decode and metadata access layer.
+It is strong at:
+- opening many RAW formats, including DNG
+- parsing RAW container structures and vendor metadata
+- unpacking raw pixel data
+- exposing processing metadata needed for RAW development
+- optionally producing a basic developed image for compatibility/testing
+
+B2. What LibRaw is not
+LibRaw is not:
+- a WebGL renderer
+- a browser canvas renderer
+- a layer system
+- a production-quality color engine by itself
+- a full studio-grade raw processor by itself
+- a phone computational photography pipeline
+
+B3. Most important official limitation
+LibRaw's own official description says its built-in RAW conversion is basic and intended for cases where RAW conversion is not the main function of the app. The maintainers explicitly state that production-quality rendering is not in scope.
+
+That means LibRaw is useful for:
+- decode
+- metadata
+- baseline compatibility
+- reference/oracle comparisons
+
+It is not a good final answer for:
+- high-end final demosaic quality
+- final color science quality
+- final highlight reconstruction quality
+- final studio-grade rendering quality
+
+======================================================================
+C. WHERE LIBRAW FITS IN THIS SITE
+======================================================================
+
+C1. Clean placement in the workflow
+The cleanest integration point is:
+
+User loads DNG
+-> DNG worker receives file bytes
+-> WASM wrapper around LibRaw opens and decodes metadata/raw data
+-> Worker returns a structured decoded payload
+-> Main thread / Editor runtime uploads decoded data to GPU textures
+-> Existing or rewritten `DNG Develop` GPU path performs live rendering
+-> Editor layer stack continues normally
+-> Export path uses GPU result, with 8-bit or 16-bit output depending on chosen export path
+
+C2. What LibRaw should replace
+Recommended: use LibRaw to replace fragile low-level custom DNG parsing/decode logic where it is currently unreliable.
+That most likely means replacing or shrinking custom code responsible for:
+- TIFF/IFD traversal where correctness is weak
+- compression-specific raw unpacking
+- some vendor quirk parsing
+- metadata extraction for black/white levels, CFA layout, WB metadata, and color metadata
+
+C3. What LibRaw should NOT replace
+Do not treat LibRaw as a replacement for:
+- the Editor's WebGL renderer
+- the layer stack
+- the live DNG slider response path
+- the display transform / tone map / color grading path
+- UI state and project save/load structure
+
+C4. Practical architectural role
+Best role:
+- LibRaw = decode backend
+- Site DNG GPU path = live image development backend
+
+This is the most natural fit with the current app architecture described in the site context.
+
+======================================================================
+D. RECOMMENDED TARGET WORKFLOW
+======================================================================
+
+D1. Recommended high-level split
+1. File IO / orchestration
+   - Main thread + shared worker broker
+   - JavaScript / TypeScript side
+
+2. DNG decode + metadata extraction
+   - Web Worker
+   - WASM module compiled from C/C++ (LibRaw wrapper)
+
+3. Live development/rendering
+   - Main thread WebGL / WebGL2
+   - GLSL shaders
+
+4. Export
+   - Main thread for GPU readback orchestration
+   - Worker can assist with encode if desired, but current context only verifies GPU-backed orchestration and PNG16 encode path ownership in main runtime, not a full worker-side export redesign
+
+D2. Recommended target data contract from worker to GPU side
+The worker should return a normalized decoded object, not a final cooked RGB image, unless an optional reference/debug image is specifically requested.
+
+Recommended returned fields:
+- source identity
+  - name
+  - mime/type
+  - byte length
+  - source signature/hash
+
+- geometry
+  - raw width
+  - raw height
+  - active/cropped width/height if available
+  - orientation
+  - CFA / mosaic description
+  - samples per pixel / color planes
+
+- raw levels
+  - black level(s)
+  - white level(s)
+  - linearization info if available
+  - default crop / active area if reliable
+
+- color / WB metadata
+  - AsShotNeutral if present
+  - AsShotWhiteXY if present
+  - AnalogBalance if present
+  - CameraCalibration1/2 if present
+  - ColorMatrix1/2 if present
+  - ForwardMatrix1/2 if present
+  - calibration illuminant data if present
+  - baseline exposure if present
+  - linear response limit if present
+
+- raw image payload
+  - decoded raw samples in a known numeric format
+  - explicit layout description
+  - explicit row stride / packing description
+  - explicit endianness / element type
+
+- support / fidelity flags
+  - exact support level
+  - exact unsupported features
+  - exact disabled features
+  - exact fallbacks used
+
+This worker result should be rigidly versioned and validated.
+No vague "best effort" object shape should be allowed to flow into GPU code without schema checks.
+
+======================================================================
+E. CPU / GPU / WASM / WORKER / MAIN THREAD RESPONSIBILITIES
+======================================================================
+
+E1. Main thread
+Should own:
+- file selection entry points
+- app state updates
+- project/document state
+- GPU texture creation and upload
+- WebGL program/shader orchestration
+- live preview rendering
+- integration with the existing layer stack
+- user-facing notices/logs routing
+
+Should not own:
+- heavy DNG parsing
+- container traversal for large files when it can happen in a worker
+- fragile low-level decode logic if that can move to WASM in the DNG worker
+
+E2. Web Worker
+Should own:
+- DNG byte parsing request lifecycle
+- LibRaw module lifecycle
+- metadata extraction
+- raw decode / unpack
+- strict normalization of decoded output
+- capability and fallback reporting
+- log/progress events for DNG actions
+
+Should not own:
+- WebGL rendering
+- DOM/canvas UI logic
+- final Editor layer compositing
+
+E3. WASM module
+Should own:
+- LibRaw integration
+- deterministic decode and metadata access
+- explicit wrapper API
+- narrow exports only
+
+Should not own:
+- app-specific state machine complexity
+- browser UI logic
+- project save/load policy
+
+E4. GPU / WebGL
+Should own:
+- remosaic / demosaic path if you keep it on GPU
+- white balance application in the chosen correct stage
+- color transform pipeline
+- tone mapping
+- highlight rendering behavior
+- optional denoise/sharpen later if desired
+- real-time slider response
+
+Should not own:
+- raw container parsing
+- vendor-specific metadata hunting
+- unknown hidden assumptions that are easier to make explicit on the decode side
+
+======================================================================
+F. RECOMMENDED WRAPPING STRATEGY FOR LIBRAW
+======================================================================
+
+F1. Do not bind the entire library surface
+Recommended: write a thin native wrapper around LibRaw instead of exposing a giant low-level interface to JS.
+
+Good wrapper idea:
+- input: bytes of a DNG file
+- output: one normalized decode record plus one raw pixel buffer
+
+F2. Recommended native wrapper shape
+C/C++ wrapper entry points should be narrow, stable, and explicit.
+For example, conceptually:
+- create decoder context
+- open from memory buffer
+- inspect/probe metadata
+- decode raw data
+- copy normalized metadata into a packed result struct
+- expose raw decoded buffer pointer/size/format
+- free context
+
+F3. Why a wrapper is strongly preferred
+Without a wrapper, JS/WASM integration becomes too coupled to internal library structures and compile options.
+A wrapper lets you:
+- hide LibRaw internals
+- standardize field names
+- normalize missing values
+- version the output schema
+- enforce complete support/fallback reporting
+- swap or upgrade the backend more safely later
+
+F4. Language recommendation
+- C++ is the natural choice because LibRaw itself is C++.
+- A small C ABI surface exported from a C++ implementation is preferred for WASM interop simplicity.
+- Do not expose complex C++ class APIs directly to JS if a narrow C ABI can avoid that.
+
+======================================================================
+G. BUILD / COMPILE RECOMMENDATIONS
+======================================================================
+
+G1. Compilation posture
+Always prefer an explicit build configuration over magical dynamic behavior.
+The DNG path should always know which capabilities were compiled in.
+
+At startup or first DNG use, log:
+- whether LibRaw WASM loaded successfully
+- exact wrapper version
+- whether SIMD build loaded
+- whether fallback non-SIMD build loaded
+- whether optional DNG SDK support is present
+- whether optional demosaic packs are present
+- whether LCMS/profile support is present, if relevant
+
+G2. Emscripten direction
+The site's context file already references Emscripten-style WASM outputs and worker-oriented loading patterns elsewhere in the app. Keep the DNG WASM path aligned with that existing toolchain direction instead of introducing a second, unrelated build story.
+
+G3. Capability truthfulness
+Do not silently assume these optional LibRaw capabilities exist:
+- Adobe DNG SDK support
+- extra GPL demosaic packs
+- LCMS/profile support
+- any special vendor SDK support
+
+Every optional native capability should be:
+- explicitly compiled or not compiled
+- detectable at runtime
+- logged
+- surfaced in debug diagnostics
+
+======================================================================
+H. COLOR / RENDERING CORRECTNESS PRIORITIES
+======================================================================
+
+H1. Most important principle
+The main reason to use LibRaw here is to improve confidence in the decode stage.
+It will not automatically fix final image color unless the GPU-side development math is also corrected.
+
+H2. Priority order for quality work
+Recommended priority order:
+1. Correct metadata extraction and normalized representation
+2. Correct raw normalization (black/white level, orientation, active area, CFA layout)
+3. Correct white-balance stage and color transform stage order
+4. Correct demosaic/remosaic strategy
+5. Correct highlight handling / clipping policy
+6. Correct tone mapping / display transform
+7. Later quality improvements: denoise, sharpening, lens corrections, more advanced correction features
+
+H3. Studio-grade reality
+LibRaw by itself is not the "studio-grade" part.
+The studio-grade part comes from the correctness and quality of the site's own develop pipeline after decode.
+
+H4. Therefore
+Treat LibRaw as:
+- ground-truth helper for raw container/decode metadata
+- not as the final authority on aesthetic rendering quality
+
+======================================================================
+I. REFERENCE / ORACLE PATH RECOMMENDATION
+======================================================================
+
+I1. Strong recommendation
+Keep a CPU reference/oracle path during the rewrite, even if it is not the final live path.
+
+Why:
+- it helps isolate whether a rendering bug is in decode or in GPU math
+- it gives a known comparison output for difficult files
+- it helps validate color matrix / WB changes
+- it helps catch regressions during refactors
+
+I2. Acceptable oracle options
+Possible oracle/reference outputs:
+- LibRaw basic processed output for sanity checks only
+- existing CPU reference path if it is already present and can be trusted enough for comparison
+- external offline comparison images during development
+
+I3. Important honesty note
+The oracle path does not need to be beautiful.
+It needs to be stable and explicit enough to answer:
+"Did the decode metadata and raw values make sense before GPU rendering touched them?"
+
+======================================================================
+J. LIMITATIONS TO EXPECT, EVEN AFTER INTEGRATING LIBRAW
+======================================================================
+
+J1. Things LibRaw does not solve for you
+- final studio-grade demosaic quality by itself
+- final studio-grade color science by itself
+- phone computational photography reconstruction
+- Samsung/phone vendor ISP look matching
+- advanced highlight reconstruction policy
+- GPU-side tone mapping correctness
+- GPU-side shader bugs
+
+J2. DNG-specific complexity that may still remain difficult
+- dual-illuminant interpolation correctness
+- some opcode/gain-map cases
+- weird vendor metadata edge cases
+- linear DNG vs mosaic DNG differences
+- multi-image DNG edge cases, depending on build and file type
+- exact parity with Adobe/phone vendor rendering
+
+J3. Consequence
+Success should be measured as:
+- much more correct raw decode and metadata grounding
+- much more maintainable architecture
+- more honest support reporting
+- fewer color/path surprises caused by bad container parsing
+
+Not as:
+- perfect match to every vendor JPEG or phone pipeline
+
+======================================================================
+K. REWRITE GUIDANCE FOR CODEX / FUTURE IMPLEMENTATION WORK
+======================================================================
+
+K1. General rule
+Quality and organization are more important than preserving questionable DNG code.
+If a DNG subsystem is messy, unclear, duplicated, or causing incorrect rendering, rewriting it is acceptable.
+
+K2. Safe rewrite posture
+Prefer to preserve:
+- top-level project/document behavior that already integrates well with the rest of the app
+- Library attachment handling for raw payloads if it is already structurally sound
+- logging integration
+- the worker broker model
+- the Editor layer-stack integration point
+
+Prefer to rewrite if weak:
+- custom TIFF/DNG parsing logic
+- custom metadata interpretation logic
+- decode-stage fallback spaghetti
+- ambiguous or lossy worker result shapes
+- duplicated CPU/GPU code paths with unclear authority
+- "pretend support" code for unsupported DNG features
+
+K3. Non-negotiable cleanup standards
+The rewritten DNG path should have:
+- one explicit decode authority
+- one explicit normalized decoded payload schema
+- one explicit GPU input schema
+- one explicit support/fidelity model
+- one explicit debug/reporting surface
+- one explicit place where unsupported features are declared
+
+K4. Strongly recommended architecture rule
+Never hide uncertainty.
+If a file is partially supported, say so.
+If a feature is disabled, say so.
+If a fallback is used, say so.
+If a matrix/tag is missing, say so.
+If a value was inferred rather than explicitly supplied by the file or backend, say so.
+
+======================================================================
+L. MINIMUM ACCEPTANCE CHECKLIST FOR A "GOOD" NEW DNG PATH
+======================================================================
+
+A good rewritten DNG path should be able to answer, in code and logs:
+1. Which backend decoded this file?
+2. Which compile-time capabilities were present?
+3. Which DNG features were found?
+4. Which were used?
+5. Which were ignored?
+6. Which were disabled deliberately?
+7. What exact raw buffer format reached the GPU?
+8. What exact white/black levels were used?
+9. What exact WB metadata was used?
+10. What exact color matrices were used?
+11. What exact render mode/high-quality mode was used?
+12. Why is a file marked full, partial, or unsupported?
+
+If these cannot be answered, the path is still too opaque.
+
+======================================================================
+M. PRACTICAL FIRST IMPLEMENTATION PHASE
+======================================================================
+
+Recommended first phase:
+1. Inspect existing DNG files/code and identify what is currently authoritative vs legacy.
+2. Freeze a target worker output schema.
+3. Build a tiny LibRaw WASM wrapper that can:
+   - open from memory
+   - probe metadata
+   - decode raw data
+   - report capability flags
+4. Feed the decoded result into a debug-only inspection view/log dump first.
+5. Only after the payload is trusted, connect it to the GPU path.
+6. Compare CPU reference/oracle output vs GPU path on a small corpus of known files.
+7. Only then remove old decode logic that is no longer needed.
+
+This is safer than trying to replace decode and rendering blindly in one step.
+
+======================================================================
+N. FINAL RECOMMENDATION IN ONE SENTENCE
+======================================================================
+
+Use LibRaw as the worker-side decode and metadata authority, keep the site's GPU path as the live develop/render authority, and do not hesitate to rewrite weak DNG code if that improves correctness, clarity, and maintainability.
+
+======================================================================
+O. SOURCE NOTES
+======================================================================
+
+Site context file used
+- Whole Site Context.txt provided by the user in this conversation
+
+Official / primary research used
+- LibRaw official "About" page
+- LibRaw official API data structures documentation
+- LibRaw official samples/usage documentation
+- LibRaw official release notes describing DNG-related capabilities and optional compile flags
+- Emscripten official compiler settings documentation
+- Adobe/commonly mirrored DNG specification references for tag/pipeline terminology
+
+Important caution on source notes
+- The DNG specification references were used here only as high-level grounding for terminology and workflow direction.
+- This file deliberately avoids claiming exact current code behavior for any matrix math stage unless it was explicitly verified from the provided site context.

@@ -106,6 +106,23 @@ function createWindow() {
   // Load the index.html of the app.
   mainWindow.loadFile('index.html');
 
+  mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
+    const levelLabel = ['verbose', 'info', 'warning', 'error'][level] || String(level);
+    console.log(`[renderer:${levelLabel}] ${message} (${sourceId}:${line})`);
+  });
+
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[renderer:gone]', details);
+  });
+
+  mainWindow.webContents.on('unresponsive', () => {
+    console.error('[renderer] window became unresponsive');
+  });
+
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    console.error('[renderer:load-failed]', { errorCode, errorDescription, validatedURL });
+  });
+
   // Open the DevTools if needed (optional)
   // mainWindow.webContents.openDevTools();
 }
