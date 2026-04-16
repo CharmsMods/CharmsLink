@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\CMakeFiles\76451219713c378cb1c5781b402a121a\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{B44DE89C-A9CB-3554-BAC8-878289A0001A}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

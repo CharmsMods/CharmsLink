@@ -1,0 +1,3108 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      The system is: Windows - 10.0.26220 - AMD64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:468 (find_file)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:506 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:122 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCCompilerId.c.in"
+    candidate_directories:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/"
+    found: "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCCompilerId.c.in"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:122 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler:  
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      MSBuild version 17.14.40+3e7442088 for .NET Framework
+      Build started 4/15/2026 8:30:27 PM.
+      
+      Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdC\\CompilerIdC.vcxproj" on node 1 (default targets).
+      PrepareForBuild:
+        Creating directory "Debug\\".
+        Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+        Creating directory "Debug\\CompilerIdC.tlog\\".
+      InitializeBuildStatus:
+        Creating "Debug\\CompilerIdC.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+        Touching "Debug\\CompilerIdC.tlog\\unsuccessfulbuild".
+      ClCompile:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /nologo /W0 /WX- /diagnostics:column /Od /D _MBCS /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Debug\\\\" /Fd"Debug\\vc143.pdb" /external:W0 /Gd /TC /FC /errorReport:queue CMakeCCompilerId.c
+        CMakeCCompilerId.c
+      Link:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /ERRORREPORT:QUEUE /OUT:".\\CompilerIdC.exe" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:".\\CompilerIdC.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:".\\CompilerIdC.lib" /MACHINE:X64 Debug\\CMakeCCompilerId.obj
+        CompilerIdC.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdC\\CompilerIdC.exe
+      PostBuildEvent:
+        for %%i in (cl.exe) do @echo CMAKE_C_COMPILER=%%~$PATH:i
+        :VCEnd
+        CMAKE_C_COMPILER=C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe
+      FinalizeBuildStatus:
+        Deleting file "Debug\\CompilerIdC.tlog\\unsuccessfulbuild".
+        Touching "Debug\\CompilerIdC.tlog\\CompilerIdC.lastbuildstate".
+      Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdC\\CompilerIdC.vcxproj" (default targets).
+      
+      Build succeeded.
+          0 Warning(s)
+          0 Error(s)
+      
+      Time Elapsed 00:00:00.41
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CompilerIdC.exe"
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CompilerIdC.vcxproj"
+      
+      The C compiler identification is MSVC, found in:
+        E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/4.3.1/CompilerIdC/CompilerIdC.exe
+      
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:103 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lld-link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link"
+      - "C:/Python314/Scripts/lld-link.com"
+      - "C:/Python314/Scripts/lld-link.exe"
+      - "C:/Python314/Scripts/lld-link"
+      - "C:/Python314/lld-link.com"
+      - "C:/Python314/lld-link.exe"
+      - "C:/Python314/lld-link"
+      - "C:/Program Files/Python312/Scripts/lld-link.com"
+      - "C:/Program Files/Python312/Scripts/lld-link.exe"
+      - "C:/Program Files/Python312/Scripts/lld-link"
+      - "C:/Program Files/Python312/lld-link.com"
+      - "C:/Program Files/Python312/lld-link.exe"
+      - "C:/Program Files/Python312/lld-link"
+      - "C:/Windows/System32/lld-link.com"
+      - "C:/Windows/System32/lld-link.exe"
+      - "C:/Windows/System32/lld-link"
+      - "C:/Windows/lld-link.com"
+      - "C:/Windows/lld-link.exe"
+      - "C:/Windows/lld-link"
+      - "C:/Windows/System32/wbem/lld-link.com"
+      - "C:/Windows/System32/wbem/lld-link.exe"
+      - "C:/Windows/System32/wbem/lld-link"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link"
+      - "C:/Windows/System32/OpenSSH/lld-link.com"
+      - "C:/Windows/System32/OpenSSH/lld-link.exe"
+      - "C:/Windows/System32/OpenSSH/lld-link"
+      - "C:/Program Files/nodejs/lld-link.com"
+      - "C:/Program Files/nodejs/lld-link.exe"
+      - "C:/Program Files/nodejs/lld-link"
+      - "C:/ProgramData/chocolatey/bin/lld-link.com"
+      - "C:/ProgramData/chocolatey/bin/lld-link.exe"
+      - "C:/ProgramData/chocolatey/bin/lld-link"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link"
+      - "C:/Program Files/CMake/bin/lld-link.com"
+      - "C:/Program Files/CMake/bin/lld-link.exe"
+      - "C:/Program Files/CMake/bin/lld-link"
+      - "C:/Program Files/Git/cmd/lld-link.com"
+      - "C:/Program Files/Git/cmd/lld-link.exe"
+      - "C:/Program Files/Git/cmd/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.com"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_LINKER"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_MT"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "mt"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt"
+      - "C:/Python314/Scripts/mt.com"
+      - "C:/Python314/Scripts/mt.exe"
+      - "C:/Python314/Scripts/mt"
+      - "C:/Python314/mt.com"
+      - "C:/Python314/mt.exe"
+      - "C:/Python314/mt"
+      - "C:/Program Files/Python312/Scripts/mt.com"
+      - "C:/Program Files/Python312/Scripts/mt.exe"
+      - "C:/Program Files/Python312/Scripts/mt"
+      - "C:/Program Files/Python312/mt.com"
+      - "C:/Program Files/Python312/mt.exe"
+      - "C:/Program Files/Python312/mt"
+      - "C:/Windows/System32/mt.com"
+      - "C:/Windows/System32/mt.exe"
+      - "C:/Windows/System32/mt"
+      - "C:/Windows/mt.com"
+      - "C:/Windows/mt.exe"
+      - "C:/Windows/mt"
+      - "C:/Windows/System32/wbem/mt.com"
+      - "C:/Windows/System32/wbem/mt.exe"
+      - "C:/Windows/System32/wbem/mt"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt"
+      - "C:/Windows/System32/OpenSSH/mt.com"
+      - "C:/Windows/System32/OpenSSH/mt.exe"
+      - "C:/Windows/System32/OpenSSH/mt"
+      - "C:/Program Files/nodejs/mt.com"
+      - "C:/Program Files/nodejs/mt.exe"
+      - "C:/Program Files/nodejs/mt"
+      - "C:/ProgramData/chocolatey/bin/mt.com"
+      - "C:/ProgramData/chocolatey/bin/mt.exe"
+      - "C:/ProgramData/chocolatey/bin/mt"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/mt.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/mt.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/mt"
+      - "C:/Program Files/CMake/bin/mt.com"
+      - "C:/Program Files/CMake/bin/mt.exe"
+      - "C:/Program Files/CMake/bin/mt"
+      - "C:/Program Files/Git/cmd/mt.com"
+      - "C:/Program Files/Git/cmd/mt.exe"
+      - "C:/Program Files/Git/cmd/mt"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/mt.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/mt"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/mt.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/mt"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/mt.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/mt"
+      - "C:/Users/djhbi/AppData/Roaming/npm/mt.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/mt.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/mt"
+      - "C:/Users/djhbi/.lmstudio/bin/mt.com"
+      - "C:/Users/djhbi/.lmstudio/bin/mt.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/mt"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/mt.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/mt"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_AR"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lib"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:468 (find_file)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:506 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCXXCompilerId.cpp.in"
+    candidate_directories:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/"
+    found: "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCXXCompilerId.cpp.in"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler:  
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      MSBuild version 17.14.40+3e7442088 for .NET Framework
+      Build started 4/15/2026 8:30:28 PM.
+      
+      Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdCXX\\CompilerIdCXX.vcxproj" on node 1 (default targets).
+      PrepareForBuild:
+        Creating directory "Debug\\".
+        Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+        Creating directory "Debug\\CompilerIdCXX.tlog\\".
+      InitializeBuildStatus:
+        Creating "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+        Touching "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild".
+      ClCompile:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /nologo /W0 /WX- /diagnostics:column /Od /D _MBCS /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Debug\\\\" /Fd"Debug\\vc143.pdb" /external:W0 /Gd /TP /FC /errorReport:queue CMakeCXXCompilerId.cpp
+        CMakeCXXCompilerId.cpp
+      Link:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /ERRORREPORT:QUEUE /OUT:".\\CompilerIdCXX.exe" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:".\\CompilerIdCXX.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:".\\CompilerIdCXX.lib" /MACHINE:X64 Debug\\CMakeCXXCompilerId.obj
+        CompilerIdCXX.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdCXX\\CompilerIdCXX.exe
+      PostBuildEvent:
+        for %%i in (cl.exe) do @echo CMAKE_CXX_COMPILER=%%~$PATH:i
+        :VCEnd
+        CMAKE_CXX_COMPILER=C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe
+      FinalizeBuildStatus:
+        Deleting file "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild".
+        Touching "Debug\\CompilerIdCXX.tlog\\CompilerIdCXX.lastbuildstate".
+      Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdCXX\\CompilerIdCXX.vcxproj" (default targets).
+      
+      Build succeeded.
+          0 Warning(s)
+          0 Error(s)
+      
+      Time Elapsed 00:00:00.37
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.vcxproj"
+      
+      The CXX compiler identification is MSVC, found in:
+        E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/4.3.1/CompilerIdCXX/CompilerIdCXX.exe
+      
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lld-link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link"
+      - "C:/Python314/Scripts/lld-link.com"
+      - "C:/Python314/Scripts/lld-link.exe"
+      - "C:/Python314/Scripts/lld-link"
+      - "C:/Python314/lld-link.com"
+      - "C:/Python314/lld-link.exe"
+      - "C:/Python314/lld-link"
+      - "C:/Program Files/Python312/Scripts/lld-link.com"
+      - "C:/Program Files/Python312/Scripts/lld-link.exe"
+      - "C:/Program Files/Python312/Scripts/lld-link"
+      - "C:/Program Files/Python312/lld-link.com"
+      - "C:/Program Files/Python312/lld-link.exe"
+      - "C:/Program Files/Python312/lld-link"
+      - "C:/Windows/System32/lld-link.com"
+      - "C:/Windows/System32/lld-link.exe"
+      - "C:/Windows/System32/lld-link"
+      - "C:/Windows/lld-link.com"
+      - "C:/Windows/lld-link.exe"
+      - "C:/Windows/lld-link"
+      - "C:/Windows/System32/wbem/lld-link.com"
+      - "C:/Windows/System32/wbem/lld-link.exe"
+      - "C:/Windows/System32/wbem/lld-link"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link"
+      - "C:/Windows/System32/OpenSSH/lld-link.com"
+      - "C:/Windows/System32/OpenSSH/lld-link.exe"
+      - "C:/Windows/System32/OpenSSH/lld-link"
+      - "C:/Program Files/nodejs/lld-link.com"
+      - "C:/Program Files/nodejs/lld-link.exe"
+      - "C:/Program Files/nodejs/lld-link"
+      - "C:/ProgramData/chocolatey/bin/lld-link.com"
+      - "C:/ProgramData/chocolatey/bin/lld-link.exe"
+      - "C:/ProgramData/chocolatey/bin/lld-link"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link"
+      - "C:/Program Files/CMake/bin/lld-link.com"
+      - "C:/Program Files/CMake/bin/lld-link.exe"
+      - "C:/Program Files/CMake/bin/lld-link"
+      - "C:/Program Files/Git/cmd/lld-link.com"
+      - "C:/Program Files/Git/cmd/lld-link.exe"
+      - "C:/Program Files/Git/cmd/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.com"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineRCCompiler.cmake:40 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC.cmake:592 (enable_language)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC.cmake:565 (__windows_compiler_msvc_enable_rc)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC-C.cmake:5 (__windows_compiler_msvc)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCInformation.cmake:48 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_RC_COMPILER"
+    description: "RC compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "rc"
+    candidate_directories:
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/"
+      - "C:/Program Files (x86)/ModularStudioStack/"
+    searched_directories:
+      - "C:/Python314/Scripts/rc.com"
+      - "C:/Python314/Scripts/rc.exe"
+      - "C:/Python314/Scripts/rc"
+      - "C:/Python314/rc.com"
+      - "C:/Python314/rc.exe"
+      - "C:/Python314/rc"
+      - "C:/Program Files/Python312/Scripts/rc.com"
+      - "C:/Program Files/Python312/Scripts/rc.exe"
+      - "C:/Program Files/Python312/Scripts/rc"
+      - "C:/Program Files/Python312/rc.com"
+      - "C:/Program Files/Python312/rc.exe"
+      - "C:/Program Files/Python312/rc"
+      - "C:/Windows/System32/rc.com"
+      - "C:/Windows/System32/rc.exe"
+      - "C:/Windows/System32/rc"
+      - "C:/Windows/rc.com"
+      - "C:/Windows/rc.exe"
+      - "C:/Windows/rc"
+      - "C:/Windows/System32/wbem/rc.com"
+      - "C:/Windows/System32/wbem/rc.exe"
+      - "C:/Windows/System32/wbem/rc"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc"
+      - "C:/Windows/System32/OpenSSH/rc.com"
+      - "C:/Windows/System32/OpenSSH/rc.exe"
+      - "C:/Windows/System32/OpenSSH/rc"
+      - "C:/Program Files/nodejs/rc.com"
+      - "C:/Program Files/nodejs/rc.exe"
+      - "C:/Program Files/nodejs/rc"
+      - "C:/ProgramData/chocolatey/bin/rc.com"
+      - "C:/ProgramData/chocolatey/bin/rc.exe"
+      - "C:/ProgramData/chocolatey/bin/rc"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/rc.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/rc.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/rc"
+      - "C:/Program Files/CMake/bin/rc.com"
+      - "C:/Program Files/CMake/bin/rc.exe"
+      - "C:/Program Files/CMake/bin/rc"
+      - "C:/Program Files/Git/cmd/rc.com"
+      - "C:/Program Files/Git/cmd/rc.exe"
+      - "C:/Program Files/Git/cmd/rc"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/rc.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/rc"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/rc.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/rc"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/rc.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/rc"
+      - "C:/Users/djhbi/AppData/Roaming/npm/rc.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/rc.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/rc"
+      - "C:/Users/djhbi/.lmstudio/bin/rc.com"
+      - "C:/Users/djhbi/.lmstudio/bin/rc.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/rc"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/rc.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/rc"
+      - "C:/Program Files/bin/rc.com"
+      - "C:/Program Files/bin/rc.exe"
+      - "C:/Program Files/bin/rc"
+      - "C:/Program Files/sbin/rc.com"
+      - "C:/Program Files/sbin/rc.exe"
+      - "C:/Program Files/sbin/rc"
+      - "C:/Program Files/rc.com"
+      - "C:/Program Files/rc.exe"
+      - "C:/Program Files/rc"
+      - "C:/Program Files (x86)/bin/rc.com"
+      - "C:/Program Files (x86)/bin/rc.exe"
+      - "C:/Program Files (x86)/bin/rc"
+      - "C:/Program Files (x86)/sbin/rc.com"
+      - "C:/Program Files (x86)/sbin/rc.exe"
+      - "C:/Program Files (x86)/sbin/rc"
+      - "C:/Program Files (x86)/rc.com"
+      - "C:/Program Files (x86)/rc.exe"
+      - "C:/Program Files (x86)/rc"
+      - "C:/Program Files/CMake/bin/rc.com"
+      - "C:/Program Files/CMake/bin/rc.exe"
+      - "C:/Program Files/CMake/bin/rc"
+      - "C:/Program Files/CMake/sbin/rc.com"
+      - "C:/Program Files/CMake/sbin/rc.exe"
+      - "C:/Program Files/CMake/sbin/rc"
+      - "C:/Program Files/CMake/rc.com"
+      - "C:/Program Files/CMake/rc.exe"
+      - "C:/Program Files/CMake/rc"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/rc.com"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/rc.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/rc"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/rc.com"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/rc.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/rc"
+      - "C:/Program Files (x86)/ModularStudioStack/rc.com"
+      - "C:/Program Files (x86)/ModularStudioStack/rc.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/rc"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ModularStudioStack"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/ModularStudioStack"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-oir774"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-oir774"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-oir774'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_76d10.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/15/2026 8:30:28 PM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oir774\\cmTC_76d10.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oir774\\Debug\\".
+          Creating directory "cmTC_76d10.dir\\Debug\\cmTC_76d10.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_76d10.dir\\Debug\\cmTC_76d10.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_76d10.dir\\Debug\\cmTC_76d10.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_76d10.dir\\Debug\\\\" /Fd"cmTC_76d10.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_76d10.dir\\Debug\\\\" /Fd"cmTC_76d10.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
+          CMakeCCompilerABI.c
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oir774\\Debug\\cmTC_76d10.exe" /INCREMENTAL /ILK:"cmTC_76d10.dir\\Debug\\cmTC_76d10.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-oir774/Debug/cmTC_76d10.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-oir774/Debug/cmTC_76d10.lib" /MACHINE:X64  /machine:x64 cmTC_76d10.dir\\Debug\\CMakeCCompilerABI.obj
+          cmTC_76d10.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oir774\\Debug\\cmTC_76d10.exe
+        FinalizeBuildStatus:
+          Deleting file "cmTC_76d10.dir\\Debug\\cmTC_76d10.tlog\\unsuccessfulbuild".
+          Touching "cmTC_76d10.dir\\Debug\\cmTC_76d10.tlog\\cmTC_76d10.lastbuildstate".
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-oir774\\cmTC_76d10.vcxproj" (default targets).
+        
+        Build succeeded.
+            0 Warning(s)
+            0 Error(s)
+        
+        Time Elapsed 00:00:00.38
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
+        linker tool for 'C': C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Running the C compiler's linker: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe" "-v"
+      Microsoft (R) Incremental Linker Version 14.44.35223.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-sbtk1w"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-sbtk1w"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /EHsc"
+      CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-sbtk1w'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_78d2a.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/15/2026 8:30:29 PM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-sbtk1w\\cmTC_78d2a.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-sbtk1w\\Debug\\".
+          Creating directory "cmTC_78d2a.dir\\Debug\\cmTC_78d2a.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_78d2a.dir\\Debug\\cmTC_78d2a.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_78d2a.dir\\Debug\\cmTC_78d2a.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_78d2a.dir\\Debug\\\\" /Fd"cmTC_78d2a.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_78d2a.dir\\Debug\\\\" /Fd"cmTC_78d2a.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          CMakeCXXCompilerABI.cpp
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-sbtk1w\\Debug\\cmTC_78d2a.exe" /INCREMENTAL /ILK:"cmTC_78d2a.dir\\Debug\\cmTC_78d2a.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-sbtk1w/Debug/cmTC_78d2a.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-sbtk1w/Debug/cmTC_78d2a.lib" /MACHINE:X64  /machine:x64 cmTC_78d2a.dir\\Debug\\CMakeCXXCompilerABI.obj
+          cmTC_78d2a.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-sbtk1w\\Debug\\cmTC_78d2a.exe
+        FinalizeBuildStatus:
+          Deleting file "cmTC_78d2a.dir\\Debug\\cmTC_78d2a.tlog\\unsuccessfulbuild".
+          Touching "cmTC_78d2a.dir\\Debug\\cmTC_78d2a.tlog\\cmTC_78d2a.lastbuildstate".
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-sbtk1w\\cmTC_78d2a.vcxproj" (default targets).
+        
+        Build succeeded.
+            0 Warning(s)
+            0 Error(s)
+        
+        Time Elapsed 00:00:00.36
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
+        linker tool for 'CXX': C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Running the CXX compiler's linker: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe" "-v"
+      Microsoft (R) Incremental Linker Version 14.44.35223.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindGit.cmake:111 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1887 (find_package)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1622 (__FetchContent_populateSubbuild)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158:EVAL:2 (__FetchContent_doPopulation)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158 (cmake_language)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2399 (__FetchContent_Populate)"
+      - "CMakeLists.txt:26 (FetchContent_MakeAvailable)"
+    mode: "program"
+    variable: "GIT_EXECUTABLE"
+    description: "Git command line client"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "git.cmd"
+      - "git"
+    candidate_directories:
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/"
+      - "C:/Program Files (x86)/ModularStudioStack/"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/"
+    searched_directories:
+      - "C:/Python314/Scripts/git.cmd.com"
+      - "C:/Python314/Scripts/git.cmd.exe"
+      - "C:/Python314/Scripts/git.cmd"
+      - "C:/Python314/git.cmd.com"
+      - "C:/Python314/git.cmd.exe"
+      - "C:/Python314/git.cmd"
+      - "C:/Program Files/Python312/Scripts/git.cmd.com"
+      - "C:/Program Files/Python312/Scripts/git.cmd.exe"
+      - "C:/Program Files/Python312/Scripts/git.cmd"
+      - "C:/Program Files/Python312/git.cmd.com"
+      - "C:/Program Files/Python312/git.cmd.exe"
+      - "C:/Program Files/Python312/git.cmd"
+      - "C:/Windows/System32/git.cmd.com"
+      - "C:/Windows/System32/git.cmd.exe"
+      - "C:/Windows/System32/git.cmd"
+      - "C:/Windows/git.cmd.com"
+      - "C:/Windows/git.cmd.exe"
+      - "C:/Windows/git.cmd"
+      - "C:/Windows/System32/wbem/git.cmd.com"
+      - "C:/Windows/System32/wbem/git.cmd.exe"
+      - "C:/Windows/System32/wbem/git.cmd"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.cmd.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.cmd.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.cmd"
+      - "C:/Windows/System32/OpenSSH/git.cmd.com"
+      - "C:/Windows/System32/OpenSSH/git.cmd.exe"
+      - "C:/Windows/System32/OpenSSH/git.cmd"
+      - "C:/Program Files/nodejs/git.cmd.com"
+      - "C:/Program Files/nodejs/git.cmd.exe"
+      - "C:/Program Files/nodejs/git.cmd"
+      - "C:/ProgramData/chocolatey/bin/git.cmd.com"
+      - "C:/ProgramData/chocolatey/bin/git.cmd.exe"
+      - "C:/ProgramData/chocolatey/bin/git.cmd"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.cmd.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.cmd.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.cmd"
+      - "C:/Program Files/CMake/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/git.cmd"
+      - "C:/Program Files/Git/cmd/git.cmd.com"
+      - "C:/Program Files/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/Git/cmd/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/git.cmd"
+      - "C:/Users/djhbi/AppData/Roaming/npm/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/git.cmd"
+      - "C:/Users/djhbi/.lmstudio/bin/git.cmd.com"
+      - "C:/Users/djhbi/.lmstudio/bin/git.cmd.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/git.cmd"
+      - "C:/Program Files/bin/git.cmd.com"
+      - "C:/Program Files/bin/git.cmd.exe"
+      - "C:/Program Files/bin/git.cmd"
+      - "C:/Program Files/sbin/git.cmd.com"
+      - "C:/Program Files/sbin/git.cmd.exe"
+      - "C:/Program Files/sbin/git.cmd"
+      - "C:/Program Files/git.cmd.com"
+      - "C:/Program Files/git.cmd.exe"
+      - "C:/Program Files/git.cmd"
+      - "C:/Program Files (x86)/bin/git.cmd.com"
+      - "C:/Program Files (x86)/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/bin/git.cmd"
+      - "C:/Program Files (x86)/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/sbin/git.cmd"
+      - "C:/Program Files (x86)/git.cmd.com"
+      - "C:/Program Files (x86)/git.cmd.exe"
+      - "C:/Program Files (x86)/git.cmd"
+      - "C:/Program Files/CMake/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/git.cmd"
+      - "C:/Program Files/CMake/sbin/git.cmd.com"
+      - "C:/Program Files/CMake/sbin/git.cmd.exe"
+      - "C:/Program Files/CMake/sbin/git.cmd"
+      - "C:/Program Files/CMake/git.cmd.com"
+      - "C:/Program Files/CMake/git.cmd.exe"
+      - "C:/Program Files/CMake/git.cmd"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/git.cmd.com"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/git.cmd"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/git.cmd"
+      - "C:/Program Files (x86)/ModularStudioStack/git.cmd.com"
+      - "C:/Program Files (x86)/ModularStudioStack/git.cmd.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd"
+      - "C:/Python314/Scripts/git.com"
+      - "C:/Python314/Scripts/git.exe"
+      - "C:/Python314/Scripts/git"
+      - "C:/Python314/git.com"
+      - "C:/Python314/git.exe"
+      - "C:/Python314/git"
+      - "C:/Program Files/Python312/Scripts/git.com"
+      - "C:/Program Files/Python312/Scripts/git.exe"
+      - "C:/Program Files/Python312/Scripts/git"
+      - "C:/Program Files/Python312/git.com"
+      - "C:/Program Files/Python312/git.exe"
+      - "C:/Program Files/Python312/git"
+      - "C:/Windows/System32/git.com"
+      - "C:/Windows/System32/git.exe"
+      - "C:/Windows/System32/git"
+      - "C:/Windows/git.com"
+      - "C:/Windows/git.exe"
+      - "C:/Windows/git"
+      - "C:/Windows/System32/wbem/git.com"
+      - "C:/Windows/System32/wbem/git.exe"
+      - "C:/Windows/System32/wbem/git"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git"
+      - "C:/Windows/System32/OpenSSH/git.com"
+      - "C:/Windows/System32/OpenSSH/git.exe"
+      - "C:/Windows/System32/OpenSSH/git"
+      - "C:/Program Files/nodejs/git.com"
+      - "C:/Program Files/nodejs/git.exe"
+      - "C:/Program Files/nodejs/git"
+      - "C:/ProgramData/chocolatey/bin/git.com"
+      - "C:/ProgramData/chocolatey/bin/git.exe"
+      - "C:/ProgramData/chocolatey/bin/git"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git"
+      - "C:/Program Files/CMake/bin/git.com"
+      - "C:/Program Files/CMake/bin/git.exe"
+      - "C:/Program Files/CMake/bin/git"
+      - "C:/Program Files/Git/cmd/git.com"
+    found: "C:/Program Files/Git/cmd/git.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ModularStudioStack"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/ModularStudioStack"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CheckSourceCompiles.cmake:104 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCSourceCompiles.cmake:103 (cmake_check_source_compiles)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:160 (check_c_source_compiles)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:226 (_threads_check_libc)"
+      - "build/_deps/glfw-src/CMakeLists.txt:60 (find_package)"
+    checks:
+      - "Performing Test CMAKE_HAVE_LIBC_PTHREAD"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-yrejxn"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-yrejxn"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+      CMAKE_MODULE_PATH: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-src/CMake/modules"
+    buildResult:
+      variable: "CMAKE_HAVE_LIBC_PTHREAD"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-yrejxn'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_10967.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/15/2026 8:30:39 PM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\cmTC_10967.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\Debug\\".
+          Creating directory "cmTC_10967.dir\\Debug\\cmTC_10967.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_10967.dir\\Debug\\cmTC_10967.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_10967.dir\\Debug\\cmTC_10967.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CMAKE_HAVE_LIBC_PTHREAD /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_10967.dir\\Debug\\\\" /Fd"cmTC_10967.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\src.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CMAKE_HAVE_LIBC_PTHREAD /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_10967.dir\\Debug\\\\" /Fd"cmTC_10967.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\src.c"
+          src.c
+        E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\src.c(1,10): error C1083: Cannot open include file: 'pthread.h': No such file or directory [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\cmTC_10967.vcxproj]
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\cmTC_10967.vcxproj" (default targets) -- FAILED.
+        
+        Build FAILED.
+        
+        "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\cmTC_10967.vcxproj" (default target) (1) ->
+        (ClCompile target) -> 
+          E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\src.c(1,10): error C1083: Cannot open include file: 'pthread.h': No such file or directory [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-yrejxn\\cmTC_10967.vcxproj]
+        
+            0 Warning(s)
+            1 Error(s)
+        
+        Time Elapsed 00:00:00.33
+        
+      exitCode: 1
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CheckLibraryExists.cmake:154 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:175 (check_library_exists)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:238 (_threads_check_lib)"
+      - "build/_deps/glfw-src/CMakeLists.txt:60 (find_package)"
+    checks:
+      - "Looking for pthread_create in pthreads"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-e6xoq4"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-e6xoq4"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+      CMAKE_MODULE_PATH: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-src/CMake/modules"
+    buildResult:
+      variable: "CMAKE_HAVE_PTHREADS_CREATE"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-e6xoq4'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_227cd.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/15/2026 8:30:39 PM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\cmTC_227cd.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\Debug\\".
+          Creating directory "cmTC_227cd.dir\\Debug\\cmTC_227cd.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_227cd.dir\\Debug\\cmTC_227cd.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_227cd.dir\\Debug\\cmTC_227cd.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_227cd.dir\\Debug\\\\" /Fd"cmTC_227cd.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\CheckFunctionExists.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_227cd.dir\\Debug\\\\" /Fd"cmTC_227cd.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\CheckFunctionExists.c"
+          CheckFunctionExists.c
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\Debug\\cmTC_227cd.exe" /INCREMENTAL /ILK:"cmTC_227cd.dir\\Debug\\cmTC_227cd.ilk" /NOLOGO pthreads.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-e6xoq4/Debug/cmTC_227cd.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-e6xoq4/Debug/cmTC_227cd.lib" /MACHINE:X64  /machine:x64 cmTC_227cd.dir\\Debug\\CheckFunctionExists.obj
+        LINK : fatal error LNK1104: cannot open file 'pthreads.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\cmTC_227cd.vcxproj]
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\cmTC_227cd.vcxproj" (default targets) -- FAILED.
+        
+        Build FAILED.
+        
+        "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\cmTC_227cd.vcxproj" (default target) (1) ->
+        (Link target) -> 
+          LINK : fatal error LNK1104: cannot open file 'pthreads.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-e6xoq4\\cmTC_227cd.vcxproj]
+        
+            0 Warning(s)
+            1 Error(s)
+        
+        Time Elapsed 00:00:00.29
+        
+      exitCode: 1
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CheckLibraryExists.cmake:154 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:175 (check_library_exists)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:239 (_threads_check_lib)"
+      - "build/_deps/glfw-src/CMakeLists.txt:60 (find_package)"
+    checks:
+      - "Looking for pthread_create in pthread"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-9f9ped"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-9f9ped"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+      CMAKE_MODULE_PATH: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-src/CMake/modules"
+    buildResult:
+      variable: "CMAKE_HAVE_PTHREAD_CREATE"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-9f9ped'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_57121.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/15/2026 8:30:40 PM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\cmTC_57121.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\Debug\\".
+          Creating directory "cmTC_57121.dir\\Debug\\cmTC_57121.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_57121.dir\\Debug\\cmTC_57121.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_57121.dir\\Debug\\cmTC_57121.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_57121.dir\\Debug\\\\" /Fd"cmTC_57121.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\CheckFunctionExists.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_57121.dir\\Debug\\\\" /Fd"cmTC_57121.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\CheckFunctionExists.c"
+          CheckFunctionExists.c
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\Debug\\cmTC_57121.exe" /INCREMENTAL /ILK:"cmTC_57121.dir\\Debug\\cmTC_57121.ilk" /NOLOGO pthread.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-9f9ped/Debug/cmTC_57121.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-9f9ped/Debug/cmTC_57121.lib" /MACHINE:X64  /machine:x64 cmTC_57121.dir\\Debug\\CheckFunctionExists.obj
+        LINK : fatal error LNK1104: cannot open file 'pthread.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\cmTC_57121.vcxproj]
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\cmTC_57121.vcxproj" (default targets) -- FAILED.
+        
+        Build FAILED.
+        
+        "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\cmTC_57121.vcxproj" (default target) (1) ->
+        (Link target) -> 
+          LINK : fatal error LNK1104: cannot open file 'pthread.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-9f9ped\\cmTC_57121.vcxproj]
+        
+            0 Warning(s)
+            1 Error(s)
+        
+        Time Elapsed 00:00:00.29
+        
+      exitCode: 1
+...
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineSystem.cmake:212 (message)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      The system is: Windows - 10.0.26220 - AMD64
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:468 (find_file)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:506 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:122 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCCompilerId.c.in"
+    candidate_directories:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/"
+    found: "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCCompilerId.c.in"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:122 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler:  
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      MSBuild version 17.14.40+3e7442088 for .NET Framework
+      Build started 4/16/2026 12:00:04 AM.
+      
+      Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdC\\CompilerIdC.vcxproj" on node 1 (default targets).
+      PrepareForBuild:
+        Creating directory "Debug\\".
+        Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+        Creating directory "Debug\\CompilerIdC.tlog\\".
+      InitializeBuildStatus:
+        Creating "Debug\\CompilerIdC.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+        Touching "Debug\\CompilerIdC.tlog\\unsuccessfulbuild".
+      ClCompile:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /nologo /W0 /WX- /diagnostics:column /Od /D _MBCS /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Debug\\\\" /Fd"Debug\\vc143.pdb" /external:W0 /Gd /TC /FC /errorReport:queue CMakeCCompilerId.c
+        CMakeCCompilerId.c
+      Link:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /ERRORREPORT:QUEUE /OUT:".\\CompilerIdC.exe" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:".\\CompilerIdC.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:".\\CompilerIdC.lib" /MACHINE:X64 Debug\\CMakeCCompilerId.obj
+        CompilerIdC.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdC\\CompilerIdC.exe
+      PostBuildEvent:
+        for %%i in (cl.exe) do @echo CMAKE_C_COMPILER=%%~$PATH:i
+        :VCEnd
+        CMAKE_C_COMPILER=C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe
+      FinalizeBuildStatus:
+        Deleting file "Debug\\CompilerIdC.tlog\\unsuccessfulbuild".
+        Touching "Debug\\CompilerIdC.tlog\\CompilerIdC.lastbuildstate".
+      Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdC\\CompilerIdC.vcxproj" (default targets).
+      
+      Build succeeded.
+          0 Warning(s)
+          0 Error(s)
+      
+      Time Elapsed 00:00:00.41
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CompilerIdC.exe"
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CompilerIdC.vcxproj"
+      
+      The C compiler identification is MSVC, found in:
+        E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/4.3.1/CompilerIdC/CompilerIdC.exe
+      
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:103 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lld-link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link"
+      - "C:/Python314/Scripts/lld-link.com"
+      - "C:/Python314/Scripts/lld-link.exe"
+      - "C:/Python314/Scripts/lld-link"
+      - "C:/Python314/lld-link.com"
+      - "C:/Python314/lld-link.exe"
+      - "C:/Python314/lld-link"
+      - "C:/Program Files/Python312/Scripts/lld-link.com"
+      - "C:/Program Files/Python312/Scripts/lld-link.exe"
+      - "C:/Program Files/Python312/Scripts/lld-link"
+      - "C:/Program Files/Python312/lld-link.com"
+      - "C:/Program Files/Python312/lld-link.exe"
+      - "C:/Program Files/Python312/lld-link"
+      - "C:/Windows/System32/lld-link.com"
+      - "C:/Windows/System32/lld-link.exe"
+      - "C:/Windows/System32/lld-link"
+      - "C:/Windows/lld-link.com"
+      - "C:/Windows/lld-link.exe"
+      - "C:/Windows/lld-link"
+      - "C:/Windows/System32/wbem/lld-link.com"
+      - "C:/Windows/System32/wbem/lld-link.exe"
+      - "C:/Windows/System32/wbem/lld-link"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link"
+      - "C:/Windows/System32/OpenSSH/lld-link.com"
+      - "C:/Windows/System32/OpenSSH/lld-link.exe"
+      - "C:/Windows/System32/OpenSSH/lld-link"
+      - "C:/Program Files/nodejs/lld-link.com"
+      - "C:/Program Files/nodejs/lld-link.exe"
+      - "C:/Program Files/nodejs/lld-link"
+      - "C:/ProgramData/chocolatey/bin/lld-link.com"
+      - "C:/ProgramData/chocolatey/bin/lld-link.exe"
+      - "C:/ProgramData/chocolatey/bin/lld-link"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link"
+      - "C:/Program Files/CMake/bin/lld-link.com"
+      - "C:/Program Files/CMake/bin/lld-link.exe"
+      - "C:/Program Files/CMake/bin/lld-link"
+      - "C:/Program Files/Git/cmd/lld-link.com"
+      - "C:/Program Files/Git/cmd/lld-link.exe"
+      - "C:/Program Files/Git/cmd/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.com"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_LINKER"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_MT"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "mt"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/mt"
+      - "C:/Python314/Scripts/mt.com"
+      - "C:/Python314/Scripts/mt.exe"
+      - "C:/Python314/Scripts/mt"
+      - "C:/Python314/mt.com"
+      - "C:/Python314/mt.exe"
+      - "C:/Python314/mt"
+      - "C:/Program Files/Python312/Scripts/mt.com"
+      - "C:/Program Files/Python312/Scripts/mt.exe"
+      - "C:/Program Files/Python312/Scripts/mt"
+      - "C:/Program Files/Python312/mt.com"
+      - "C:/Program Files/Python312/mt.exe"
+      - "C:/Program Files/Python312/mt"
+      - "C:/Windows/System32/mt.com"
+      - "C:/Windows/System32/mt.exe"
+      - "C:/Windows/System32/mt"
+      - "C:/Windows/mt.com"
+      - "C:/Windows/mt.exe"
+      - "C:/Windows/mt"
+      - "C:/Windows/System32/wbem/mt.com"
+      - "C:/Windows/System32/wbem/mt.exe"
+      - "C:/Windows/System32/wbem/mt"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/mt"
+      - "C:/Windows/System32/OpenSSH/mt.com"
+      - "C:/Windows/System32/OpenSSH/mt.exe"
+      - "C:/Windows/System32/OpenSSH/mt"
+      - "C:/Program Files/nodejs/mt.com"
+      - "C:/Program Files/nodejs/mt.exe"
+      - "C:/Program Files/nodejs/mt"
+      - "C:/ProgramData/chocolatey/bin/mt.com"
+      - "C:/ProgramData/chocolatey/bin/mt.exe"
+      - "C:/ProgramData/chocolatey/bin/mt"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/mt.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/mt.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/mt"
+      - "C:/Program Files/CMake/bin/mt.com"
+      - "C:/Program Files/CMake/bin/mt.exe"
+      - "C:/Program Files/CMake/bin/mt"
+      - "C:/Program Files/Git/cmd/mt.com"
+      - "C:/Program Files/Git/cmd/mt.exe"
+      - "C:/Program Files/Git/cmd/mt"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/mt.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/mt"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/mt.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/mt"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/mt.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/mt"
+      - "C:/Users/djhbi/AppData/Roaming/npm/mt.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/mt.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/mt"
+      - "C:/Users/djhbi/.lmstudio/bin/mt.com"
+      - "C:/Users/djhbi/.lmstudio/bin/mt.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/mt"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/mt.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/mt.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/mt"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:243 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCCompiler.cmake:200 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_AR"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lib"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.com"
+    found: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lib.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:468 (find_file)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:506 (CMAKE_DETERMINE_COMPILER_ID_WRITE)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:8 (CMAKE_DETERMINE_COMPILER_ID_BUILD)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "file"
+    variable: "src_in"
+    description: "Path to a file."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "CMakeCXXCompilerId.cpp.in"
+    candidate_directories:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/"
+    found: "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCXXCompilerId.cpp.in"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:125 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler:  
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      MSBuild version 17.14.40+3e7442088 for .NET Framework
+      Build started 4/16/2026 12:00:04 AM.
+      
+      Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdCXX\\CompilerIdCXX.vcxproj" on node 1 (default targets).
+      PrepareForBuild:
+        Creating directory "Debug\\".
+        Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+        Creating directory "Debug\\CompilerIdCXX.tlog\\".
+      InitializeBuildStatus:
+        Creating "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+        Touching "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild".
+      ClCompile:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /nologo /W0 /WX- /diagnostics:column /Od /D _MBCS /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Debug\\\\" /Fd"Debug\\vc143.pdb" /external:W0 /Gd /TP /FC /errorReport:queue CMakeCXXCompilerId.cpp
+        CMakeCXXCompilerId.cpp
+      Link:
+        C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /ERRORREPORT:QUEUE /OUT:".\\CompilerIdCXX.exe" /INCREMENTAL:NO /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /PDB:".\\CompilerIdCXX.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:".\\CompilerIdCXX.lib" /MACHINE:X64 Debug\\CMakeCXXCompilerId.obj
+        CompilerIdCXX.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdCXX\\CompilerIdCXX.exe
+      PostBuildEvent:
+        for %%i in (cl.exe) do @echo CMAKE_CXX_COMPILER=%%~$PATH:i
+        :VCEnd
+        CMAKE_CXX_COMPILER=C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe
+      FinalizeBuildStatus:
+        Deleting file "Debug\\CompilerIdCXX.tlog\\unsuccessfulbuild".
+        Touching "Debug\\CompilerIdCXX.tlog\\CompilerIdCXX.lastbuildstate".
+      Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\4.3.1\\CompilerIdCXX\\CompilerIdCXX.vcxproj" (default targets).
+      
+      Build succeeded.
+          0 Warning(s)
+          0 Error(s)
+      
+      Time Elapsed 00:00:00.38
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.vcxproj"
+      
+      The CXX compiler identification is MSVC, found in:
+        E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/4.3.1/CompilerIdCXX/CompilerIdCXX.exe
+      
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:37 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:65 (__resolve_tool_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeFindBinUtils.cmake:104 (__resolve_linker_path)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCXXCompiler.cmake:206 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "_CMAKE_TOOL_WITH_PATH"
+    description: "Path to a program."
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: false
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: false
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "lld-link"
+    candidate_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/"
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+    searched_directories:
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.com"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link.exe"
+      - "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/lld-link"
+      - "C:/Python314/Scripts/lld-link.com"
+      - "C:/Python314/Scripts/lld-link.exe"
+      - "C:/Python314/Scripts/lld-link"
+      - "C:/Python314/lld-link.com"
+      - "C:/Python314/lld-link.exe"
+      - "C:/Python314/lld-link"
+      - "C:/Program Files/Python312/Scripts/lld-link.com"
+      - "C:/Program Files/Python312/Scripts/lld-link.exe"
+      - "C:/Program Files/Python312/Scripts/lld-link"
+      - "C:/Program Files/Python312/lld-link.com"
+      - "C:/Program Files/Python312/lld-link.exe"
+      - "C:/Program Files/Python312/lld-link"
+      - "C:/Windows/System32/lld-link.com"
+      - "C:/Windows/System32/lld-link.exe"
+      - "C:/Windows/System32/lld-link"
+      - "C:/Windows/lld-link.com"
+      - "C:/Windows/lld-link.exe"
+      - "C:/Windows/lld-link"
+      - "C:/Windows/System32/wbem/lld-link.com"
+      - "C:/Windows/System32/wbem/lld-link.exe"
+      - "C:/Windows/System32/wbem/lld-link"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/lld-link"
+      - "C:/Windows/System32/OpenSSH/lld-link.com"
+      - "C:/Windows/System32/OpenSSH/lld-link.exe"
+      - "C:/Windows/System32/OpenSSH/lld-link"
+      - "C:/Program Files/nodejs/lld-link.com"
+      - "C:/Program Files/nodejs/lld-link.exe"
+      - "C:/Program Files/nodejs/lld-link"
+      - "C:/ProgramData/chocolatey/bin/lld-link.com"
+      - "C:/ProgramData/chocolatey/bin/lld-link.exe"
+      - "C:/ProgramData/chocolatey/bin/lld-link"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/lld-link"
+      - "C:/Program Files/CMake/bin/lld-link.com"
+      - "C:/Program Files/CMake/bin/lld-link.exe"
+      - "C:/Program Files/CMake/bin/lld-link"
+      - "C:/Program Files/Git/cmd/lld-link.com"
+      - "C:/Program Files/Git/cmd/lld-link.exe"
+      - "C:/Program Files/Git/cmd/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/lld-link"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/lld-link"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.com"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/lld-link"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/lld-link"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineRCCompiler.cmake:40 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC.cmake:592 (enable_language)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC.cmake:565 (__windows_compiler_msvc_enable_rc)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Platform/Windows-MSVC-C.cmake:5 (__windows_compiler_msvc)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeCInformation.cmake:48 (include)"
+      - "CMakeLists.txt:2 (project)"
+    mode: "program"
+    variable: "CMAKE_RC_COMPILER"
+    description: "RC compiler"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "rc"
+    candidate_directories:
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/"
+      - "C:/Program Files (x86)/ModularStudioStack/"
+    searched_directories:
+      - "C:/Python314/Scripts/rc.com"
+      - "C:/Python314/Scripts/rc.exe"
+      - "C:/Python314/Scripts/rc"
+      - "C:/Python314/rc.com"
+      - "C:/Python314/rc.exe"
+      - "C:/Python314/rc"
+      - "C:/Program Files/Python312/Scripts/rc.com"
+      - "C:/Program Files/Python312/Scripts/rc.exe"
+      - "C:/Program Files/Python312/Scripts/rc"
+      - "C:/Program Files/Python312/rc.com"
+      - "C:/Program Files/Python312/rc.exe"
+      - "C:/Program Files/Python312/rc"
+      - "C:/Windows/System32/rc.com"
+      - "C:/Windows/System32/rc.exe"
+      - "C:/Windows/System32/rc"
+      - "C:/Windows/rc.com"
+      - "C:/Windows/rc.exe"
+      - "C:/Windows/rc"
+      - "C:/Windows/System32/wbem/rc.com"
+      - "C:/Windows/System32/wbem/rc.exe"
+      - "C:/Windows/System32/wbem/rc"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/rc"
+      - "C:/Windows/System32/OpenSSH/rc.com"
+      - "C:/Windows/System32/OpenSSH/rc.exe"
+      - "C:/Windows/System32/OpenSSH/rc"
+      - "C:/Program Files/nodejs/rc.com"
+      - "C:/Program Files/nodejs/rc.exe"
+      - "C:/Program Files/nodejs/rc"
+      - "C:/ProgramData/chocolatey/bin/rc.com"
+      - "C:/ProgramData/chocolatey/bin/rc.exe"
+      - "C:/ProgramData/chocolatey/bin/rc"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/rc.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/rc.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/rc"
+      - "C:/Program Files/CMake/bin/rc.com"
+      - "C:/Program Files/CMake/bin/rc.exe"
+      - "C:/Program Files/CMake/bin/rc"
+      - "C:/Program Files/Git/cmd/rc.com"
+      - "C:/Program Files/Git/cmd/rc.exe"
+      - "C:/Program Files/Git/cmd/rc"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/rc.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/rc"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/rc.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/rc"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/rc.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/rc"
+      - "C:/Users/djhbi/AppData/Roaming/npm/rc.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/rc.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/rc"
+      - "C:/Users/djhbi/.lmstudio/bin/rc.com"
+      - "C:/Users/djhbi/.lmstudio/bin/rc.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/rc"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/rc.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/rc.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/rc"
+      - "C:/Program Files/bin/rc.com"
+      - "C:/Program Files/bin/rc.exe"
+      - "C:/Program Files/bin/rc"
+      - "C:/Program Files/sbin/rc.com"
+      - "C:/Program Files/sbin/rc.exe"
+      - "C:/Program Files/sbin/rc"
+      - "C:/Program Files/rc.com"
+      - "C:/Program Files/rc.exe"
+      - "C:/Program Files/rc"
+      - "C:/Program Files (x86)/bin/rc.com"
+      - "C:/Program Files (x86)/bin/rc.exe"
+      - "C:/Program Files (x86)/bin/rc"
+      - "C:/Program Files (x86)/sbin/rc.com"
+      - "C:/Program Files (x86)/sbin/rc.exe"
+      - "C:/Program Files (x86)/sbin/rc"
+      - "C:/Program Files (x86)/rc.com"
+      - "C:/Program Files (x86)/rc.exe"
+      - "C:/Program Files (x86)/rc"
+      - "C:/Program Files/CMake/bin/rc.com"
+      - "C:/Program Files/CMake/bin/rc.exe"
+      - "C:/Program Files/CMake/bin/rc"
+      - "C:/Program Files/CMake/sbin/rc.com"
+      - "C:/Program Files/CMake/sbin/rc.exe"
+      - "C:/Program Files/CMake/sbin/rc"
+      - "C:/Program Files/CMake/rc.com"
+      - "C:/Program Files/CMake/rc.exe"
+      - "C:/Program Files/CMake/rc"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/rc.com"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/rc.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/rc"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/rc.com"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/rc.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/rc"
+      - "C:/Program Files (x86)/ModularStudioStack/rc.com"
+      - "C:/Program Files (x86)/ModularStudioStack/rc.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/rc"
+    found: false
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ModularStudioStack"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/ModularStudioStack"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-imxcy6"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-imxcy6"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-imxcy6'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_6d6a1.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/16/2026 12:00:05 AM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-imxcy6\\cmTC_6d6a1.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-imxcy6\\Debug\\".
+          Creating directory "cmTC_6d6a1.dir\\Debug\\cmTC_6d6a1.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_6d6a1.dir\\Debug\\cmTC_6d6a1.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_6d6a1.dir\\Debug\\cmTC_6d6a1.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_6d6a1.dir\\Debug\\\\" /Fd"cmTC_6d6a1.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_6d6a1.dir\\Debug\\\\" /Fd"cmTC_6d6a1.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCCompilerABI.c"
+          CMakeCCompilerABI.c
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-imxcy6\\Debug\\cmTC_6d6a1.exe" /INCREMENTAL /ILK:"cmTC_6d6a1.dir\\Debug\\cmTC_6d6a1.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-imxcy6/Debug/cmTC_6d6a1.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-imxcy6/Debug/cmTC_6d6a1.lib" /MACHINE:X64  /machine:x64 cmTC_6d6a1.dir\\Debug\\CMakeCCompilerABI.obj
+          cmTC_6d6a1.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-imxcy6\\Debug\\cmTC_6d6a1.exe
+        FinalizeBuildStatus:
+          Deleting file "cmTC_6d6a1.dir\\Debug\\cmTC_6d6a1.tlog\\unsuccessfulbuild".
+          Touching "cmTC_6d6a1.dir\\Debug\\cmTC_6d6a1.tlog\\cmTC_6d6a1.lastbuildstate".
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-imxcy6\\cmTC_6d6a1.vcxproj" (default targets).
+        
+        Build succeeded.
+            0 Warning(s)
+            0 Error(s)
+        
+        Time Elapsed 00:00:00.38
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
+        linker tool for 'C': C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Running the C compiler's linker: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe" "-v"
+      Microsoft (R) Incremental Linker Version 14.44.35223.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:83 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-73gobx"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-73gobx"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: "/DWIN32 /D_WINDOWS /EHsc"
+      CMAKE_CXX_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-73gobx'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_54197.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/16/2026 12:00:06 AM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-73gobx\\cmTC_54197.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-73gobx\\Debug\\".
+          Creating directory "cmTC_54197.dir\\Debug\\cmTC_54197.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_54197.dir\\Debug\\cmTC_54197.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_54197.dir\\Debug\\cmTC_54197.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_54197.dir\\Debug\\\\" /Fd"cmTC_54197.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /EHsc /RTC1 /MDd /Fo"cmTC_54197.dir\\Debug\\\\" /Fd"cmTC_54197.dir\\Debug\\vc143.pdb" /external:W1 /TP /errorReport:queue "C:\\Program Files\\CMake\\share\\cmake-4.3\\Modules\\CMakeCXXCompilerABI.cpp"
+          CMakeCXXCompilerABI.cpp
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-73gobx\\Debug\\cmTC_54197.exe" /INCREMENTAL /ILK:"cmTC_54197.dir\\Debug\\cmTC_54197.ilk" /NOLOGO kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-73gobx/Debug/cmTC_54197.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-73gobx/Debug/cmTC_54197.lib" /MACHINE:X64  /machine:x64 cmTC_54197.dir\\Debug\\CMakeCXXCompilerABI.obj
+          cmTC_54197.vcxproj -> E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-73gobx\\Debug\\cmTC_54197.exe
+        FinalizeBuildStatus:
+          Deleting file "cmTC_54197.dir\\Debug\\cmTC_54197.tlog\\unsuccessfulbuild".
+          Touching "cmTC_54197.dir\\Debug\\cmTC_54197.tlog\\cmTC_54197.lastbuildstate".
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-73gobx\\cmTC_54197.vcxproj" (default targets).
+        
+        Build succeeded.
+            0 Warning(s)
+            0 Error(s)
+        
+        Time Elapsed 00:00:00.37
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:253 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|"|[0-9]+>[ 	-]*Build:[ 	0-9]+ ms[ 	]*)?[ 	]*(([^"]*[/\\])?(ld[0-9]*(|\\.[a-rt-z][a-z]*|\\.s[a-np-z][a-z]*|\\.so[a-z]+)|link\\.exe|lld-link(\\.exe)?))("|,| |$)]
+        linker tool for 'CXX': C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe
+        implicit libs: []
+        implicit objs: []
+        implicit dirs: []
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CMakeDetermineLinkerId.cmake:38 (message)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeDetermineCompilerABI.cmake:299 (cmake_determine_linker_id)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:2 (project)"
+    message: |
+      Running the CXX compiler's linker: "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/HostX64/x64/link.exe" "-v"
+      Microsoft (R) Incremental Linker Version 14.44.35223.0
+      Copyright (C) Microsoft Corporation.  All rights reserved.
+  -
+    kind: "find-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindGit.cmake:111 (find_program)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1887 (find_package)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:1622 (__FetchContent_populateSubbuild)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158:EVAL:2 (__FetchContent_doPopulation)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2158 (cmake_language)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FetchContent.cmake:2399 (__FetchContent_Populate)"
+      - "CMakeLists.txt:26 (FetchContent_MakeAvailable)"
+    mode: "program"
+    variable: "GIT_EXECUTABLE"
+    description: "Git command line client"
+    settings:
+      SearchFramework: "NEVER"
+      SearchAppBundle: "NEVER"
+      CMAKE_FIND_USE_CMAKE_PATH: true
+      CMAKE_FIND_USE_CMAKE_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_SYSTEM_ENVIRONMENT_PATH: true
+      CMAKE_FIND_USE_CMAKE_SYSTEM_PATH: true
+      CMAKE_FIND_USE_INSTALL_PREFIX: true
+    names:
+      - "git.cmd"
+      - "git"
+    candidate_directories:
+      - "C:/Python314/Scripts/"
+      - "C:/Python314/"
+      - "C:/Program Files/Python312/Scripts/"
+      - "C:/Program Files/Python312/"
+      - "C:/Windows/System32/"
+      - "C:/Windows/"
+      - "C:/Windows/System32/wbem/"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/"
+      - "C:/Windows/System32/OpenSSH/"
+      - "C:/Program Files/nodejs/"
+      - "C:/ProgramData/chocolatey/bin/"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/Git/cmd/"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/"
+      - "C:/Users/djhbi/AppData/Roaming/npm/"
+      - "C:/Users/djhbi/.lmstudio/bin/"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/"
+      - "C:/Program Files/bin/"
+      - "C:/Program Files/sbin/"
+      - "C:/Program Files/"
+      - "C:/Program Files (x86)/bin/"
+      - "C:/Program Files (x86)/sbin/"
+      - "C:/Program Files (x86)/"
+      - "C:/Program Files/CMake/bin/"
+      - "C:/Program Files/CMake/sbin/"
+      - "C:/Program Files/CMake/"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/"
+      - "C:/Program Files (x86)/ModularStudioStack/"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/"
+    searched_directories:
+      - "C:/Python314/Scripts/git.cmd.com"
+      - "C:/Python314/Scripts/git.cmd.exe"
+      - "C:/Python314/Scripts/git.cmd"
+      - "C:/Python314/git.cmd.com"
+      - "C:/Python314/git.cmd.exe"
+      - "C:/Python314/git.cmd"
+      - "C:/Program Files/Python312/Scripts/git.cmd.com"
+      - "C:/Program Files/Python312/Scripts/git.cmd.exe"
+      - "C:/Program Files/Python312/Scripts/git.cmd"
+      - "C:/Program Files/Python312/git.cmd.com"
+      - "C:/Program Files/Python312/git.cmd.exe"
+      - "C:/Program Files/Python312/git.cmd"
+      - "C:/Windows/System32/git.cmd.com"
+      - "C:/Windows/System32/git.cmd.exe"
+      - "C:/Windows/System32/git.cmd"
+      - "C:/Windows/git.cmd.com"
+      - "C:/Windows/git.cmd.exe"
+      - "C:/Windows/git.cmd"
+      - "C:/Windows/System32/wbem/git.cmd.com"
+      - "C:/Windows/System32/wbem/git.cmd.exe"
+      - "C:/Windows/System32/wbem/git.cmd"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.cmd.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.cmd.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.cmd"
+      - "C:/Windows/System32/OpenSSH/git.cmd.com"
+      - "C:/Windows/System32/OpenSSH/git.cmd.exe"
+      - "C:/Windows/System32/OpenSSH/git.cmd"
+      - "C:/Program Files/nodejs/git.cmd.com"
+      - "C:/Program Files/nodejs/git.cmd.exe"
+      - "C:/Program Files/nodejs/git.cmd"
+      - "C:/ProgramData/chocolatey/bin/git.cmd.com"
+      - "C:/ProgramData/chocolatey/bin/git.cmd.exe"
+      - "C:/ProgramData/chocolatey/bin/git.cmd"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.cmd.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.cmd.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.cmd"
+      - "C:/Program Files/CMake/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/git.cmd"
+      - "C:/Program Files/Git/cmd/git.cmd.com"
+      - "C:/Program Files/Git/cmd/git.cmd.exe"
+      - "C:/Program Files/Git/cmd/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Microsoft/WindowsApps/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/GitHubDesktop/bin/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Antigravity/bin/git.cmd"
+      - "C:/Users/djhbi/AppData/Roaming/npm/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Roaming/npm/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Roaming/npm/git.cmd"
+      - "C:/Users/djhbi/.lmstudio/bin/git.cmd.com"
+      - "C:/Users/djhbi/.lmstudio/bin/git.cmd.exe"
+      - "C:/Users/djhbi/.lmstudio/bin/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Programs/Ollama/git.cmd"
+      - "C:/Program Files/bin/git.cmd.com"
+      - "C:/Program Files/bin/git.cmd.exe"
+      - "C:/Program Files/bin/git.cmd"
+      - "C:/Program Files/sbin/git.cmd.com"
+      - "C:/Program Files/sbin/git.cmd.exe"
+      - "C:/Program Files/sbin/git.cmd"
+      - "C:/Program Files/git.cmd.com"
+      - "C:/Program Files/git.cmd.exe"
+      - "C:/Program Files/git.cmd"
+      - "C:/Program Files (x86)/bin/git.cmd.com"
+      - "C:/Program Files (x86)/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/bin/git.cmd"
+      - "C:/Program Files (x86)/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/sbin/git.cmd"
+      - "C:/Program Files (x86)/git.cmd.com"
+      - "C:/Program Files (x86)/git.cmd.exe"
+      - "C:/Program Files (x86)/git.cmd"
+      - "C:/Program Files/CMake/bin/git.cmd.com"
+      - "C:/Program Files/CMake/bin/git.cmd.exe"
+      - "C:/Program Files/CMake/bin/git.cmd"
+      - "C:/Program Files/CMake/sbin/git.cmd.com"
+      - "C:/Program Files/CMake/sbin/git.cmd.exe"
+      - "C:/Program Files/CMake/sbin/git.cmd"
+      - "C:/Program Files/CMake/git.cmd.com"
+      - "C:/Program Files/CMake/git.cmd.exe"
+      - "C:/Program Files/CMake/git.cmd"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/git.cmd.com"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/git.cmd.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/bin/git.cmd"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/git.cmd.com"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/git.cmd.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/sbin/git.cmd"
+      - "C:/Program Files (x86)/ModularStudioStack/git.cmd.com"
+      - "C:/Program Files (x86)/ModularStudioStack/git.cmd.exe"
+      - "C:/Program Files (x86)/ModularStudioStack/git.cmd"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd.com"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd.exe"
+      - "C:/Users/djhbi/AppData/Local/Atlassian/SourceTree/git_local/bin/git.cmd"
+      - "C:/Python314/Scripts/git.com"
+      - "C:/Python314/Scripts/git.exe"
+      - "C:/Python314/Scripts/git"
+      - "C:/Python314/git.com"
+      - "C:/Python314/git.exe"
+      - "C:/Python314/git"
+      - "C:/Program Files/Python312/Scripts/git.com"
+      - "C:/Program Files/Python312/Scripts/git.exe"
+      - "C:/Program Files/Python312/Scripts/git"
+      - "C:/Program Files/Python312/git.com"
+      - "C:/Program Files/Python312/git.exe"
+      - "C:/Program Files/Python312/git"
+      - "C:/Windows/System32/git.com"
+      - "C:/Windows/System32/git.exe"
+      - "C:/Windows/System32/git"
+      - "C:/Windows/git.com"
+      - "C:/Windows/git.exe"
+      - "C:/Windows/git"
+      - "C:/Windows/System32/wbem/git.com"
+      - "C:/Windows/System32/wbem/git.exe"
+      - "C:/Windows/System32/wbem/git"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.com"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git.exe"
+      - "C:/Windows/System32/WindowsPowerShell/v1.0/git"
+      - "C:/Windows/System32/OpenSSH/git.com"
+      - "C:/Windows/System32/OpenSSH/git.exe"
+      - "C:/Windows/System32/OpenSSH/git"
+      - "C:/Program Files/nodejs/git.com"
+      - "C:/Program Files/nodejs/git.exe"
+      - "C:/Program Files/nodejs/git"
+      - "C:/ProgramData/chocolatey/bin/git.com"
+      - "C:/ProgramData/chocolatey/bin/git.exe"
+      - "C:/ProgramData/chocolatey/bin/git"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.com"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git.exe"
+      - "C:/Program Files (x86)/NVIDIA Corporation/PhysX/Common/git"
+      - "C:/Program Files/CMake/bin/git.com"
+      - "C:/Program Files/CMake/bin/git.exe"
+      - "C:/Program Files/CMake/bin/git"
+      - "C:/Program Files/Git/cmd/git.com"
+    found: "C:/Program Files/Git/cmd/git.exe"
+    search_context:
+      ENV{PATH}:
+        - "C:\\Python314\\Scripts\\"
+        - "C:\\Python314\\"
+        - "C:\\Program Files\\Python312\\Scripts\\"
+        - "C:\\Program Files\\Python312\\"
+        - "C:\\WINDOWS\\system32"
+        - "C:\\WINDOWS"
+        - "C:\\WINDOWS\\System32\\Wbem"
+        - "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\"
+        - "C:\\WINDOWS\\System32\\OpenSSH\\"
+        - "C:\\Program Files\\nodejs\\"
+        - "C:\\ProgramData\\chocolatey\\bin"
+        - "C:\\Program Files (x86)\\NVIDIA Corporation\\PhysX\\Common"
+        - "C:\\Program Files\\CMake\\bin"
+        - "C:\\Program Files\\Git\\cmd"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Microsoft\\WindowsApps"
+        - "C:\\Users\\djhbi\\AppData\\Local\\GitHubDesktop\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Antigravity\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Roaming\\npm"
+        - "C:\\Users\\djhbi\\.lmstudio\\bin"
+        - "C:\\Users\\djhbi\\AppData\\Local\\Programs\\Ollama"
+      CMAKE_INSTALL_PREFIX: "C:/Program Files (x86)/ModularStudioStack"
+      CMAKE_SYSTEM_PREFIX_PATH:
+        - "C:/Program Files"
+        - "C:/Program Files (x86)"
+        - "C:/Program Files/CMake"
+        - "C:/Program Files (x86)/ModularStudioStack"
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/Internal/CheckSourceCompiles.cmake:104 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CheckCSourceCompiles.cmake:103 (cmake_check_source_compiles)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:160 (check_c_source_compiles)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:226 (_threads_check_libc)"
+      - "build/_deps/glfw-src/CMakeLists.txt:60 (find_package)"
+    checks:
+      - "Performing Test CMAKE_HAVE_LIBC_PTHREAD"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-77va9m"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-77va9m"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+      CMAKE_MODULE_PATH: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-src/CMake/modules"
+    buildResult:
+      variable: "CMAKE_HAVE_LIBC_PTHREAD"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-77va9m'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_2715f.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/16/2026 12:00:07 AM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\cmTC_2715f.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\Debug\\".
+          Creating directory "cmTC_2715f.dir\\Debug\\cmTC_2715f.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_2715f.dir\\Debug\\cmTC_2715f.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_2715f.dir\\Debug\\cmTC_2715f.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CMAKE_HAVE_LIBC_PTHREAD /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_2715f.dir\\Debug\\\\" /Fd"cmTC_2715f.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\src.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CMAKE_HAVE_LIBC_PTHREAD /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_2715f.dir\\Debug\\\\" /Fd"cmTC_2715f.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\src.c"
+          src.c
+        E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\src.c(1,10): error C1083: Cannot open include file: 'pthread.h': No such file or directory [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\cmTC_2715f.vcxproj]
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\cmTC_2715f.vcxproj" (default targets) -- FAILED.
+        
+        Build FAILED.
+        
+        "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\cmTC_2715f.vcxproj" (default target) (1) ->
+        (ClCompile target) -> 
+          E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\src.c(1,10): error C1083: Cannot open include file: 'pthread.h': No such file or directory [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-77va9m\\cmTC_2715f.vcxproj]
+        
+            0 Warning(s)
+            1 Error(s)
+        
+        Time Elapsed 00:00:00.23
+        
+      exitCode: 1
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CheckLibraryExists.cmake:154 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:175 (check_library_exists)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:238 (_threads_check_lib)"
+      - "build/_deps/glfw-src/CMakeLists.txt:60 (find_package)"
+    checks:
+      - "Looking for pthread_create in pthreads"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-qhmsh6"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-qhmsh6"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+      CMAKE_MODULE_PATH: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-src/CMake/modules"
+    buildResult:
+      variable: "CMAKE_HAVE_PTHREADS_CREATE"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-qhmsh6'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_af649.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/16/2026 12:00:07 AM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\cmTC_af649.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\Debug\\".
+          Creating directory "cmTC_af649.dir\\Debug\\cmTC_af649.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_af649.dir\\Debug\\cmTC_af649.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_af649.dir\\Debug\\cmTC_af649.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_af649.dir\\Debug\\\\" /Fd"cmTC_af649.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\CheckFunctionExists.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_af649.dir\\Debug\\\\" /Fd"cmTC_af649.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\CheckFunctionExists.c"
+          CheckFunctionExists.c
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\Debug\\cmTC_af649.exe" /INCREMENTAL /ILK:"cmTC_af649.dir\\Debug\\cmTC_af649.ilk" /NOLOGO pthreads.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-qhmsh6/Debug/cmTC_af649.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-qhmsh6/Debug/cmTC_af649.lib" /MACHINE:X64  /machine:x64 cmTC_af649.dir\\Debug\\CheckFunctionExists.obj
+        LINK : fatal error LNK1104: cannot open file 'pthreads.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\cmTC_af649.vcxproj]
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\cmTC_af649.vcxproj" (default targets) -- FAILED.
+        
+        Build FAILED.
+        
+        "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\cmTC_af649.vcxproj" (default target) (1) ->
+        (Link target) -> 
+          LINK : fatal error LNK1104: cannot open file 'pthreads.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-qhmsh6\\cmTC_af649.vcxproj]
+        
+            0 Warning(s)
+            1 Error(s)
+        
+        Time Elapsed 00:00:00.29
+        
+      exitCode: 1
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/CheckLibraryExists.cmake:154 (try_compile)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:175 (check_library_exists)"
+      - "C:/Program Files/CMake/share/cmake-4.3/Modules/FindThreads.cmake:239 (_threads_check_lib)"
+      - "build/_deps/glfw-src/CMakeLists.txt:60 (find_package)"
+    checks:
+      - "Looking for pthread_create in pthread"
+    directories:
+      source: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-kcqrt0"
+      binary: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-kcqrt0"
+    cmakeVariables:
+      CMAKE_CXX_STDLIB_MODULES_JSON: ""
+      CMAKE_C_FLAGS: "/DWIN32 /D_WINDOWS"
+      CMAKE_C_FLAGS_DEBUG: "/Zi /Ob0 /Od /RTC1"
+      CMAKE_EXE_LINKER_FLAGS: "/machine:x64"
+      CMAKE_MODULE_PATH: "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-src/CMake/modules"
+    buildResult:
+      variable: "CMAKE_HAVE_PTHREAD_CREATE"
+      cached: true
+      stdout: |
+        Change Dir: 'E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-kcqrt0'
+        
+        Run Build Command(s): "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/amd64/MSBuild.exe" cmTC_0aa5c.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=17.0 /v:n
+        MSBuild version 17.14.40+3e7442088 for .NET Framework
+        Build started 4/16/2026 12:00:08 AM.
+        
+        Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\cmTC_0aa5c.vcxproj" on node 1 (default targets).
+        PrepareForBuild:
+          Structured output is enabled. The formatting of compiler diagnostics will reflect the error hierarchy. See https://aka.ms/cpp/structured-output for more details.
+          Creating directory "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\Debug\\".
+          Creating directory "cmTC_0aa5c.dir\\Debug\\cmTC_0aa5c.tlog\\".
+        InitializeBuildStatus:
+          Creating "cmTC_0aa5c.dir\\Debug\\cmTC_0aa5c.tlog\\unsuccessfulbuild" because "AlwaysCreate" was specified.
+          Touching "cmTC_0aa5c.dir\\Debug\\cmTC_0aa5c.tlog\\unsuccessfulbuild".
+        ClCompile:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\CL.exe /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_0aa5c.dir\\Debug\\\\" /Fd"cmTC_0aa5c.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\CheckFunctionExists.c"
+          Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35223 for x64
+          Copyright (C) Microsoft Corporation.  All rights reserved.
+          cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D CHECK_FUNCTION_EXISTS=pthread_create /D _MBCS /D "CMAKE_INTDIR=\\"Debug\\"" /RTC1 /MDd /Fo"cmTC_0aa5c.dir\\Debug\\\\" /Fd"cmTC_0aa5c.dir\\Debug\\vc143.pdb" /external:W1 /TC /errorReport:queue "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\CheckFunctionExists.c"
+          CheckFunctionExists.c
+        Link:
+          C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64\\link.exe /OUT:"E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\Debug\\cmTC_0aa5c.exe" /INCREMENTAL /ILK:"cmTC_0aa5c.dir\\Debug\\cmTC_0aa5c.ilk" /NOLOGO pthread.lib kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-kcqrt0/Debug/cmTC_0aa5c.pdb" /SUBSYSTEM:CONSOLE /TLBID:1 /IMPLIB:"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/CMakeFiles/CMakeScratch/TryCompile-kcqrt0/Debug/cmTC_0aa5c.lib" /MACHINE:X64  /machine:x64 cmTC_0aa5c.dir\\Debug\\CheckFunctionExists.obj
+        LINK : fatal error LNK1104: cannot open file 'pthread.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\cmTC_0aa5c.vcxproj]
+        Done Building Project "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\cmTC_0aa5c.vcxproj" (default targets) -- FAILED.
+        
+        Build FAILED.
+        
+        "E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\cmTC_0aa5c.vcxproj" (default target) (1) ->
+        (Link target) -> 
+          LINK : fatal error LNK1104: cannot open file 'pthread.lib' [E:\\WEBSITE\\CharmsLink\\CharmsLink\\Charms Web Tools\\Image Tools\\Noise Studio\\Modular Studio V2\\Stack\\build\\CMakeFiles\\CMakeScratch\\TryCompile-kcqrt0\\cmTC_0aa5c.vcxproj]
+        
+            0 Warning(s)
+            1 Error(s)
+        
+        Time Elapsed 00:00:00.28
+        
+      exitCode: 1
+...

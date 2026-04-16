@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\15d7eb575746def48ff69460c74cd3ef\json-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\b67fabcd06c6ee752a0a6bf16d761be1\json-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\63dce0b6d4274f1d3abeff9294ab168c\json-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\json-subbuild\CMakeFiles\json-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{AE6D609B-FF6E-37EC-88F0-998CB63248D9}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

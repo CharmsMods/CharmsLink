@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\ee41bbcd0904f2ae4f6737351b206649\glfw-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\0d2c040ebbec5054b24b145a4802a69c\glfw-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\d13c3ed929b3856a0a5feb34dad97205\glfw-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="E:\WEBSITE\CharmsLink\CharmsLink\Charms Web Tools\Image Tools\Noise Studio\Modular Studio V2\Stack\build\_deps\glfw-subbuild\CMakeFiles\glfw-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{217091CB-99E3-3124-B553-7F57633A23B5}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

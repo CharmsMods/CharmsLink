@@ -1,0 +1,10 @@
+^E:\WEBSITE\CHARMSLINK\CHARMSLINK\CHARMS WEB TOOLS\IMAGE TOOLS\NOISE STUDIO\MODULAR STUDIO V2\STACK\BUILD\_DEPS\JSON-SUBBUILD\CMAKEFILES\63DCE0B6D4274F1D3ABEFF9294AB168C\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" "-SE:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/json-subbuild" "-BE:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/json-subbuild" --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file "E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/json-subbuild/json-populate.sln"
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

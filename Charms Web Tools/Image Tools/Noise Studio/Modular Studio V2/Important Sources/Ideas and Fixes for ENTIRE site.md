@@ -64,72 +64,56 @@
 ## Not Done
 
 
-
-ENSURE that when a 3D site png render is done, that the site first carefully saves it to the library assets tab, and then opens the file explorer window for where to save it locally as well.
-
 explore adding ray tracing as an option for viewport and rendering on the 3D tab since it's different than path tracing that we already have
 
-add an option for rendering to do a render in the selected modes from the same camera setting automatically (not all that important right now)
-
-options for the entire site should now be moved to right click where it makes sense for "context menus" allowing parts of the UI to be de-bloated, due to not needing to hide literally every setting and UI option behind a dropdown, tab, or button. (this idea must first rely on a verdict from figuring out if this still works on electron, and how to make it more reliable on browser, before switching to it more heaviliy)
 
 full check the entire site to see what cnds or anything that relys on the internet, and if possible, download everything locally and update the code to use the local copy (very small current priority do not focus on for a while)
 
-inspect worker for handling the background png render of the 3D tab, and inspect how the worker handles the gpu while making sure the rest of the site is still usable and switching tabs still works perfectly, since currently starting a render, and leaving the 3D tab works fine, but then trying to come back to it the page freezes a lot and sometimes crashes
-
-idea to make the universial tab bar, a native loading bar for processes
-
-in the library, every 3D scene project should be automatically given the tag "3D", every Stitch scene project should be automatically given the tag "Stitch" and every Editor page project in the library should be automatically given the tag "Editor". the library on load already is able to determine the difference between a 3D and a Editor project, so ensure that on site load, the library will scan all projects to make sure they have the correct tag, and give tags to any that dont. so this will just need to be added to the list of things that the library does on load, and ensure that it has it's place in the logs that are sent to the logging tab.
-
-
-
-
-move the dark/light mode toggle from the editor tab, to a new settings tab that will exist in the universial site tab just to the left of the logs tab:
-settings tab:
-a central place for setting the site's settings for use.
-settings can include but are not limited to (i will need to think of more)
-button to scan for and fix library files that may not have a final rendered version in their json.
+in the library, every 3D scene project should be automatically given the tag "3D", every Stitch scene project should be automatically given the tag "Stitch" and every Editor page project in the library should be automatically given the tag "Editor". the library on load already is able to determine the difference between a 3D and a Editor project, so ensure that on site load, the library will scan all projects to make sure they have the correct tag, and give tags to any that dont. so this will just need to be added to the list of things that the library does on load, and ensure that it has it's place in the logs that are sent to the logging tab. this might already be implimented idk.
 
 add fog or some type of volumetric addition where emissive objects can have halos and (reference picture) (for a later implimentation, not until after many other bug fixes)
 
-check to see if the current way the library indexs it's contents is making it slower in any way or not using teh web workers to full potential, especially on page load for the first time.
+check to see if the current way the library indexs it's contents on load and during use is making it slower in any way or not using the web workers to full potential, especially on page load for the first time to ensure the page doenst crash.
 
 
-A potentially large update, requiring an elevated attention to detail, and planning with context: assets for 3D scenes, should not be stored redundantly, where multple copies are used, instead, inside each json file for a 3D scene, it should store 1 copy, and just use that copy to rebuild the scene. the same thing should also apply to a library export, when the user exports an entire library, the library should have some reliable logic that looks at all assets, and stores only 1 copy of everything, even across multiple 3D scenes if they have the same assets used partly. this will greatly cut down on file sizes for the json library exports. we will need to make extra sure that the logic for "unbundling" these updated library files works reliably at parsing things, since different 3D scenes may have some of the same assets. assets should be identified as "the same" if their name is the same. and in order to keep it this simple, we need to update the naming for the 3D assets so that changing the name of an asset in a 3D scene, will open up a popup basically saying "hey, you're changing the name of this 3D asset, which is currently used in X number of 3D scenes, are you sure you want to do this?" and if they confirm, it will update the name in all of the scenes that use it.
-note that the "only storing one copy" mindset shouldnt apply to the parsed and loaded state of the library or 3D scenes when the site is just being used and each 3D scene is a project in the library, they can be seperate then, and need to be if we are to update them all when a name changes.
-
-
-potentially huge job in terms of making sure nothing is missed, but reorganizing any code files in the database to be in better groups, since there are many different files for different tabs, engines, and having things organized would be a life saver. it would be  extremely important to use move and copy commands,and then edit realtive paths and where files point to, rather than re-writing entire files from scratch and making errors.
+potentially huge job in terms of making sure nothing is missed, but reorganizing any code files in the database to be in better groups, since there are many different files for different tabs, engines, and having things organized would be a life saver. it would be  extremely important to use move and copy commands,and then edit realtive paths and where files point to, rather than re-writing entire files from scratch and making errors UNLESS things can be improved logically to consolidate things or have them organized better, than this is just fine. Note, this has already been done once with a file that used to exist at over 11k lines called main.js
 
 add animations to the entire site, and a toggle in settings to disable animations for the site
 
 add the option to include the currrent entire settings state in the library json file when exporting a copy of the library out. this would need the added logic for loading it with the library as well.
-
-
-add a text layer to the editor tab
-
-
-NEW TAB IDEA:
-create a new asset generation tab: that has sub tabs inside it:
-QR codes
-Bar codes
-
-
-
 
 explore to see whether a translucent frosted glass effective material can be made for the 3D tab for materials is possible with the current glass settings, or if updates would need to be made to add that capability and ensure it works like it should with the path tracing
 
 whole site background UI background image behind everything, with some UI elements being slightly see-through for the picture, not a darkening see through type, but a frosted glass look
 
 
-library loading and switching between tabs optimization, its somewhat slow sometimes while the site is doing things in the background
+library loading and switching between tabs optimization, it's decently slow when a lot of things are loaded or there are a lot of things in the library.
 
 
 add a tiling layer to the editor tab
 
 
 
-add the ability to warp text on the editor tab, and blend them with whatever is behind them
+add the ability to warp text on the editor tab, and blend it with whatever is behind it
 
 
-do some digging on the biggest code files currently in the site, to see if any of them are worth breaking down into smaller files for better organization and managment
+do some digging on the biggest code files currently in the site, to see if any of them are worth breaking down into smaller files for better organization and managment and potentially even performance
+
+
+
+png export for editor tab does not always work especially after lots of crashes
+
+
+the text for some of the fonts in the composite tab is clipped off by the dragging box for it
+
+
+
+export to png does not work for the editor or composite tabs
+
+
+the analog layer of the editor tab, is animated like a video and it should just be a normal layer like the rest.
+
+
+up and down increment buttons on slider values dont update the canvas for pretty much anything on the editor or maybe even the composite site as well, so the user can only use the sliders or type numbers in instead of also being able to increment by 1 in either direction as well, or whatever 0.1, or value distance that is defined.
+
+
