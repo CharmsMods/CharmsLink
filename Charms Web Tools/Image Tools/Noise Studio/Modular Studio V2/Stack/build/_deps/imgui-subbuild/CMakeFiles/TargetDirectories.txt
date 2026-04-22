@@ -1,3 +1,0 @@
-E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/imgui-subbuild/CMakeFiles/imgui-populate.dir
-E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/imgui-subbuild/CMakeFiles/ALL_BUILD.dir
-E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/imgui-subbuild/CMakeFiles/ZERO_CHECK.dir

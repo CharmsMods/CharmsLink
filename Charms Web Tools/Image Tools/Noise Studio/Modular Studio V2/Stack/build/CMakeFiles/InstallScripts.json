@@ -1,9 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/cmake_install.cmake",
-		"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-build/cmake_install.cmake",
-		"E:/WEBSITE/CharmsLink/CharmsLink/Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/Stack/build/_deps/glfw-build/src/cmake_install.cmake"
-	],
-	"Parallel" : false
-}
