@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VENGE // GLB REPOSITORY</title>
+
+    <!-- External Libraries -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+
+    <!-- Fonts: Space Mono for Brutalist Headers, Inter for readability -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap"
+        rel="stylesheet">
+
+    <style>
+        /* --- CSS VARIABLES & RESET --- */
+        :root {
+            --bg-color: #1a1815;
+            --cream-color: #eaddcf;
+            --accent-color: #c04848;
+            /* Brick Red for highlights */
+            --secondary-accent: #4a5d5a;
+            /* Muted Green */
+            --border-width: 2px;
+            --shadow-offset: 6px;
+            --card-bg: #24211d;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            cursor: crosshair;
+            /* Brutalist cursor */
+        }
+
+        ::selection {
+            background: var(--accent-color);
+            color: var(--cream-color);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--cream-color);
+            line-height: 1.6;
+            overflow-x: hidden;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        /* --- BACKGROUND NOISE TEXTURE --- */
+        .noise-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.07;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        }
+
+        /* --- SCROLLBAR --- */
+        ::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+            border-left: 1px solid var(--cream-color);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--cream-color);
+            border: 1px solid var(--bg-color);
+        }
+
+        /* --- LAYOUT CONTAINERS --- */
+        .main-wrapper {
+            position: relative;
+            z-index: 1;
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* --- HEADER & TYPOGRAPHY --- */
+        header {
+            text-align: center;
+            margin-bottom: 4rem;
+            border-bottom: var(--border-width) solid var(--cream-color);
+            padding-bottom: 2rem;
+            position: relative;
+        }
+
+        h1 {
+            font-family: 'Space Mono', monospace;
+            font-size: clamp(2rem, 5vw, 4rem);
+            text-transform: uppercase;
+            font-weight: 700;
+            letter-spacing: -2px;
+            position: relative;
+            display: inline-block;
+            margin-bottom: 1.5rem;
+            text-shadow: 4px 4px 0px rgba(192, 72, 72, 0.3);
+        }
+
+        /* Glitch Effect on Hover */
+        h1:hover {
+            animation: glitch 0.3s cubic-bezier(.25, .46, .45, .94) both infinite;
+            color: var(--accent-color);
+        }
+
+        @keyframes glitch {
+            0% {
+                transform: translate(0)
+            }
+
+            20% {
+                transform: translate(-2px, 2px)
+            }
+
+            40% {
+                transform: translate(-2px, -2px)
+            }
+
+            60% {
+                transform: translate(2px, 2px)
+            }
+
+            80% {
+                transform: translate(2px, -2px)
+            }
+
+            100% {
+                transform: translate(0)
+            }
+        }
+
+        /* --- SEARCH BAR --- */
+        .search-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0;
+            /* Brutal stack */
+            flex-wrap: wrap;
+            margin-top: 1.5rem;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .search-input {
+            width: 100%;
+            max-width: 400px;
+            padding: 1rem;
+            background: transparent;
+            color: var(--cream-color);
+            border: var(--border-width) solid var(--cream-color);
+            font-family: 'Space Mono', monospace;
+            font-size: 1rem;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .search-input::placeholder {
+            color: rgba(234, 221, 207, 0.4);
+            text-transform: uppercase;
+        }
+
+        .search-input:focus {
+            background: rgba(234, 221, 207, 0.1);
+            box-shadow: 4px 4px 0px var(--accent-color);
+            transform: translate(-2px, -2px);
+        }
+
+        .search-button {
+            padding: 1rem 2rem;
+            background: var(--cream-color);
+            color: var(--bg-color);
+            border: var(--border-width) solid var(--cream-color);
+            font-family: 'Space Mono', monospace;
+            font-weight: 700;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .search-button:hover {
+            background: var(--accent-color);
+            color: var(--cream-color);
+            border-color: var(--accent-color);
+            box-shadow: 4px 4px 0px var(--cream-color);
+            transform: translate(-2px, -2px);
+        }
+
+        .clear-button {
+            background: var(--bg-color);
+            color: var(--cream-color);
+        }
+
+        .instruction-text {
+            margin-top: 1.5rem;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--cream-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: var(--accent-color);
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            transform: rotate(-1deg);
+        }
+
+        /* --- GRID --- */
+        #texture-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 3rem;
+            padding: 1rem;
+        }
+
+        /* --- CARD DESIGN (BRUTALIST) --- */
+        .texture-card {
+            background: var(--card-bg);
+            border: var(--border-width) solid var(--cream-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0;
+            /* Padding handled by children */
+            position: relative;
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            /* Hard shadow */
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0px rgba(234, 221, 207, 0.2);
+            overflow: visible;
+            /* Allow shadow to be seen */
+            animation: cardEntrance 0.5s ease-out backwards;
+        }
+
+        .texture-card:hover {
+            transform: translate(-4px, -4px);
+            box-shadow: 10px 10px 0px var(--accent-color);
+            z-index: 10;
+        }
+
+        .texture-card.glb {
+            border-top: 6px solid var(--accent-color);
+            /* Distinct mark for GLB */
+        }
+
+        @keyframes cardEntrance {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Card Content Wrapper for padding */
+        .card-inner {
+            padding: 2rem 1.5rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            background:
+                linear-gradient(45deg, transparent 48%, var(--cream-color) 48%, var(--cream-color) 52%, transparent 52%),
+                linear-gradient(-45deg, transparent 48%, var(--cream-color) 48%, var(--cream-color) 52%, transparent 52%);
+            background-size: 20px 20px;
+            background-position: center bottom;
+            /* Decorative background pattern */
+        }
+
+        .media-icon {
+            font-size: 4rem;
+            color: var(--cream-color);
+            margin-bottom: 1.5rem;
+            transition: transform 0.3s ease;
+            filter: drop-shadow(4px 4px 0px var(--bg-color));
+        }
+
+        .texture-card:hover .media-icon {
+            transform: scale(1.1) rotate(5deg);
+            color: var(--accent-color);
+        }
+
+        .glb-filename-display {
+            font-family: 'Space Mono', monospace;
+            font-size: 1rem;
+            color: var(--cream-color);
+            font-weight: 700;
+            text-align: center;
+            word-break: break-word;
+            margin-bottom: 1.5rem;
+            width: 100%;
+            position: relative;
+            background: var(--bg-color);
+            padding: 0.5rem;
+            border: 1px dashed var(--cream-color);
+        }
+
+        .folder-number-button {
+            background: transparent;
+            border: 1px solid var(--cream-color);
+            color: var(--cream-color);
+            padding: 0.5rem 1rem;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            margin-bottom: 1.5rem;
+            transition: all 0.2s;
+        }
+
+        .folder-number-button:hover {
+            background: var(--cream-color);
+            color: var(--bg-color);
+            box-shadow: 3px 3px 0px var(--accent-color);
+        }
+
+        .glb-buttons-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            width: 100%;
+            margin-top: auto;
+        }
+
+        .glb-buttons-wrapper button {
+            background: var(--bg-color);
+            border: 1px solid var(--cream-color);
+            color: var(--cream-color);
+            padding: 0.8rem;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            position: relative;
+        }
+
+        .glb-buttons-wrapper button:hover {
+            background: var(--secondary-accent);
+            color: #fff;
+            border-color: var(--secondary-accent);
+            padding-left: 1.2rem;
+            /* Slide text effect */
+        }
+
+        /* --- MODAL STYLES --- */
+        .modal {
+            display: none;
+            /* Hidden by default */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(26, 24, 21, 0.95);
+            /* Solid brutal overlay */
+            backdrop-filter: blur(5px);
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: var(--bg-color);
+            border: 3px solid var(--cream-color);
+            padding: 0;
+            /* Padding handled inside */
+            position: relative;
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 15px 15px 0px rgba(0, 0, 0, 0.5);
+            animation: modalPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes modalPop {
+            from {
+                transform: scale(0.9) translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: scale(1) translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .close-button {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            font-size: 3rem;
+            color: var(--accent-color);
+            z-index: 10;
+            background: var(--bg-color);
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid var(--accent-color);
+            transition: all 0.2s;
+            line-height: 1;
+        }
+
+        .close-button:hover {
+            background: var(--accent-color);
+            color: var(--cream-color);
+            transform: rotate(90deg);
+        }
+
+        /* Modal Header */
+        .modal-header-section {
+            padding: 1.5rem 2rem;
+            border-bottom: 2px solid var(--cream-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1f1c19;
+        }
+
+        .glb-viewer-header h2 {
+            font-family: 'Space Mono', monospace;
+            font-size: 1.5rem;
+            text-transform: uppercase;
+            color: var(--cream-color);
+        }
+
+        #viewer-folder-info {
+            font-family: 'Inter', sans-serif;
+            color: var(--secondary-accent);
+            font-size: 1rem;
+            margin-top: 0.2rem;
+        }
+
+        /* 3D Viewer Area */
+        .glb-viewer-container {
+            width: 100%;
+            height: 60vh;
+            background: #000;
+            border-bottom: 2px solid var(--cream-color);
+            position: relative;
+        }
+
+        /* Loading overlay for viewer */
+        .glb-viewer-container::after {
+            content: "LOADING_ASSETS...";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-family: 'Space Mono', monospace;
+            color: var(--cream-color);
+            pointer-events: none;
+        }
+
+        .glb-viewer-container.loaded::after {
+            display: none;
+        }
+
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            --poster-color: transparent;
+        }
+
+        /* Modal Footer */
+        .glb-viewer-actions {
+            padding: 2rem;
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            background: var(--bg-color);
+        }
+
+        .glb-viewer-actions button {
+            flex: 1;
+            max-width: 300px;
+            padding: 1rem;
+            background: transparent;
+            border: 2px solid var(--cream-color);
+            color: var(--cream-color);
+            font-family: 'Space Mono', monospace;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+
+        .glb-viewer-actions button:hover {
+            background: var(--accent-color);
+            border-color: var(--accent-color);
+            color: #fff;
+            box-shadow: 5px 5px 0px var(--cream-color);
+            transform: translate(-2px, -2px);
+        }
+
+        /* --- WARNING MODAL SPECIFIC --- */
+        .warning-content {
+            max-width: 600px;
+            text-align: center;
+            padding: 3rem;
+            border: 2px solid var(--accent-color);
+            position: relative;
+        }
+
+        /* Corner accents for warning modal */
+        .warning-content::before,
+        .warning-content::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: var(--accent-color);
+            transition: all 0.3s;
+        }
+
+        .warning-content::before {
+            top: -2px;
+            left: -2px;
+        }
+
+        .warning-content::after {
+            bottom: -2px;
+            right: -2px;
+        }
+
+        .warning-content:hover::before {
+            transform: translate(5px, 5px);
+        }
+
+        .warning-content:hover::after {
+            transform: translate(-5px, -5px);
+        }
+
+        .warning-title {
+            font-family: 'Space Mono', monospace;
+            font-size: 1.8rem;
+            color: var(--accent-color);
+            margin-bottom: 1.5rem;
+            text-transform: uppercase;
+        }
+
+        .warning-message {
+            font-size: 1rem;
+            color: var(--cream-color);
+            margin-bottom: 2rem;
+            line-height: 1.8;
+            text-align: left;
+            border-left: 2px solid var(--cream-color);
+            padding-left: 1rem;
+        }
+
+        /* --- RESPONSIVE --- */
+        @media (max-width: 768px) {
+            header {
+                padding: 1rem;
+                margin-bottom: 2rem;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .search-container {
+                flex-direction: column;
+                width: 100%;
+            }
+
+            .search-input,
+            .search-button {
+                width: 100%;
+                max-width: none;
+            }
+
+            #texture-grid {
+                grid-template-columns: 1fr;
+                padding: 0.5rem;
+            }
+
+            .glb-viewer-container {
+                height: 40vh;
+            }
+
+            .modal-content {
+                width: 95%;
+                max-height: 95vh;
+            }
+
+            .glb-viewer-actions {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Background Texture -->
+    <div class="noise-overlay"></div>
+
+    <div class="main-wrapper">
+        <header>
+            <h1 data-text="Venge // Archive">Venge // GLB Models</h1>
+            <div class="search-container">
+                <input type="text" id="texture-search" placeholder="SEARCH_ASSETS..." class="search-input">
+                <button id="search-button" class="search-button">Search</button>
+                <button id="clear-search-button" class="search-button clear-button">Clear</button>
+            </div>
+            <br>
+            <p class="instruction-text">System Status: Online // Click GLB Cards to Render</p>
+        </header>
+
+        <main>
+            <div id="texture-grid">
+                <!-- Cards injected via JS -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Initial Warning Modal -->
+    <div id="initial-warning-modal" class="modal initial-warning-modal">
+        <div class="modal-content warning-content">
+            <h2 class="warning-title">! System Warning</h2>
+            <p class="warning-message">
+                Not all GLB files may display visible 3D meshes. Some files primarily contain animations, lighting data,
+                or rigging information. A blank viewport indicates non-visual data is present.
+            </p>
+            <button id="warning-close-button" class="search-button">ACKNOWLEDGE</button>
+        </div>
+    </div>
+
+    <!-- GLB Viewer Modal -->
+    <div id="glb-viewer-modal" class="modal glb-viewer-modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+
+            <div class="modal-header-section">
+                <div class="glb-viewer-header">
+                    <h2 id="viewer-filename">FILENAME.GLB</h2>
+                    <div id="viewer-folder-info">DIR: <span id="viewer-folder-number">000000</span></div>
+                </div>
+            </div>
+
+            <div class="glb-viewer-container">
+                <model-viewer id="model-viewer-instance" alt="3D Model Render" ar
+                    ar-modes="webxr scene-viewer quick-look" environment-image="neutral" shadow-intensity="1"
+                    camera-controls touch-action="pan-y" disable-zoom min-field-of-view="10deg"
+                    max-field-of-view="60deg" loading="eager">
+                </model-viewer>
+            </div>
+
+            <div class="glb-viewer-actions">
+                <button id="viewer-download-button" class="download-button">Download Asset</button>
+                <button id="viewer-copy-folder-button" class="copy-folder-button">Copy Path</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // DOM Elements
+        let searchInput;
+        let allCards = [];
+
+        // GLB Viewer Modal elements
+        let glbViewerModal;
+        let modelViewerInstance;
+        let viewerFilenameDisplay;
+        let viewerFolderNumberDisplay;
+        let viewerDownloadButton;
+        let viewerCopyFolderButton;
+        let glbViewerCloseButton;
+
+        // Initial Warning Modal elements
+        let initialWarningModal;
+        let warningCloseButton;
+
+        // Helper function to reliably copy text to clipboard using document.execCommand
+        function copyTextToClipboard(text) {
+            let textarea = document.createElement('textarea');
+            textarea.value = text;
+            // Make the textarea invisible and outside the viewport
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            textarea.style.top = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    console.log('Text copied successfully!');
+                } else {
+                    console.warn('Copy command was unsuccessful.');
+                }
+            } catch (err) {
+                console.error('Error copying text:', err);
+            }
+            document.body.removeChild(textarea);
+        }
+
+        // Card Creation (Logic Preserved)
+        function createAndAppendCard(folder, filename, type) {
+            const card = document.createElement('div');
+            card.className = 'texture-card';
+            card.style.display = 'flex';
+            card.style.visibility = 'visible';
+            card.style.opacity = '1';
+
+            // Stagger animation delay based on current cards count
+            card.style.animationDelay = `${(allCards.length % 10) * 0.1}s`;
+
+            let mediaPath;
+
+            // We are now only handling GLB types
+            if (type.toLowerCase() === 'glb') {
+                card.className += ' glb';
+                mediaPath = `./assets/${folder}/1/${filename}`;
+
+                // Inner wrapper for background pattern
+                const cardInner = document.createElement('div');
+                cardInner.className = 'card-inner';
+
+                // Icon
+                const viewIcon = document.createElement('i');
+                viewIcon.className = 'fas fa-cube media-icon';
+                viewIcon.onclick = (event) => {
+                    event.stopPropagation();
+                    openGlbViewer(mediaPath, folder, filename);
+                };
+
+                // Filename
+                const glbFilenameDisplay = document.createElement('div');
+                glbFilenameDisplay.className = 'glb-filename-display';
+                glbFilenameDisplay.textContent = filename;
+
+                // Folder Button
+                const folderNumberButton = document.createElement('button');
+                folderNumberButton.className = 'folder-number-button';
+                folderNumberButton.textContent = `DIR: ${folder}`;
+                folderNumberButton.onclick = (event) => {
+                    event.stopPropagation();
+                    copyTextToClipboard(folder);
+                    folderNumberButton.textContent = 'COPIED!';
+                    setTimeout(() => {
+                        folderNumberButton.textContent = `DIR: ${folder}`;
+                    }, 1000);
+                };
+
+                // Buttons Wrapper
+                const glbButtonsWrapper = document.createElement('div');
+                glbButtonsWrapper.className = 'glb-buttons-wrapper';
+
+                // Download Button
+                const downloadButton = document.createElement('button');
+                downloadButton.className = 'download-button';
+                downloadButton.innerHTML = 'Download <i class="fas fa-download"></i>';
+                downloadButton.onclick = (event) => {
+                    event.stopPropagation();
+                    const link = document.createElement('a');
+                    link.href = mediaPath;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                };
+
+                // Copy Folder Button
+                const copyFolderButton = document.createElement('button');
+                copyFolderButton.className = 'copy-folder-button';
+                copyFolderButton.innerHTML = 'Copy Path <i class="fas fa-folder"></i>';
+                copyFolderButton.onclick = (event) => {
+                    event.stopPropagation();
+                    copyTextToClipboard(folder);
+                    copyFolderButton.textContent = 'PATH COPIED!';
+                    setTimeout(() => {
+                        copyFolderButton.innerHTML = 'Copy Path <i class="fas fa-folder"></i>';
+                    }, 1000);
+                };
+
+                glbButtonsWrapper.appendChild(downloadButton);
+                glbButtonsWrapper.appendChild(copyFolderButton);
+
+                // Append to inner wrapper
+                cardInner.appendChild(viewIcon);
+                cardInner.appendChild(glbFilenameDisplay);
+                cardInner.appendChild(folderNumberButton);
+                cardInner.appendChild(glbButtonsWrapper);
+
+                // Append inner wrapper to card
+                card.appendChild(cardInner);
+
+                // Card Click
+                card.onclick = () => {
+                    openGlbViewer(mediaPath, folder, filename);
+                };
+
+            } else {
+                console.warn(`Attempted to create a card of unsupported type: ${type}. Only 'glb' type is supported.`);
+                return;
+            }
+
+            document.getElementById('texture-grid').appendChild(card);
+            allCards.push(card);
+        }
+
+        // Search functionality
+        function filterCards() {
+            const searchTerm = searchInput.value.toLowerCase();
+
+            allCards.forEach(card => {
+                const filenameElement = card.querySelector('.glb-filename-display');
+                const folderButton = card.querySelector('.folder-number-button');
+
+                const filename = filenameElement ? filenameElement.textContent.toLowerCase() : '';
+                const folderName = folderButton ? folderButton.textContent.replace('DIR: ', '').toLowerCase() : '';
+
+                const matchesSearch = filename.includes(searchTerm) || folderName.includes(searchTerm);
+
+                if (matchesSearch) {
+                    card.style.display = 'flex';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        // GLB Viewer Functions
+        function openGlbViewer(glbPath, folder, filename) {
+            viewerFilenameDisplay.textContent = filename;
+            viewerFolderNumberDisplay.textContent = folder;
+
+            modelViewerInstance.src = glbPath;
+
+            viewerDownloadButton.onclick = () => {
+                const link = document.createElement('a');
+                link.href = glbPath;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            viewerCopyFolderButton.onclick = () => {
+                copyTextToClipboard(folder);
+                const originalText = viewerCopyFolderButton.textContent;
+                viewerCopyFolderButton.textContent = 'PATH COPIED!';
+                setTimeout(() => {
+                    viewerCopyFolderButton.textContent = originalText;
+                }, 1000);
+            };
+
+            const viewerContainer = document.querySelector('.glb-viewer-container');
+            viewerContainer.classList.remove('loaded');
+
+            glbViewerModal.classList.add('active');
+            if (modelViewerInstance.requestUpdate) {
+                modelViewerInstance.requestUpdate();
+            }
+        }
+
+        function closeGlbViewer() {
+            glbViewerModal.classList.remove('active');
+            const viewerContainer = document.querySelector('.glb-viewer-container');
+            viewerContainer.classList.remove('loaded');
+        }
+
+        // Warning Modal Functions
+        function showInitialWarning() {
+            initialWarningModal.classList.add('active');
+        }
+
+        function hideInitialWarning() {
+            initialWarningModal.classList.remove('active');
+        }
+
+        // Initialization
+        async function initializeGallery() {
+            try {
+                // Get DOM elements
+                glbViewerModal = document.getElementById('glb-viewer-modal');
+                modelViewerInstance = document.getElementById('model-viewer-instance');
+                viewerFilenameDisplay = document.getElementById('viewer-filename');
+                viewerFolderNumberDisplay = document.getElementById('viewer-folder-number');
+                viewerDownloadButton = document.getElementById('viewer-download-button');
+                viewerCopyFolderButton = document.getElementById('viewer-copy-folder-button');
+                glbViewerCloseButton = glbViewerModal.querySelector('.close-button');
+
+                initialWarningModal = document.getElementById('initial-warning-modal');
+                warningCloseButton = document.getElementById('warning-close-button');
+
+                // Event Listeners
+                glbViewerCloseButton.onclick = closeGlbViewer;
+                warningCloseButton.onclick = hideInitialWarning;
+
+                modelViewerInstance.addEventListener('load', () => {
+                    const viewerContainer = document.querySelector('.glb-viewer-container');
+                    viewerContainer.classList.add('loaded');
+                });
+
+                window.onclick = (event) => {
+                    if (event.target === glbViewerModal) {
+                        closeGlbViewer();
+                    } else if (event.target === initialWarningModal) {
+                        hideInitialWarning();
+                    }
+                };
+
+                // Search Setup
+                searchInput = document.getElementById('texture-search');
+                document.getElementById('search-button').addEventListener('click', filterCards);
+                document.getElementById('clear-search-button').addEventListener('click', () => {
+                    searchInput.value = '';
+                    filterCards();
+                });
+                searchInput.addEventListener('input', filterCards);
+
+                // Load Data (Logic preserved exactly)
+                try {
+                    const glbResponse = await fetch('glblist.txt');
+                    if (!glbResponse.ok) {
+                        console.error('Failed to fetch glblist.txt. Please ensure it exists and is accessible.');
+                    } else {
+                        const glbText = await glbResponse.text();
+                        const glbLines = glbText.trim().split('\n');
+
+                        for (const line of glbLines) {
+                            const [folder, filename] = line.split(' ');
+                            if (folder && filename) {
+                                createAndAppendCard(folder, filename, 'glb');
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error loading GLB files from glblist.txt:', error);
+                }
+
+                showInitialWarning();
+
+            } catch (error) {
+                console.error('Error initializing gallery:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initializeGallery);
+    </script>
+</body>
+
+</html>

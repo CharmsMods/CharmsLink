@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Build and Dist Outputs
+dist/
+build/
+.opencv-build/
+
+# Emscripten SDK and Compilers
+emsdk/
+
+# Temporary and Cache Directories
+.tmp*/
+.tmp_dnginspect/
+.tmp_dngproc/
+.cache/

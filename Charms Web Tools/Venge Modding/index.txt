@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MODDING_HUB // SYSTEM_V2</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* --- CSS VARIABLES & RESET --- */
+        :root {
+            /* Light Theme Palette */
+            --bg-color: #f0f0f0;
+            --surface-color: #ffffff;
+            --text-primary: #000000;
+            --text-secondary: #444444;
+            --accent-color: #ff3300; /* Intense Red/Orange */
+            --border-width: 3px;
+            --shadow-offset: 6px;
+            --border-color: #000000;
+            --font-main: 'Courier New', Courier, monospace;
+        }
+
+        body.dark-mode {
+            /* Dark Theme Palette */
+            --bg-color: #0a0a0a;
+            --surface-color: #111111;
+            --text-primary: #e0e0e0;
+            --text-secondary: #888888;
+            --accent-color: #00ff41; /* Terminal Green */
+            --border-color: #ffffff;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-main);
+            overflow-x: hidden;
+            transition: background-color 0.3s step-end, color 0.3s step-end;
+            line-height: 1.5;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        /* --- UTILITIES --- */
+        .brutal-border {
+            border: var(--border-width) solid var(--border-color);
+        }
+
+        .brutal-shadow {
+            box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--border-color);
+            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+        }
+
+        .brutal-shadow:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: calc(var(--shadow-offset) + 2px) calc(var(--shadow-offset) + 2px) 0px var(--accent-color);
+        }
+
+        .uppercase {
+            text-transform: uppercase;
+        }
+
+        /* --- NAVIGATION BAR --- */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background-color: var(--bg-color);
+            z-index: 1000;
+            border-bottom: var(--border-width) solid var(--border-color);
+        }
+
+        .brand {
+            font-size: 1.5rem;
+            font-weight: 900;
+            letter-spacing: -1px;
+            background: var(--text-primary);
+            color: var(--bg-color);
+            padding: 0.2rem 0.5rem;
+        }
+
+        .nav-controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .control-btn {
+            background: transparent;
+            border: var(--border-width) solid var(--border-color);
+            color: var(--text-primary);
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            font-size: 1.2rem;
+            transition: all 0.2s ease;
+        }
+
+        .control-btn:hover {
+            background: var(--text-primary);
+            color: var(--bg-color);
+        }
+
+        /* --- MOBILE MENU OVERLAY --- */
+        .menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            background: var(--bg-color);
+            z-index: 999;
+            transform: translateY(-100%);
+            transition: transform 0.4s cubic-bezier(0.76, 0, 0.24, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .menu-overlay.active {
+            transform: translateY(0);
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            width: 100%;
+            max-width: 1000px;
+        }
+
+        .menu-link {
+            border: var(--border-width) solid var(--border-color);
+            padding: 1.5rem;
+            font-size: 1.2rem;
+            font-weight: bold;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+            background: var(--surface-color);
+        }
+
+        .menu-link:hover {
+            background: var(--accent-color);
+            color: var(--bg-color);
+            border-color: var(--accent-color);
+        }
+
+        .close-menu-btn {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+            font-size: 2rem;
+            cursor: pointer;
+            border: none;
+            background: none;
+            color: var(--text-primary);
+        }
+
+        /* --- HERO SECTION --- */
+        .hero {
+            min-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 6rem 1rem 2rem;
+            text-align: center;
+            border-bottom: var(--border-width) solid var(--border-color);
+            background: 
+                linear-gradient(90deg, var(--border-color) 1px, transparent 1px),
+                linear-gradient(var(--border-color) 1px, transparent 1px);
+            background-size: 40px 40px;
+            background-position: center top;
+        }
+
+        .profile-container {
+            width: 150px;
+            height: 150px;
+            border: var(--border-width) solid var(--border-color);
+            margin-bottom: 2rem;
+            overflow: hidden;
+            background: var(--text-primary);
+            box-shadow: 10px 10px 0px var(--accent-color);
+        }
+
+        .profile-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: grayscale(100%) contrast(120%);
+            transition: filter 0.3s ease;
+        }
+
+        .profile-img:hover {
+            filter: grayscale(0%) contrast(100%);
+        }
+
+        .hero h1 {
+            font-size: clamp(3rem, 8vw, 6rem);
+            line-height: 0.9;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            font-weight: 900;
+            word-break: break-all;
+        }
+
+        .hero p {
+            font-size: 1.2rem;
+            max-width: 600px;
+            background: var(--accent-color);
+            color: var(--bg-color);
+            padding: 0.5rem 1rem;
+            display: inline-block;
+            font-weight: bold;
+        }
+
+        /* --- MARQUEE --- */
+        .marquee-wrapper {
+            border-bottom: var(--border-width) solid var(--border-color);
+            background: var(--text-primary);
+            color: var(--bg-color);
+            overflow: hidden;
+            white-space: nowrap;
+            padding: 0.5rem 0;
+        }
+
+        .marquee-content {
+            display: inline-block;
+            animation: scroll 20s linear infinite;
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        @keyframes scroll {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+
+        /* --- MAIN GRID --- */
+        .content-section {
+            padding: 4rem 1rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .section-title {
+            font-size: 2rem;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .section-title::before {
+            content: '';
+            display: block;
+            width: 20px;
+            height: 20px;
+            background: var(--accent-color);
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 2rem;
+        }
+
+        .card {
+            background: var(--surface-color);
+            border: var(--border-width) solid var(--border-color);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 300px;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .card-number {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 3rem;
+            font-weight: 900;
+            opacity: 0.1;
+            color: var(--text-primary);
+        }
+
+        .card h3 {
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            line-height: 1.1;
+        }
+
+        .card p {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            flex-grow: 1;
+        }
+
+        .card-btn {
+            display: inline-block;
+            width: 100%;
+            padding: 1rem;
+            background: transparent;
+            border: var(--border-width) solid var(--border-color);
+            text-align: center;
+            font-weight: bold;
+            text-transform: uppercase;
+            transition: 0.2s;
+            cursor: pointer;
+        }
+
+        .card:hover .card-btn {
+            background: var(--text-primary);
+            color: var(--bg-color);
+            border-color: var(--text-primary);
+        }
+        
+        .card:hover {
+             border-color: var(--accent-color);
+        }
+
+        /* --- FOOTER --- */
+        footer {
+            border-top: var(--border-width) solid var(--border-color);
+            padding: 3rem 1rem;
+            text-align: center;
+            background: var(--surface-color);
+            margin-top: 4rem;
+        }
+
+        .footer-content p {
+            margin-bottom: 0.5rem;
+        }
+
+        .social-link {
+            font-size: 1.5rem;
+            margin: 0 10px;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .social-link:hover {
+            color: var(--accent-color);
+            border-bottom: 2px solid var(--accent-color);
+        }
+
+        /* --- ANIMATIONS & RESPONSIVE --- */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 3.5rem;
+            }
+            .navbar {
+                padding: 1rem;
+            }
+            .grid-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Loading Overlay Animation */
+        .loader-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-color);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: opacity 0.5s ease;
+        }
+        
+        .loader-box {
+            width: 100px;
+            height: 100px;
+            border: 5px solid var(--text-primary);
+            animation: spin 2s infinite steps(4);
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Loading Screen -->
+    <div class="loader-overlay" id="loader">
+        <div class="loader-box"></div>
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="brand">MODDING_HUB</div>
+        <div class="nav-controls">
+            <button id="themeToggle" class="control-btn" aria-label="Toggle Theme">
+                <i class="fas fa-adjust"></i>
+            </button>
+            <button id="menuToggle" class="control-btn brutal-border" aria-label="Open Menu">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Mobile/Full Screen Menu Overlay -->
+    <div class="menu-overlay" id="menuOverlay">
+        <button class="close-menu-btn" id="closeMenuBtn">
+            <i class="fas fa-times"></i>
+        </button>
+        <div class="menu-grid">
+            <a href="weapons/weapons.html" class="menu-link brutal-shadow">WEAPONS INFO</a>
+        </div>
+    </div>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="profile-container">
+            <img src="pfp.png" alt="Profile Picture" class="profile-img">
+        </div>
+        <h1>Modding<br>Hub</h1>
+        <p>// YOUR COMPLETE RESOURCE //</p>
+    </header>
+
+    <!-- Scrolling Marquee -->
+    <div class="marquee-wrapper">
+        <div class="marquee-content">
+            SYSTEM READY // WELCOME USER // ACCESS GRANTED // CREATE YOUR OWN ADVENTURE // RESOURCES LOADED // SYSTEM READY // WELCOME USER // ACCESS GRANTED // CREATE YOUR OWN ADVENTURE // RESOURCES LOADED //
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="content-section">
+        <div class="section-title uppercase">Select_Module</div>
+        
+        <div class="grid-container">
+            
+            <!-- Repository Card -->
+            <div class="card brutal-shadow">
+                <span class="card-number">01</span>
+                <div>
+                    <h3>Modding Repository</h3>
+                    <p>Access our comprehensive collection of modding resources and tools.</p>
+                </div>
+                <a href="https://charmsmods.github.io/Modding-Repository-V2-Official-/" class="card-btn">Enter Database</a>
+            </div>
+
+            <!-- GLB Viewer Card -->
+            <div class="card brutal-shadow">
+                <span class="card-number">02</span>
+                <div>
+                    <h3>GLB Models & Viewer</h3>
+                    <p>A list of all 3D models and a window to view them in real-time.</p>
+                </div>
+                <a href="https://charmsmods.github.io/.glb-Viewer/" class="card-btn">Launch Viewer</a>
+            </div>
+
+            <!-- How to Make a Mod -->
+            <div class="card brutal-shadow">
+                <span class="card-number">03</span>
+                <div>
+                    <h3>How to Make a Mod</h3>
+                    <p>Learn the art of modding with our step-by-step guides and documentation.</p>
+                </div>
+                <a href="makeamod/makeamod.html" class="card-btn">Read Guides</a>
+            </div>
+
+            <!-- CSS/JS Code -->
+            <div class="card brutal-shadow">
+                <span class="card-number">04</span>
+                <div>
+                    <h3>CSS and JS Code</h3>
+                    <p>Learn how to use CSS and JS to change the way your game looks and feels.</p>
+                </div>
+                <a href="jscss/jscss.html" class="card-btn">View Code</a>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <p class="uppercase" style="font-weight: bold; font-size: 1.2rem;">Modding Hub</p>
+            <p class="uppercase" style="opacity: 0.7;">Copyright © 2025 Charm?</p>
+            <div style="margin-top: 1.5rem;">
+                <a href="https://discord.gg/jpKwHAZkEm" class="social-link"><i class="fab fa-discord"></i></a>
+                <a href="#" class="social-link"><i class="fab fa-github"></i></a>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Logic -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Elements ---
+            const themeToggle = document.getElementById('themeToggle');
+            const menuToggle = document.getElementById('menuToggle');
+            const closeMenuBtn = document.getElementById('closeMenuBtn');
+            const menuOverlay = document.getElementById('menuOverlay');
+            const body = document.body;
+            const loader = document.getElementById('loader');
+
+            // --- Loading Animation ---
+            window.addEventListener('load', () => {
+                setTimeout(() => {
+                    loader.style.opacity = '0';
+                    setTimeout(() => {
+                        loader.style.display = 'none';
+                    }, 500);
+                }, 500); // Small delay for effect
+            });
+
+            // --- Theme Logic ---
+            // Check for saved preference
+            const savedTheme = localStorage.getItem('theme');
+            if (savedTheme === 'dark') {
+                body.classList.add('dark-mode');
+            }
+
+            themeToggle.addEventListener('click', () => {
+                body.classList.toggle('dark-mode');
+                
+                // Save preference
+                if (body.classList.contains('dark-mode')) {
+                    localStorage.setItem('theme', 'dark');
+                } else {
+                    localStorage.setItem('theme', 'light');
+                }
+            });
+
+            // --- Menu Logic ---
+            function toggleMenu() {
+                menuOverlay.classList.toggle('active');
+                
+                // Toggle icon between bars and times
+                const icon = menuToggle.querySelector('i');
+                if (menuOverlay.classList.contains('active')) {
+                    icon.classList.remove('fa-bars');
+                    icon.classList.add('fa-times');
+                } else {
+                    icon.classList.remove('fa-times');
+                    icon.classList.add('fa-bars');
+                }
+            }
+
+            menuToggle.addEventListener('click', toggleMenu);
+            closeMenuBtn.addEventListener('click', toggleMenu);
+
+            // Close menu when clicking a link
+            const menuLinks = document.querySelectorAll('.menu-link');
+            menuLinks.forEach(link => {
+                link.addEventListener('click', () => {
+                    menuOverlay.classList.remove('active');
+                    const icon = menuToggle.querySelector('i');
+                    icon.classList.remove('fa-times');
+                    icon.classList.add('fa-bars');
+                });
+            });
+
+            // --- Brutalist Interaction Details ---
+            // Add a slight "glitch" or "shift" effect on click for buttons
+            const buttons = document.querySelectorAll('.card-btn, .control-btn');
+            buttons.forEach(btn => {
+                btn.addEventListener('mousedown', () => {
+                    btn.style.transform = 'translate(2px, 2px)';
+                    btn.style.boxShadow = 'none';
+                });
+                btn.addEventListener('mouseup', () => {
+                    btn.style.transform = 'translate(-2px, -2px)';
+                    btn.style.boxShadow = ''; // Reset to CSS hover state
+                });
+                btn.addEventListener('mouseleave', () => {
+                    btn.style.transform = '';
+                    btn.style.boxShadow = '';
+                });
+            });
+        });
+    </script>
+</body>
+</html>

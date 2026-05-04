@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weapons Guide // VENGE.IO_DB</title>
+  <style>
+    /* 
+      BRUTALIST RESET & VARIABLES 
+    */
+    :root {
+      --bg-dark: #0c0c0c;
+      --bg-panel: #141414;
+      --cream: #e6dec8;
+      --cream-dim: #8a8476;
+      --accent: #ff3333;
+      /* Harsh Red for alerts */
+      --border-thick: 3px solid var(--cream);
+      --border-thin: 1px solid var(--cream-dim);
+      --font-main: 'Courier New', Courier, monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--cream);
+      font-family: var(--font-main);
+      overflow-x: hidden;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* 
+      LAYOUT & CONTAINER 
+    */
+    .weapons-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0;
+      background: transparent;
+      border-left: var(--border-thin);
+      border-right: var(--border-thin);
+      min-height: 100vh;
+      position: relative;
+    }
+
+    /* 
+      TYPOGRAPHY & HEADER 
+    */
+    .weapons-title {
+      font-size: clamp(3rem, 8vw, 6rem);
+      text-transform: uppercase;
+      border-bottom: var(--border-thick);
+      padding: 2rem;
+      background: var(--bg-dark);
+      position: relative;
+      z-index: 10;
+      text-shadow: 4px 4px 0px var(--bg-panel);
+      letter-spacing: -2px;
+      overflow: hidden;
+    }
+
+    /* Glitch Animation for Title */
+    .weapons-title::before,
+    .weapons-title::after {
+      content: attr(data-text);
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg-dark);
+    }
+
+    .weapons-title::before {
+      left: 2px;
+      text-shadow: -1px 0 #ff00c1;
+      clip: rect(44px, 450px, 56px, 0);
+      animation: glitch-anim 5s infinite linear alternate-reverse;
+    }
+
+    .weapons-title::after {
+      left: -2px;
+      text-shadow: -1px 0 #00fff9;
+      clip: rect(44px, 450px, 56px, 0);
+      animation: glitch-anim2 5s infinite linear alternate-reverse;
+    }
+
+    .weapons-intro {
+      font-size: 1.1rem;
+      color: var(--cream);
+      background: var(--bg-panel);
+      border-bottom: var(--border-thin);
+      padding: 2rem;
+      line-height: 1.5;
+      text-align: left;
+      position: relative;
+    }
+
+    .weapons-intro::before {
+      content: "SYSTEM_MSG // ";
+      font-weight: bold;
+      color: var(--accent);
+    }
+
+    /* 
+      MARQUEE (New Brutalist Element)
+    */
+    .marquee-strip {
+      background: var(--accent);
+      color: var(--bg-dark);
+      font-weight: bold;
+      text-transform: uppercase;
+      overflow: hidden;
+      white-space: nowrap;
+      border-top: var(--border-thin);
+      border-bottom: var(--border-thin);
+      font-size: 0.9rem;
+      padding: 0.5rem 0;
+    }
+
+    .marquee-content {
+      display: inline-block;
+      animation: marquee 15s linear infinite;
+    }
+
+    /* 
+      CATEGORIES 
+    */
+    .weapon-category {
+      border-bottom: var(--border-thin);
+      padding: 2rem;
+      position: relative;
+    }
+
+    .category-title {
+      font-size: 2.5rem;
+      text-transform: uppercase;
+      margin-bottom: 2rem;
+      background: var(--cream);
+      color: var(--bg-dark);
+      display: inline-block;
+      padding: 0.2rem 1rem;
+      transform: rotate(-1deg);
+      box-shadow: 5px 5px 0px rgba(255, 255, 255, 0.1);
+    }
+
+    /* 
+      WEAPONS GRID (Exposed Structure)
+    */
+    .weapons-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 0;
+      /* No gap for brutalism, borders divide */
+      border: var(--border-thick);
+      background: var(--bg-dark);
+    }
+
+    /* 
+      WEAPON CARD (Dossier Style)
+    */
+    .weapon-card {
+      border: 1px solid var(--cream-dim);
+      border-top: 1px solid var(--cream);
+      padding: 0;
+      background: var(--bg-panel);
+      position: relative;
+      transition: all 0.1s steps(2);
+      /* Instant, mechanical transition */
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Hover Effect: Invert colors */
+    .weapon-card:hover {
+      background: var(--cream);
+      color: var(--bg-dark);
+      border: 1px solid var(--bg-dark);
+      z-index: 2;
+      transform: scale(1.01);
+      box-shadow: -10px 10px 0px var(--bg-dark);
+    }
+
+    .weapon-card:hover .weapon-name,
+    .weapon-card:hover .stat-label,
+    .weapon-card:hover .stat-value,
+    .weapon-card:hover .weapon-description,
+    .weapon-card:hover .category-title {
+      color: var(--bg-dark);
+    }
+
+    .weapon-card:hover .weapon-icon {
+      color: var(--bg-dark);
+      border-color: var(--bg-dark);
+      background: transparent;
+    }
+
+    .weapon-card:hover .stat-item {
+      border-left-color: var(--bg-dark);
+      background: rgba(0, 0, 0, 0.05);
+    }
+
+    .weapon-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.5rem;
+      border-bottom: 1px dashed var(--cream-dim);
+    }
+
+    .weapon-icon {
+      width: 80px;
+      height: 80px;
+      border: 2px solid var(--cream);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 3rem;
+      background: transparent;
+    }
+
+    .weapon-name {
+      font-size: 2.2rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-align: right;
+    }
+
+    .weapon-description {
+      padding: 1.5rem;
+      font-size: 0.95rem;
+      border-bottom: 1px solid var(--cream-dim);
+      min-height: 120px;
+      opacity: 0.9;
+    }
+
+    /* 
+      STATS (Grid Layout)
+    */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-top: 1px solid var(--cream-dim);
+    }
+
+    .stat-item {
+      padding: 1.5rem;
+      border-right: 1px solid var(--cream-dim);
+      border-bottom: 1px solid var(--cream-dim);
+      position: relative;
+    }
+
+    .stat-item:nth-child(even) {
+      border-right: none;
+    }
+
+    .stat-item:nth-last-child(-n+2) {
+      border-bottom: none;
+    }
+
+    .stat-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      display: block;
+      margin-bottom: 0.5rem;
+      opacity: 0.7;
+    }
+
+    .stat-value {
+      font-size: 1.8rem;
+      font-weight: 700;
+      font-family: 'Oswald', sans-serif;
+      /* Industrial font fallback */
+    }
+
+    /* 
+      SPECIAL NOTE (Warning Box)
+    */
+    .special-note {
+      background: var(--bg-dark);
+      color: var(--accent);
+      padding: 1rem;
+      text-align: center;
+      text-transform: uppercase;
+      font-weight: bold;
+      border-top: var(--border-thick);
+      letter-spacing: 1px;
+      animation: text-flash 2s infinite;
+      position: relative;
+    }
+
+    .weapon-card:hover .special-note {
+      background: var(--bg-dark);
+      color: var(--accent);
+      /* Keep warning red */
+    }
+
+    /* 
+      BACK BUTTON 
+    */
+    .back-button-container {
+      padding: 4rem 2rem;
+      text-align: center;
+      border-top: var(--border-thick);
+    }
+
+    .link-button {
+      display: inline-block;
+      padding: 1.5rem 4rem;
+      background: var(--bg-panel);
+      color: var(--cream);
+      text-decoration: none;
+      font-size: 1.5rem;
+      text-transform: uppercase;
+      font-weight: bold;
+      border: 2px solid var(--cream);
+      position: relative;
+      transition: 0.2s;
+    }
+
+    .link-button:hover {
+      background: var(--cream);
+      color: var(--bg-dark);
+      box-shadow: 10px 10px 0px var(--accent);
+      transform: translate(-2px, -2px);
+    }
+
+    /* 
+      UTILS & DECORATIONS 
+    */
+    .discord-float {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      background: var(--bg-dark);
+      color: var(--cream);
+      border: 2px solid var(--accent);
+      padding: 1rem;
+      max-width: 300px;
+      z-index: 100;
+      box-shadow: 5px 5px 0px rgba(0, 0, 0, 0.5);
+    }
+
+    .discord-float::before {
+      content: "ID: ";
+      color: var(--accent);
+      font-weight: bold;
+    }
+
+    /* Scanline Overlay */
+    .scanlines {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(to bottom,
+          rgba(255, 255, 255, 0),
+          rgba(255, 255, 255, 0) 50%,
+          rgba(0, 0, 0, 0.2) 50%,
+          rgba(0, 0, 0, 0.2));
+      background-size: 100% 4px;
+      pointer-events: none;
+      z-index: 999;
+    }
+
+    /* 
+      ANIMATIONS 
+    */
+    @keyframes marquee {
+      0% {
+        transform: translateX(100%);
+      }
+
+      100% {
+        transform: translateX(-100%);
+      }
+    }
+
+    @keyframes glitch-anim {
+      0% {
+        clip: rect(20px, 9999px, 10px, 0);
+      }
+
+      20% {
+        clip: rect(60px, 9999px, 70px, 0);
+      }
+
+      40% {
+        clip: rect(10px, 9999px, 50px, 0);
+      }
+
+      60% {
+        clip: rect(80px, 9999px, 20px, 0);
+      }
+
+      80% {
+        clip: rect(30px, 9999px, 60px, 0);
+      }
+
+      100% {
+        clip: rect(50px, 9999px, 90px, 0);
+      }
+    }
+
+    @keyframes glitch-anim2 {
+      0% {
+        clip: rect(60px, 9999px, 70px, 0);
+      }
+
+      20% {
+        clip: rect(10px, 9999px, 40px, 0);
+      }
+
+      40% {
+        clip: rect(90px, 9999px, 10px, 0);
+      }
+
+      60% {
+        clip: rect(15px, 9999px, 60px, 0);
+      }
+
+      80% {
+        clip: rect(45px, 9999px, 85px, 0);
+      }
+
+      100% {
+        clip: rect(30px, 9999px, 20px, 0);
+      }
+    }
+
+    @keyframes text-flash {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    @keyframes slideInHard {
+      from {
+        transform: translateY(50px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .animate-in {
+      animation: slideInHard 0.4s cubic-bezier(0.19, 1, 0.22, 1) forwards;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .weapons-title {
+        font-size: 2.5rem;
+      }
+
+      .weapons-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .weapon-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 1rem;
+      }
+
+      .weapon-name {
+        text-align: left;
+      }
+
+      .stat-item {
+        border-right: none !important;
+      }
+
+      .stats-grid {
+        border: none;
+      }
+
+      .stat-item {
+        border-bottom: 1px solid var(--cream-dim);
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Visual Noise Overlay -->
+  <div class="scanlines"></div>
+
+  <div class="weapons-container">
+
+    <div class="marquee-strip">
+      <div class="marquee-content">
+        // CAUTION: LIVE AMMUNITION DATA // VENGE.IO CLASSIFIED // DO NOT DISTRIBUTE // SYSTEM STATUS: UNSTABLE //
+        // CAUTION: LIVE AMMUNITION DATA // VENGE.IO CLASSIFIED // DO NOT DISTRIBUTE // SYSTEM STATUS: UNSTABLE //
+      </div>
+    </div>
+
+    <h1 class="weapons-title" data-text="🔫 VENGE.IO WEAPONS GUIDE">🔫 VENGE.IO WEAPONS GUIDE</h1>
+
+    <p class="weapons-intro">
+      Master the arsenal! Discover weapon stats, damage values, and tactical insights for every gun in Venge.io.
+      Choose your loadout wisely and dominate the battlefield with the perfect weapon combination.
+    </p>
+
+    <!-- Assault Rifles -->
+    <div class="weapon-category">
+      <h2 class="category-title">⚡ Assault Rifles</h2>
+      <div class="weapons-grid">
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">🔥</div>
+            <h3 class="weapon-name">SCAR</h3>
+          </div>
+          <p class="weapon-description">
+            The most famous weapon in Venge! A balanced assault rifle perfect for general playstyles.
+            Reliable performance across all combat situations.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">13</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.06s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">25</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Reload</div>
+              <div class="stat-value">2.2s</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ BEST ALL-AROUND WEAPON</div>
+        </div>
+
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">⚡</div>
+            <h3 class="weapon-name">M4</h3>
+          </div>
+          <p class="weapon-description">
+            High fire rate assault rifle with less spread than SCAR but higher recoil.
+            Effective with burst fire at mid to far distances.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">13</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.04s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">25</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Reload</div>
+              <div class="stat-value">2.2s</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ HIGHEST FIRE RATE</div>
+        </div>
+
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">💥</div>
+            <h3 class="weapon-name">AK-47</h3>
+          </div>
+          <p class="weapon-description">
+            High damage rifle with reliable single-shot potential. Higher spread makes it challenging
+            but rewarding for skilled players. Effective at mid to far range.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">18</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.09s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">30</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Reload</div>
+              <div class="stat-value">2.2s</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ HIGHEST RIFLE DAMAGE</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sniper Rifles -->
+    <div class="weapon-category">
+      <h2 class="category-title">🎯 Sniper Rifles</h2>
+      <div class="weapons-grid">
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">🔭</div>
+            <h3 class="weapon-name">Sniper</h3>
+          </div>
+          <p class="weapon-description">
+            Original sharp shooting rifle with semi-automatic capability. Perfect for medium to far range
+            with minimal damage drop-off over distance.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">38</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.5s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">6</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Zoom FOV</div>
+              <div class="stat-value">40°</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ SEMI-AUTOMATIC PRECISION</div>
+        </div>
+
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">💀</div>
+            <h3 class="weapon-name">AWP</h3>
+          </div>
+          <p class="weapon-description">
+            The ultimate sharp shooter rifle! Often deals fatal damage with the highest zoom rate.
+            Designed for sub-zero temperatures with manual bolt action.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">95</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">1.3s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">4</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Zoom FOV</div>
+              <div class="stat-value">15°</div>
+            </div>
+          </div>
+          <div class="special-note">☠ ONE-SHOT ELIMINATOR</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Close Combat -->
+    <div class="weapon-category">
+      <h2 class="category-title">💥 Close Combat</h2>
+      <div class="weapons-grid">
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">🔫</div>
+            <h3 class="weapon-name">Shotgun</h3>
+          </div>
+          <p class="weapon-description">
+            The only scattergun in Venge, firing 8 projectiles per shot. Devastating at close range
+            with exponential spread over distance. Perfect for tight corridors.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">9x8</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.85s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">3</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Spread</div>
+              <div class="stat-value">8 Pellets</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ CLOSE RANGE DESTROYER</div>
+        </div>
+
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">🌪️</div>
+            <h3 class="weapon-name">Tec-9</h3>
+          </div>
+          <p class="weapon-description">
+            Fastest fire rate weapon in Venge! This SMG excels in close to mid-range combat
+            but becomes uncontrollable at longer distances.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">12</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.032s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">25</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Range</div>
+              <div class="stat-value">Close-Mid</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ SPEED DEMON</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Special Weapons -->
+    <div class="weapon-category">
+      <h2 class="category-title">🌟 Special Weapons</h2>
+      <div class="weapons-grid">
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">🔥</div>
+            <h3 class="weapon-name">Desert Eagle</h3>
+          </div>
+          <p class="weapon-description">
+            The only pistol in Venge with high damage and minimal shooting restrictions.
+            High recoil and spread make it challenging but rewarding for skilled players.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">18</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.16s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">12</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Range</div>
+              <div class="stat-value">Close-Mid</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ PRECISION SIDEARM</div>
+        </div>
+
+        <div class="weapon-card">
+          <div class="weapon-header">
+            <div class="weapon-icon">🔫</div>
+            <h3 class="weapon-name">LMG</h3>
+          </div>
+          <p class="weapon-description">
+            Light Machine Gun with the highest ammo capacity in Venge. High spread and recoil
+            balanced by sustained firepower. Currently exclusive to Gun Game mode.
+          </p>
+          <div class="stats-grid">
+            <div class="stat-item">
+              <div class="stat-label">Damage</div>
+              <div class="stat-value">20</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Fire Rate</div>
+              <div class="stat-value">0.07s</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Ammo</div>
+              <div class="stat-value">50</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-label">Reload</div>
+              <div class="stat-value">3.5s</div>
+            </div>
+          </div>
+          <div class="special-note">⚠ SUSTAINED FIREPOWER</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="back-button-container">
+      <a href="../mainpage.html" class="link-button"><span>← DISCONNECT / BACK</span></a>
+    </div>
+  </div>
+
+  <!-- Brutalist Discord Box -->
+  <div class="discord-float">
+    Friend me on Discord as: "clouds_forever"
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      // Brutalist Scroll Animation Logic
+      const observerOptions = {
+        threshold: 0.1,
+        rootMargin: '0px 0px -50px 0px'
+      };
+
+      const observer = new IntersectionObserver(function (entries) {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('animate-in');
+            // Stop observing once animated
+            observer.unobserve(entry.target);
+          }
+        });
+      }, observerOptions);
+
+      // Observe cards for mechanical sliding effect
+      document.querySelectorAll('.weapon-card').forEach(card => {
+        card.style.opacity = '0'; // Initially hidden
+        observer.observe(card);
+      });
+
+      // Sound Effect Simulation (Visual Only - Screen Shake)
+      document.querySelectorAll('.weapon-card').forEach(card => {
+        card.addEventListener('mouseenter', function () {
+          // Add a tiny random shake to the body on hover for "impact"
+          const x = Math.random() * 2 - 1;
+          const y = Math.random() * 2 - 1;
+          document.body.style.transform = `translate(${x}px, ${y}px)`;
+        });
+
+        card.addEventListener('mouseleave', function () {
+          document.body.style.transform = `translate(0px, 0px)`;
+        });
+      });
+
+      // Random "Glitch" text effect on Stat Values
+      setInterval(() => {
+        const stats = document.querySelectorAll('.stat-value');
+        if (stats.length > 0) {
+          const randomStat = stats[Math.floor(Math.random() * stats.length)];
+          const originalText = randomStat.innerText;
+
+          // Glitch for 100ms
+          randomStat.innerText = Math.floor(Math.random() * 99);
+          randomStat.style.color = '#fff';
+
+          setTimeout(() => {
+            randomStat.innerText = originalText;
+            randomStat.style.color = ''; // Revert to CSS default
+          }, 100);
+        }
+      }, 2000);
+    });
+  </script>
+</body>
+
+</html>

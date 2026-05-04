@@ -1,0 +1,12 @@
+The swapper by default comes with Geno mod installed [https://github.com/Tomogunchi/GenoMod]
+
+_______________________________________________
+
+
+HOW TO INSTALL CUSTOM MODS
+
+_______________________________________________
+
+1. Delete the "files" folder from the directory.
+2. Paste the "files" folder of the mod you want to use.
+3. restart the browser or alternatively you can go to "chrome://extensions/" and reload the extension from there.

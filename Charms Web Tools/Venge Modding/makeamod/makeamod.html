@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Charm? - Mod Creation Guide</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap"
+    rel="stylesheet">
+
+  <style>
+    /* --- CSS VARIABLES & RESET --- */
+    :root {
+      /* Lighter Theme Palette */
+      --bg-color: #f0ece3;
+      /* Architectural Paper Cream */
+      --card-bg: #ffffff;
+      --text-color: #1c1c1c;
+      /* Ink Black */
+      --text-muted: #555555;
+
+      /* Accents */
+      --accent-lime: #b4ff00;
+      /* Acid Lime */
+      --accent-red: #ff2a2a;
+      --accent-blue: #00a8ff;
+
+      /* Structural */
+      --border-thick: 3px solid var(--text-color);
+      --border-thin: 1px solid var(--text-color);
+      --font-display: 'Archivo Black', sans-serif;
+      --font-mono: 'Space Mono', monospace;
+      --shadow-hard: 6px 6px 0px var(--text-color);
+      --shadow-hover: 2px 2px 0px var(--text-color);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      cursor: none;
+      /* Custom cursor */
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: var(--font-mono);
+      line-height: 1.6;
+      width: 100%;
+      min-height: 100vh;
+      /* Noise Texture */
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+    }
+
+    /* --- CUSTOM CURSOR --- */
+    #cursor {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 16px;
+      height: 16px;
+      background: var(--text-color);
+      border-radius: 0;
+      /* Square for brutalism */
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%, -50%);
+      transition: width 0.2s, height 0.2s, background-color 0.2s;
+    }
+
+    #cursor.hovered {
+      width: 40px;
+      height: 40px;
+      background: var(--accent-lime);
+      mix-blend-mode: difference;
+    }
+
+    /* --- LAYOUT --- */
+    .app-container {
+      display: flex;
+      max-width: 1400px;
+      margin: 0 auto;
+      position: relative;
+      padding: 2rem;
+    }
+
+    /* Sticky Sidebar Navigation */
+    .sidebar {
+      position: sticky;
+      top: 2rem;
+      height: fit-content;
+      width: 250px;
+      flex-shrink: 0;
+      margin-right: 3rem;
+      display: none;
+      /* Hidden on mobile by default */
+      border-right: var(--border-thick);
+      padding-right: 1.5rem;
+    }
+
+    @media (min-width: 1000px) {
+      .sidebar {
+        display: block;
+      }
+    }
+
+    .nav-link {
+      display: block;
+      text-decoration: none;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: bold;
+      text-transform: uppercase;
+      padding: 0.5rem 0;
+      border-left: 2px solid transparent;
+      padding-left: 1rem;
+      transition: all 0.2s;
+    }
+
+    .nav-link:hover,
+    .nav-link.active {
+      color: var(--text-color);
+      border-left: 2px solid var(--text-color);
+      padding-left: 1.5rem;
+      background: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Main Content Column */
+    .main-content {
+      flex-grow: 1;
+      max-width: 100%;
+      /* Full width on mobile */
+    }
+
+    @media (min-width: 1000px) {
+      .main-content {
+        max-width: 900px;
+      }
+    }
+
+    /* --- TYPOGRAPHY & COMPONENTS --- */
+
+    h1,
+    h2,
+    h3,
+    h4 {
+      text-transform: uppercase;
+      letter-spacing: -1px;
+      margin-bottom: 1rem;
+      color: var(--text-color);
+    }
+
+    h1 {
+      font-family: var(--font-display);
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      line-height: 0.9;
+      margin-bottom: 0.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    h1::after {
+      content: attr(data-text);
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 100%;
+      height: 100%;
+      color: transparent;
+      -webkit-text-stroke: 1px var(--text-color);
+      z-index: -1;
+      opacity: 0.3;
+    }
+
+    h2 {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      border-bottom: var(--border-thick);
+      padding-bottom: 0.5rem;
+      margin-top: 3rem;
+      background: var(--accent-lime);
+      display: inline-block;
+      transform: rotate(-0.5deg);
+      box-shadow: 4px 4px 0px var(--text-color);
+    }
+
+    h3 {
+      font-size: 1.4rem;
+      margin-top: 2rem;
+      text-decoration: underline;
+      text-decoration-thickness: 2px;
+    }
+
+    h4 {
+      font-size: 1.2rem;
+      margin-top: 1.5rem;
+      font-weight: bold;
+    }
+
+    p {
+      font-size: 1.05rem;
+      margin-bottom: 1.2rem;
+      color: #333;
+    }
+
+    strong {
+      font-weight: 700;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    /* Cards/Sections */
+    .content-card {
+      background: var(--card-bg);
+      border: var(--border-thick);
+      padding: 2rem;
+      margin-bottom: 3rem;
+      box-shadow: var(--shadow-hard);
+      position: relative;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .content-card:hover {
+      transform: translate(-2px, -2px);
+      box-shadow: 8px 8px 0px var(--text-color);
+    }
+
+    /* Warning Marquee */
+    .marquee-container {
+      width: 100%;
+      overflow: hidden;
+      background: var(--accent-red);
+      color: #fff;
+      padding: 1rem 0;
+      border: var(--border-thick);
+      transform: rotate(1deg) scale(1.02);
+      margin: 2rem 0;
+      font-weight: bold;
+      text-transform: uppercase;
+      box-shadow: var(--shadow-hard);
+    }
+
+    .marquee-content {
+      display: flex;
+      white-space: nowrap;
+      animation: marquee 20s linear infinite;
+    }
+
+    .marquee-item {
+      padding: 0 2rem;
+    }
+
+    @keyframes marquee {
+      0% {
+        transform: translateX(0);
+      }
+
+      100% {
+        transform: translateX(-50%);
+      }
+    }
+
+    /* Info Boxes */
+    .box {
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      border: 2px solid var(--text-color);
+      background: #fff;
+      box-shadow: 4px 4px 0px var(--text-color);
+    }
+
+    .warning-box {
+      background: #ffecec;
+      border-color: var(--accent-red);
+    }
+
+    .warning-box strong {
+      color: var(--accent-red);
+      text-decoration: none;
+    }
+
+    .warning-box::before {
+      content: "WARNING ";
+      font-weight: bold;
+    }
+
+    .tip-box {
+      background: #faffd8;
+      border-color: #aaaa00;
+    }
+
+    .tip-box strong {
+      color: #888800;
+      text-decoration: none;
+    }
+
+    .tip-box::before {
+      content: "TIP ";
+      font-weight: bold;
+    }
+
+    .info-box {
+      background: #eafaff;
+      border-color: var(--accent-blue);
+    }
+
+    .info-box strong {
+      color: #0077aa;
+      text-decoration: none;
+    }
+
+    .info-box::before {
+      content: "INFO ";
+      font-weight: bold;
+    }
+
+    /* Lists */
+    ul,
+    ol {
+      margin-left: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    li {
+      margin-bottom: 0.5rem;
+      list-style-type: square;
+    }
+
+    /* Code Blocks */
+    .code-block {
+      background: #2d2d2d;
+      border: var(--border-thick);
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      position: relative;
+      font-family: var(--font-mono);
+      font-size: 0.9rem;
+      overflow-x: auto;
+      /* Prevent overflow */
+      color: #e0e0e0;
+      box-shadow: 4px 4px 0px var(--accent-blue);
+    }
+
+    .code-block code {
+      background: transparent;
+      color: inherit;
+      padding: 0;
+      border: none;
+      white-space: pre;
+      /* Keep formatting */
+    }
+
+    /* Syntax Highlighting */
+    .code-pink {
+      color: #ff79c6;
+    }
+
+    .code-green {
+      color: #50fa7b;
+    }
+
+    .code-purple {
+      color: #bd93f9;
+    }
+
+    .code-cyan {
+      color: #8be9fd;
+    }
+
+    .code-red {
+      color: #ff5555;
+    }
+
+    .code-yellow {
+      color: #f1fa8c;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0;
+      right: 0;
+      background: var(--text-color);
+      color: #fff;
+      border: none;
+      padding: 0.5rem 1rem;
+      font-family: var(--font-mono);
+      font-weight: bold;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .copy-btn:hover {
+      background: var(--accent-lime);
+      color: #000;
+    }
+
+    /* Links */
+    a.guide-link {
+      color: var(--text-color);
+      text-decoration: none;
+      background: var(--accent-lime);
+      padding: 0 4px;
+      font-weight: bold;
+      transition: all 0.2s;
+    }
+
+    a.guide-link:hover {
+      background: var(--text-color);
+      color: var(--accent-lime);
+    }
+
+    /* Buttons */
+    .fixed-btns {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      z-index: 100;
+    }
+
+    .brutal-btn {
+      padding: 1rem 1.5rem;
+      background: var(--text-color);
+      color: var(--bg-color);
+      text-decoration: none;
+      font-family: var(--font-display);
+      font-size: 1rem;
+      text-transform: uppercase;
+      border: var(--border-thick);
+      box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.2);
+      transition: transform 0.1s;
+      text-align: center;
+    }
+
+    .brutal-btn:hover {
+      transform: translate(-2px, -2px);
+      background: var(--accent-lime);
+      color: #000;
+    }
+
+    .brutal-btn.btn-download {
+      background: var(--accent-red);
+      color: #fff;
+    }
+
+    /* Animation */
+    .fade-in {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+    }
+
+    .fade-in.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Decorative line */
+    .deco-line {
+      height: 2px;
+      background: var(--text-color);
+      width: 100px;
+      margin: 2rem 0;
+      border-left: 10px solid var(--text-color);
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Custom Cursor -->
+  <div id="cursor"></div>
+
+  <div class="app-container">
+
+    <!-- Sticky Sidebar Navigation (Desktop) -->
+    <aside class="sidebar">
+      <h3 style="margin-top:0; font-size: 1rem; text-decoration:none;">Index</h3>
+      <nav>
+        <a href="#section-guidelines" class="nav-link">Guidelines</a>
+        <a href="#section-first-mod" class="nav-link">First Mod: Textures</a>
+        <a href="#section-setup" class="nav-link">Environment Setup</a>
+        <a href="#section-resource" class="nav-link">Resource Swapper</a>
+        <a href="#section-assets" class="nav-link">Finding Asset IDs</a>
+        <a href="#section-perform" class="nav-link">Performing a Mod</a>
+        <a href="#section-scripting" class="nav-link">Scripting (JS)</a>
+        <a href="#section-lighting" class="nav-link">Lighting (JS)</a>
+        <a href="#section-ui" class="nav-link">UI Hiding (JS)</a>
+        <a href="#section-weapon" class="nav-link">Weapon Visuals (JS)</a>
+        <a href="#section-chat" class="nav-link">Chat (JS)</a>
+        <a href="#section-css" class="nav-link">CSS Styling</a>
+      </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- Header -->
+      <header class="fade-in visible">
+        <h1 data-text="MOD GUIDE">🛠️ Mod Creation Guide</h1>
+        <p style="font-size: 1.5rem; font-family: var(--font-display); font-style: italic; margin-top: 1rem;">
+          Unlock your creativity! Learn the fundamentals of modding and bring your ideas to life.
+        </p>
+      </header>
+
+      <!-- Marquee Warning -->
+      <div class="marquee-container fade-in">
+        <div class="marquee-content">
+          <span class="marquee-item">🚨 CRITICAL: Use of old map files is prohibited (Exploits/Cheating)</span>
+          <span class="marquee-item">🚨 CRITICAL: Only use verified mods listed in official channels</span>
+          <span class="marquee-item">🚨 CRITICAL: Use of old map files is prohibited (Exploits/Cheating)</span>
+          <span class="marquee-item">🚨 CRITICAL: Only use verified mods listed in official channels</span>
+        </div>
+      </div>
+
+      <!-- 1. Guidelines -->
+      <section id="section-guidelines" class="content-card fade-in">
+        <h2>Understanding Modding Guidelines</h2>
+        <p>It is crucial to understand and adhere to the official modding guidelines to ensure a fair and enjoyable
+          experience for everyone. Violations can lead to serious consequences, including account termination.</p>
+
+        <h3>Permitted Modifications:</h3>
+        <ul>
+          <li>Retexturing of Map Objects</li>
+          <li>Retexturing of Characters</li>
+          <li>Retexturing of UI Objects</li>
+          <li>Altering Weapon/Action Audio Files</li>
+          <li>Equitable Visual Adjustment (visual changes that do not provide an unfair advantage)</li>
+        </ul>
+
+        <h3>Prohibited Modifications:</h3>
+        <ul>
+          <li>Removal/Modification of Map Objects</li>
+          <li>Modification of Character Models</li>
+          <li><strong>Including Dynamic/Redirecting Links within the scripts</strong></li>
+          <li>Altering the Venge Verification/Season Badges</li>
+          <li>Scripts that provide an unfair advantage (e.g., adding <code>.json</code> or <code>.glb</code> files for
+            new models)</li>
+        </ul>
+
+        <div class="box warning-box">
+          <strong>Violation Consequences:</strong> The use of prohibited modifications is regarded as cheating and will
+          result in serious consequences, including account termination and other disciplinary actions.
+        </div>
+      </section>
+
+      <!-- 2. First Mod -->
+      <section id="section-first-mod" class="content-card fade-in">
+        <h2>Your Very First Mod: Wall Textures!</h2>
+        <p>If you're new to modding, the absolute best place to start is by changing a wall texture. Walls are
+          everywhere in the game, so it's incredibly easy to see if your mod worked the moment you launch the game!</p>
+        <p>Here are some examples of wall texture assets from the <a
+            href="https://charmsmods.github.io/Modding-Repository-V2-Official-/" target="_blank"
+            class="guide-link">Venge Modding Website</a>. These specific examples are for walls on the <a
+            href="maps.html" class="guide-link">Sierra</a> map:</p>
+        <ul>
+          <li><a href="https://venge.io/files/assets/30409946/1/Wall-Texture.jpg" target="_blank"
+              class="guide-link">https://venge.io/files/assets/30409946/1/Wall-Texture.jpg</a></li>
+          <li><a href="https://venge.io/files/assets/40062797/1/Wall-Texture-Snow.jpg" target="_blank"
+              class="guide-link">https://venge.io/files/assets/40062797/1/Wall-Texture-Snow.jpg</a></li>
+          <li><a href="https://venge.io/files/assets/50533048/1/Wall-Texture-v1.jpg" target="_blank"
+              class="guide-link">https://venge.io/files/assets/50533048/1/Wall-Texture-v1.jpg</a></li>
+          <li><a href="https://venge.io/files/assets/81679790/1/Wall-Texture-dirty.jpg" target="_blank"
+              class="guide-link">https://venge.io/files/assets/81679790/1/Wall-Texture-dirty.jpg</a></li>
+        </ul>
+        <div class="box info-box">
+          <strong>Map Specificity:</strong> The links above are for textures on the <a href="maps.html"
+            class="guide-link">Sierra</a> map. If you want to change textures on other maps, or modify other types of
+          assets (like weapon textures, character textures, or audio files), you'll need to use the search feature on
+          the <a href="https://charmsmods.github.io/Modding-Repository-V2-Official-/" target="_blank"
+            class="guide-link">Venge Modding Hub</a> to find the correct asset IDs and file names for what you're
+          looking for.
+        </div>
+      </section>
+
+      <!-- 3. Environment Setup -->
+      <section id="section-setup" class="content-card fade-in">
+        <h2>Visual & Audio Modding: Retexturing & Sound</h2>
+        <p>This section focuses on how to replace existing game textures (for maps, characters, UI) and audio files.
+          This is a common and permitted way to personalize your game experience without altering core gameplay
+          mechanics.</p>
+
+        <h3>Setting Up Your Modding Environment</h3>
+        <p>To begin modding, you first need to ensure your game client is installed. Once installed, the game client
+          will recognize a specific folder structure within your computer's Documents directory.</p>
+        <p>Navigate to your "Documents" folder (e.g., <code>C:\Users\YourName\Documents</code>). Inside, you need to
+          create a new folder named exactly:</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code>Venge Client</code>
+        </div>
+        <p>Inside this "Venge Client" folder, you will create four more sub-folders:</p>
+        <ul>
+          <li><code>CSS</code>: For custom CSS files that style the game's main menu and UI.</li>
+          <li><code>Resource Swapper</code>: This is where you'll place your custom textures and audio files.</li>
+          <li><code>Skin Swapper</code>: Used for character skin modifications (though retexturing is the focus here).
+            This folder is where you place custom textures for the four main characters:
+            <ul>
+              <li><code>Echo-Default.jpg</code></li>
+              <li><code>Kulu-Default.jpg</code></li>
+              <li><code>Lilium-Default.jpg</code></li>
+              <li><code>Shin-Default.jpg</code></li>
+            </ul>
+            These are the default texture names for the four playable characters in the game. You can replace these
+            files with your own custom textures to change the appearance of Echo, Kulu, Lilium, and Shin in-game.
+          </li>
+          <li><code>Userscript</code>: For JavaScript files that modify game logic or visual behaviors.</li>
+        </ul>
+      </section>
+
+      <!-- 4. Resource Swapper -->
+      <section id="section-resource" class="content-card fade-in">
+        <h3>The Resource Swapper Folder Structure</h3>
+        <p>The <code>Resource Swapper</code> folder has a very specific internal structure that the game client uses to
+          find and apply your custom assets. Inside <code>Resource Swapper</code>, you must create the following path:
+        </p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code>Venge Client/Resource Swapper/files/assets/</code>
+        </div>
+        <p>The <code>assets</code> folder will then contain many sub-folders, each named with a long number. This long
+          number is a unique ID that the game uses to identify a specific asset (like a wall texture or a weapon sound).
+          Inside each of these "long number" folders, there's yet another folder named <code>1</code>. Finally, your
+          custom asset goes inside that <code>1</code> folder.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code>Venge Client/<br>
+└── Resource Swapper/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;└── files/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── assets/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── [LONG_NUMBER_ASSET_ID]/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── 1/<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── [YOUR_CUSTOM_TEXTURE_OR_AUDIO_FILE]</code>
+        </div>
+      </section>
+
+      <!-- 5. Finding Assets -->
+      <section id="section-assets" class="content-card fade-in">
+        <h3>Finding Asset IDs with Venge Modding Hub</h3>
+        <p>Most modders use the <a href="https://charmsmods.github.io/Modding-Repository-V2-Official-/" target="_blank"
+            class="guide-link">Venge Modding Hub</a> to find the correct asset IDs and file names.</p>
+        <ol>
+          <li>Go to <a href="https://charmsmods.github.io/Modding-Repository-V2-Official-/" target="_blank"
+              class="guide-link">https://charmsmods.github.io/Modding-Repository-V2-Official-/</a>.</li>
+          <li>Use the search box to type in what you're looking for (e.g., "wall", "gun_sound", "UI_button").</li>
+          <li>When you click on a result on the website, the URL for the asset (image or MP3) will appear. This URL
+            contains the crucial "long number" (asset ID) you need for your folder name, and the exact file name and
+            extension.</li>
+        </ol>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code>Example URL: https://venge.io/files/assets/<span class="code-red">30409946</span>/1/<span class="code-red">Wall-Texture.jpg</span><br>
+<br>
+From this URL:<br>
+- The Asset ID (long number) is: <span class="code-green">30409946</span><br>
+- The exact File Name and Extension is: <span class="code-green">Wall-Texture.jpg</span></code>
+        </div>
+      </section>
+
+      <!-- 6. Performing the Mod -->
+      <section id="section-perform" class="content-card fade-in">
+        <h3>Performing Your First Texture/Audio Mod</h3>
+        <p>Once you have your custom texture or audio file ready, and you've identified the target asset's ID and file
+          name:</p>
+        <ol>
+          <li>Create the full folder path in your Documents:
+            <code>Venge Client/Resource Swapper/files/assets/[Asset_ID]/1/</code>.</li>
+          <li>Place your custom texture (e.g., a square image, even a transparent PNG) or audio file (e.g., an MP3)
+            inside the <code>1</code> folder.</li>
+          <li><strong>CRITICAL RULE:</strong> Your custom file <strong>MUST</strong> have the <strong>exact same file
+              name and extension</strong> as the original asset you found my Venge Modding Site. For example, if the
+            original is <code>Wall-Texture.jpg</code>, your custom file must also be named
+            <code>Wall-Texture.jpg</code>. If you try to replace a <code>.jpg</code> with a <code>.png</code>, nothing
+            will happen. This applies to all other file types as well (e.g., <code>.mp3</code> for audio).</li>
+          <li>Launch the game client to see your changes!</li>
+        </ol>
+
+        <div class="box warning-box">
+          <strong>Strict Compliance:</strong> Remember, this method is for <strong>retexturing</strong> and
+          <strong>altering audio files</strong> only. You are <strong>not permitted</strong> to modify character models.
+        </div>
+
+        <div class="box tip-box">
+          <strong>Always Backup:</strong> Before making any changes, always create a backup of the original game files
+          you intend to modify. This allows you to easily revert your changes if something goes wrong or if you wish to
+          uninstall your mod.
+        </div>
+      </section>
+
+      <div class="deco-line"></div>
+
+      <!-- 7. Scripting Overview -->
+      <section id="section-scripting" class="content-card fade-in">
+        <h2>Beyond Textures: Scripting & Styling Visuals</h2>
+        <p>Modding isn't just about replacing images; it's also about manipulating the game's behavior and user
+          interface through code. JavaScript and CSS files play a crucial role in changing lighting, UI elements, and
+          even character animations.</p>
+        <div class="box info-box">
+          <strong>Important Note on Competitive Modding:</strong> Modding can be used not only to customize the game
+          visually for fun but also to gain a competitive advantage. However, there are strict limitations on what is
+          allowed. You are <strong>prohibited</strong> from changing model files or adding new <code>.json</code> or
+          <code>.glb</code> files that introduce new models or alter existing ones beyond retexturing. All changes must
+          still fall under "Equitable Visual Adjustment."
+        </div>
+
+        <h3>JavaScript for In-Game Visuals</h3>
+        <p>The game uses JavaScript to control various aspects of the in-game environment and UI. By modifying these
+          scripts, you can alter lighting, hide non-essential elements, and adjust visual effects, as long as they
+          comply with the "Equitable Visual Adjustment" guideline. These files would typically be placed in the
+          <code>Userscript</code> folder within your <code>Venge Client</code> directory.</p>
+      </section>
+
+      <!-- 8. Settings JS -->
+      <section id="section-lighting" class="content-card fade-in">
+        <h4>1. Game Settings & Lighting (<code>settings.js</code>)</h4>
+        <p>This script allows for overriding default game functions and adjusting map-specific visual properties. You
+          can change character skin rendering and modify environmental lighting.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code><span class="code-purple">// Example: Adjusting map-specific lighting (from settings.js)</span><br>
+<span class="code-purple">// Ensure these adjustments are 'Equitable Visual Adjustments' and don't provide an unfair advantage.</span><br>
+pc.app.on(<span class="code-green">"Map:Loaded"</span>, () => {<br>
+&nbsp;&nbsp;setTimeout(() => {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;if (pc.currentMap == <span class="code-green">"Sierra"</span>) {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;pc.app.renderer.scene.exposure = <span class="code-cyan">0.1</span>; <span class="code-purple">// Controls overall brightness</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;pc.app.renderer.scene.skyboxIntensity = <span class="code-cyan">10</span>; <span class="code-purple">// Controls skybox brightness</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;pc.app.root.findByName(<span class="code-green">"Light"</span>).light.color = { r: <span class="code-cyan">0.2</span>, g: <span class="code-cyan">0.2</span>, b: <span class="code-cyan">0.2</span>, a: <span class="code-cyan">1</span> }; <span class="code-purple">// Adjusts main light color</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;}, <span class="code-cyan">2000</span>);<br>
+});<br><br>
+<span class="code-purple">// Example: Character skin emission effect (from settings.js)</span><br>
+<span class="code-purple">// This can make character skins glow. Ensure it's an equitable visual adjustment.</span><br>
+pc.app.scripts.list()[<span class="code-cyan">11</span>].prototype.setHeroSkin = <span class="code-purple">function</span>(){<br>
+&nbsp;&nbsp;<span class="code-purple">/* ... (code omitted for brevity) ... */</span><br>
+&nbsp;&nbsp;material.emissive = <span class="code-purple">new</span> pc.Color(<span class="code-cyan">1</span>, <span class="code-cyan">1</span>, <span class="code-cyan">1</span>); <span class="code-purple">// Sets emission color to white</span><br>
+&nbsp;&nbsp;material.emissiveIntensity = <span class="code-cyan">10000</span>; <span class="code-purple">// Sets emission intensity</span><br>
+&nbsp;&nbsp;material.update();<br>
+&nbsp;&nbsp;<span class="code-purple">/* ... */</span><br>
+};</code>
+        </div>
+        <p>The <code>exposure</code>, <code>skyboxIntensity</code>, and <code>light.color</code> properties control the
+          overall brightness, skybox contribution, and color of the main light source, respectively. The
+          <code>emissive</code> and <code>emissiveIntensity</code> properties can make character skins glow. Always
+          ensure these changes do not create an unfair advantage by making players or objects unnaturally visible.</p>
+      </section>
+
+      <!-- 9. UI Hiding -->
+      <section id="section-ui" class="content-card fade-in">
+        <h4>2. UI Hiding & Placement (<code>hide_ui.js</code>)</h4>
+        <p>This script demonstrates how to disable or reposition various in-game UI elements. You can hide non-essential
+          elements like ads or reposition information displays.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code><span class="code-purple">// Example: Hiding non-essential UI elements (from settings.js, similar to hide_ui.js)</span><br>
+<span class="code-purple">// Hiding ads and banners is generally permitted as it doesn't provide an unfair advantage.</span><br>
+pc.app.on(<span class="code-green">"Map:Loaded"</span>, () => {<br>
+&nbsp;&nbsp;setTimeout(() => {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;pc.app.root.findByName(<span class="code-green">"Overlay"</span>).findByName(<span class="code-green">"Announce"</span>).setLocalPosition(<span class="code-cyan">0</span>, -<span class="code-cyan">530</span>, <span class="code-cyan">0</span>); <span class="code-purple">// Reposition an announcement</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;pc.app.root.findByName(<span class="code-green">"Achievement"</span>).children[<span class="code-cyan">0</span>].enabled = <span class="code-purple">false</span>; <span class="code-purple">// Disable an achievement notification</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;pc.app.root.findByName(<span class="code-green">"Overlay"</span>).findByName(<span class="code-green">"728x90-Banner"</span>).element.opacity = <span class="code-cyan">0</span>; <span class="code-purple">// Hide a banner ad</span><br>
+&nbsp;&nbsp;}, <span class="code-cyan">2000</span>);<br>
+});</code>
+        </div>
+        <p>By setting <code>enabled = false</code> or <code>element.opacity = 0</code>, you can make UI elements
+          disappear. <code>setLocalPosition</code> allows you to move them around the screen.</p>
+        <div class="box warning-box">
+          <strong>Prohibited: Hiding Critical Game Information!</strong> Hiding UI elements that provide crucial game
+          information (e.g., player health bars, objective markers, full leaderboard details that impact gameplay) is
+          considered to provide an unfair advantage and is strictly prohibited.
+        </div>
+      </section>
+
+      <!-- 10. Weapon Visuals -->
+      <section id="section-weapon" class="content-card fade-in">
+        <h4>3. Weapon Visuals & Audio (<code>weapon_pos.js</code>, <code>weapon_vol.js</code>,
+          <code>hide_hands.js</code>)</h4>
+        <p>These smaller scripts specifically target weapon appearance and sound.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code><span class="code-purple">// Example: Adjusting weapon position (from weapon_pos.js)</span><br>
+const weaponpos = { x: <span class="code-cyan">-0.01</span>, y: <span class="code-cyan">0</span>, z: <span class="code-cyan">0.45</span> } <span class="code-purple">// Adjust X, Y, Z coordinates</span><br>
+pc.app.on(<span class="code-green">'Player:Focused'</span>, <span class="code-purple">function</span> (state) {<br>
+&nbsp;&nbsp;if (!state) {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;pc.app.root.findByName(<span class="code-green">"WeaponCenter"</span>).setLocalPosition(weaponpos.x, weaponpos.y, weaponpos.z)<br>
+&nbsp;&nbsp;}<br>
+});<br><br>
+<span class="code-purple">// Example: Hiding player hands (from hide_hands.js)</span><br>
+pc.app.on(<span class="code-green">"Map:Loaded"</span>, () => {<br>
+&nbsp;&nbsp;setTimeout(() => {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;pc.app.root.findByName(<span class="code-green">"WeaponCenter"</span>).findByName(<span class="code-green">"CharacterHandsHolder"</span>).setLocalScale(<span class="code-cyan">0</span>, <span class="code-cyan">0</span>, <span class="code-cyan">0</span>); <span class="code-purple">// Sets scale to zero to hide</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;pc.settings.hideArms = <span class="code-purple">true</span> <span class="code-purple">// Sets a game setting to hide arms</span><br>
+&nbsp;&nbsp;}, <span class="code-cyan">2000</span>);<br>
+});<br><br>
+<span class="code-purple">// Example: Setting weapon volume (from weapon_vol.js)</span><br>
+<span class="code-purple">// Altering weapon audio is a Permitted Modification.</span><br>
+const weaponVolume = <span class="code-cyan">0.5</span>; <span class="code-purple">// Value ranges from 0 to 1</span><br>
+pc.app.on(<span class="code-green">'Map:Loaded'</span>, () => {<br>
+&nbsp;&nbsp;pc.app.root.findByName(<span class="code-green">'Scar'</span>).sound.volume = weaponVolume;<br>
+&nbsp;&nbsp;<span class="code-purple">// Apply to other weapons as needed</span><br>
+});</code>
+        </div>
+        <p><code>setLocalPosition</code> on <code>WeaponCenter</code> changes where your weapon appears on screen.
+          <code>setLocalScale(0, 0, 0)</code> effectively hides the player's hands. <code>sound.volume</code> directly
+          controls the audio level of specific game objects. These are examples of "Equitable Visual Adjustments" that
+          can be used for competitive purposes without violating core rules.</p>
+      </section>
+
+      <!-- 11. Chat Messages -->
+      <section id="section-chat" class="content-card fade-in">
+        <h4>4. Chat Messages (<code>message.js</code>)</h4>
+        <p>This script demonstrates how to inject custom, pre-defined messages into the in-game chat. This is generally
+          permissible as it does not offer an unfair advantage.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code><span class="code-purple">// Example: Sending a random chat message (from message.js)</span><br>
+const messages = [<br>
+&nbsp;&nbsp;<span class="code-green">"RVNG ON TOP GG EZ!"</span>,<br>
+&nbsp;&nbsp;<span class="code-green">"RVNG EZ WIN!"</span>,<br>
+];<br>
+<span class="code-purple">function</span> sendRandomMessage() {<br>
+&nbsp;&nbsp;const randomIndex = Math.floor(Math.random() * messages.length);<br>
+&nbsp;&nbsp;const message = messages[randomIndex];<br>
+&nbsp;&nbsp;pc.app.fire(<span class="code-green">"Network:Chat"</span>, message); <span class="code-purple">// Fires an event to send the message to chat</span><br>
+}<br>
+document.addEventListener(<span class="code-green">"keydown"</span>, handleKeyPress); <span class="code-purple">// Triggers on key press</span></code>
+        </div>
+        <p>This shows how to interact with the game's internal events, in this case, firing a "Network:Chat" event to
+          send a message.</p>
+      </section>
+
+      <!-- 12. CSS Styling -->
+      <section id="section-css" class="content-card fade-in">
+        <h3>CSS for Main Menu & UI Styling</h3>
+        <p>CSS files are used to completely overhaul the appearance of the game's main menu, popups, and other UI
+          elements. You can change colors, fonts, sizes, and even hide default elements, provided these are "Retexturing
+          of UI Objects" and do not alter verification badges or provide an unfair advantage. These files would
+          typically be placed in the <code>CSS</code> folder within your <code>Venge Client</code> directory.</p>
+
+        <h4>1. Grey Mod Styling (<code>Grey.css</code>)</h4>
+        <p>This CSS file provides a black and white theme with red accents. It heavily modifies the main menu's
+          navigation, buttons, and information displays.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code><span class="code-purple">/* Example: Navigation Tab Hover Effects (from Grey.css) */</span><br>
+.match:hover {<br>
+&nbsp;&nbsp;color: <span class="code-green">#ffffff</span> !important;<br>
+&nbsp;&nbsp;transition: <span class="code-cyan">0.5s</span> !important;<br>
+&nbsp;&nbsp;scale: <span class="code-cyan">125%</span> !important;<br>
+&nbsp;&nbsp;font-size: <span class="code-cyan">2.0rem</span> !important;<br>
+&nbsp;&nbsp;font-weight: <span class="code-cyan">800</span> !important;<br>
+&nbsp;&nbsp;box-shadow: <span class="code-cyan">0</span> <span class="code-cyan">0</span> <span class="code-cyan">10px</span> <span class="code-cyan">5px</span> rgb(<span class="code-cyan">255</span>, <span class="code-cyan">255</span>, <span class="code-cyan">255</span>) !important;<br>
+}<br><br>
+<span class="code-purple">/* Example: Hiding specific ads/buttons (from Grey.css) */</span><br>
+<span class="code-purple">/* Hiding elements like social media buttons or ads is generally permitted. */</span><br>
+.poki.button-sound,<br>
+.twitter.button-sound {<br>
+&nbsp;&nbsp;display: none !important;<br>
+}<br>
+#news-area > div,<br>
+#mobile-banner,<br>
+#venge-io_728x90,<br>
+#reward-ads,<br>
+.alert-danger,<br>
+#poki-ZF5kzJqL8FBxp7hh48Meaw {<br>
+&nbsp;&nbsp;display: none !important;<br>
+}</code>
+        </div>
+        <p>The <code>!important</code> flag is used extensively to override existing game styles. You can see changes to
+          <code>color</code>, <code>scale</code>, <code>font-size</code>, <code>font-weight</code>, and
+          <code>box-shadow</code> on hover. Elements are hidden using <code>display: none</code>.</p>
+
+        <h4>2. VVS Mod Styling (<code>VVS.css</code>)</h4>
+        <p>The VVS CSS file applies a distinct cyan/teal color scheme, altering backgrounds, borders, and text colors
+          across various UI components, including the menu bar, buttons, and popups.</p>
+        <div class="code-block">
+          <button class="copy-btn" onclick="copyCode(this)">COPY</button>
+          <code><span class="code-purple">/* Example: Menu Bar background and border (from VVS.css) */</span><br>
+#menu-bar {<br>
+&nbsp;&nbsp;background: url(<span class="code-green">"https://iili.io/3Raeyn1.jpg"</span>) !important; <span class="code-purple">/* Custom background image */</span><br>
+&nbsp;&nbsp;border-bottom: <span class="code-cyan">2px</span> solid rgb(<span class="code-cyan">0</span>, <span class="code-cyan">128</span>, <span class="code-cyan">255</span>) !important; <span class="code-purple">/* Custom border */</span><br>
+}<br><br>
+<span class="code-purple">/* Example: Button styling (from VVS.css) */</span><br>
+.big-button {<br>
+&nbsp;&nbsp;border: <span class="code-cyan">1px</span> solid rgb(<span class="code-cyan">0</span>, <span class="code-cyan">255</span>, <span class="code-cyan">221</span>)!important;<br>
+&nbsp;&nbsp;background-color: <span class="code-green">#00fff2</span>!important;<br>
+&nbsp;&nbsp;background: <span class="code-green">#00ffe1</span>!important;<br>
+}<br><br>
+<span class="code-purple">/* Example: Custom text content (from VVS.css) */</span><br>
+<span class="code-purple">/* This is a 'Retexturing of UI Objects' by changing text content. */</span><br>
+.popup-bottom-left-text p {<br>
+&nbsp;&nbsp;display: none !important;<br>
+}<br>
+.popup-bottom-left-text:after {<br>
+&nbsp;&nbsp;content:<span class="code-green">'Join RVNG clan for weekly giveaways!'</span> !important;<br>
+&nbsp;&nbsp;font-size: <span class="code-cyan">23px</span> !important;<br>
+}</code>
+        </div>
+        <p>This CSS shows how to change background images, border colors, and even inject custom text content using
+          <code>::after</code> pseudo-elements. It also demonstrates how to hide default elements
+          (<code>display: none</code>).</p>
+        <div class="box tip-box">
+          <strong>CSS Specificity:</strong> Notice the frequent use of <code>!important</code>. This is often necessary
+          in modding to override the game's default inline styles or highly specific CSS rules. Use it judiciously.
+        </div>
+        <div class="box warning-box">
+          <strong>Prohibited: Altering Badges & Dynamic Links!</strong> Remember, "Altering the Venge
+          Verification/Season Badges" and "Including Dynamic/Redirecting Links within the scripts" are strictly
+          prohibited. Ensure your CSS changes do not affect these elements.
+        </div>
+      </section>
+
+      <div class="content-card" style="text-align: center; border: none; background: transparent; box-shadow: none;">
+        <a href="../mainpage.html" class="brutal-btn">
+          <span>← Back to Home</span>
+        </a>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Fixed Buttons -->
+  <div class="fixed-btns">
+    <a href="../codedownload/codedownload.html" class="brutal-btn btn-download">
+      <span>⬇ Download Code</span>
+    </a>
+  </div>
+
+  <!-- Scripts -->
+  <script>
+    // Custom Cursor Logic
+    const cursor = document.getElementById('cursor');
+    const links = document.querySelectorAll('a, button');
+
+    document.addEventListener('mousemove', (e) => {
+      cursor.style.left = e.clientX + 'px';
+      cursor.style.top = e.clientY + 'px';
+    });
+
+    links.forEach(link => {
+      link.addEventListener('mouseenter', () => cursor.classList.add('hovered'));
+      link.addEventListener('mouseleave', () => cursor.classList.remove('hovered'));
+    });
+
+    // Copy Code Functionality
+    function copyCode(btn) {
+      const codeBlock = btn.nextElementSibling;
+      const textToCopy = codeBlock.innerText;
+
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        const originalText = btn.innerText;
+        btn.innerText = 'COPIED!';
+        btn.style.background = 'var(--accent-lime)';
+        btn.style.color = '#000';
+
+        setTimeout(() => {
+          btn.innerText = originalText;
+          btn.style.background = '';
+          btn.style.color = '';
+        }, 1500);
+      }).catch(err => {
+        console.error('Failed to copy text: ', err);
+      });
+    }
+
+    // Scroll Reveal & Navigation Highlighting
+    const sections = document.querySelectorAll('section');
+    const navLinks = document.querySelectorAll('.nav-link');
+
+    const revealOnScroll = () => {
+      const windowHeight = window.innerHeight;
+      const elementVisible = 50;
+
+      sections.forEach((section) => {
+        const elementTop = section.getBoundingClientRect().top;
+
+        // Reveal Animation
+        if (elementTop < windowHeight - elementVisible) {
+          section.classList.add('visible');
+        }
+
+        // Navigation Highlighting
+        const sectionId = section.getAttribute('id');
+        if (elementTop >= 0 && elementTop <= windowHeight / 2) {
+          navLinks.forEach(link => {
+            link.classList.remove('active');
+            if (link.getAttribute('href') === '#' + sectionId) {
+              link.classList.add('active');
+            }
+          });
+        }
+      });
+    };
+
+    window.addEventListener('scroll', revealOnScroll);
+    // Trigger once on load
+    revealOnScroll();
+
+  </script>
+</body>
+
+</html>

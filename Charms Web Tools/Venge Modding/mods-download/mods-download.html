@@ -1,0 +1,49 @@
+<!--
+  Copyright (c) 2025 Charm?
+
+  Licensed under the MIT License. See LICENSE file in the project root for full license information.
+  SPDX-License-Identifier: MIT
+
+  Use of this code requires attribution to the original author.
+
+  This file is the homepage of the site.
+-->
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Mods</title>
+    <link rel="stylesheet" href="mods-download.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Explore the Mods</h1>
+            <p class="subtitle">Discover various modifications for your game.</p>
+        </header>
+
+        <div class="mods-grid" id="modsGrid">
+            </div>
+
+        <a href="../mainpage.html" class="back-button">Back to Home</a>
+    </div>
+
+    <div class="fullscreen-modal">
+        <img src="" alt="Fullscreen Mod Image">
+        <span class="close-button">&times;</span>
+    </div>
+
+    <div id="messageModal" class="fullscreen-modal" style="display: none;">
+        <div class="modal-content">
+            <p id="modalMessage"></p>
+            <button id="modalCloseButton" class="download-button">OK</button>
+        </div>
+    </div>
+
+    <script src="mods-download.js"></script>
+</body>
+</html>

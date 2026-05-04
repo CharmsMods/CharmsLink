@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Mods</title>
+    <link rel="stylesheet" href="mods-download.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="container main-layout">
+        <div class="column left-column">
+            <header>
+                <h1>Community Mods</h1>
+                <p class="subtitle">Shared by the community.</p>
+            </header>
+            <div class="mods-grid" id="communityGrid">
+            </div>
+        </div>
+
+        <div class="column right-column">
+            <header>
+                <h1>My Mods</h1>
+                <p class="subtitle">Created by me.</p>
+            </header>
+            <div class="mods-grid" id="myModsGrid">
+            </div>
+        </div>
+    </div>
+
+    <div id="messageModal" class="fullscreen-modal" style="display: none;">
+        <div class="modal-content">
+            <p id="modalMessage"></p>
+            <button id="modalCloseButton" class="download-button">OK</button>
+        </div>
+    </div>
+
+    <script src="mods-download.js"></script>
+</body>
+
+</html>

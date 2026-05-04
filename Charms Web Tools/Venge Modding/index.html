@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modding Hub</title>
+
+    <!-- External Assets: Fonts and Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Space+Grotesk:wght@400;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        /* --- 1. CORE VARIABLES & RESET --- */
+        :root {
+            /* Cream Theme Palette */
+            --bg-cream: #f0ebe0;
+            --surface-white: #ffffff;
+            --text-black: #0c0c0c;
+            --text-grey: #4a4a4a;
+            --accent-orange: #ff4500;
+            /* Safety Orange */
+            --accent-blue: #0044ff;
+
+            /* Brutalist Dimensions */
+            --border-thick: 4px solid var(--text-black);
+            --border-thin: 2px solid var(--text-black);
+            --shadow-hard: 8px 8px 0px var(--text-black);
+            --shadow-hover: 12px 12px 0px var(--text-black);
+            --radius-none: 0px;
+
+            /* Typography */
+            --font-display: 'Space Grotesk', sans-serif;
+            --font-mono: 'Courier Prime', monospace;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background-color: var(--bg-cream);
+            color: var(--text-black);
+            font-family: var(--font-mono);
+            overflow-x: hidden;
+            line-height: 1.6;
+            /* Noise Texture Overlay */
+            position: relative;
+        }
+
+        /* Subtle Noise Texture */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.05'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 9999;
+            mix-blend-mode: multiply;
+        }
+
+        a {
+            text-decoration: none;
+            color: inherit;
+            cursor: pointer;
+        }
+
+        ul {
+            list-style: none;
+        }
+
+        img {
+            display: block;
+            max-width: 100%;
+        }
+
+        /* --- 2. UTILITIES & COMPONENTS --- */
+        .brutal-box {
+            background: var(--surface-white);
+            border: var(--border-thick);
+            box-shadow: var(--shadow-hard);
+            transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), box-shadow 0.2s ease;
+        }
+
+        .brutal-box:hover {
+            transform: translate(-4px, -4px);
+            box-shadow: var(--shadow-hover);
+        }
+
+        .uppercase {
+            text-transform: uppercase;
+        }
+
+        .font-display {
+            font-family: var(--font-display);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 12px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-cream);
+            border-left: var(--border-thin);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--text-black);
+            border: 2px solid var(--bg-cream);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-orange);
+        }
+
+        /* --- 3. NAVIGATION --- */
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 2rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            background: var(--bg-cream);
+            z-index: 1000;
+            border-bottom: var(--border-thick);
+            /* Hide until loaded */
+            transform: translateY(-100%);
+            transition: transform 0.5s ease;
+        }
+
+        .navbar.loaded {
+            transform: translateY(0);
+        }
+
+        .brand {
+            font-family: var(--font-display);
+            font-size: 1.8rem;
+            font-weight: 700;
+            letter-spacing: -1px;
+            background: var(--text-black);
+            color: var(--bg-cream);
+            padding: 0.2rem 0.8rem;
+            transform: none;
+        }
+
+        .nav-controls {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .control-btn {
+            background: var(--bg-cream);
+            border: var(--border-thick);
+            color: var(--text-black);
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            font-size: 1.2rem;
+            transition: all 0.1s;
+        }
+
+        .control-btn:hover {
+            background: var(--accent-orange);
+            color: var(--bg-cream);
+            border-color: var(--text-black);
+        }
+
+        .control-btn:active {
+            transform: translate(4px, 4px);
+            box-shadow: none;
+        }
+
+        /* --- 4. LOADER --- */
+        .loader-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-cream);
+            z-index: 10000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            transition: opacity 0.6s ease;
+        }
+
+        .loader-text {
+            font-family: var(--font-display);
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 2rem;
+            letter-spacing: normal;
+        }
+
+        .loader-bar {
+            width: 300px;
+            height: 20px;
+            border: var(--border-thick);
+            padding: 2px;
+            position: relative;
+        }
+
+        .loader-progress {
+            height: 100%;
+            background: var(--accent-orange);
+            width: 0%;
+            transition: width 0.2s linear;
+        }
+
+        /* --- 5. HERO SECTION --- */
+        .hero {
+            min-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            /* Mobile first stack */
+            justify-content: center;
+            padding: 8rem 2rem 4rem;
+            position: relative;
+            overflow: hidden;
+            border-bottom: var(--border-thick);
+        }
+
+        @media (min-width: 900px) {
+            .hero {
+                flex-direction: row;
+                align-items: center;
+                gap: 4rem;
+                max-width: 1400px;
+                margin: 0 auto;
+            }
+        }
+
+        .hero-content {
+            flex: 1;
+            z-index: 2;
+        }
+
+        .hero-tag {
+            background: var(--accent-orange);
+            color: var(--bg-cream);
+            padding: 0.2rem 0.6rem;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 1rem;
+            border: 2px solid var(--text-black);
+        }
+
+        .hero h1 {
+            font-family: var(--font-display);
+            font-size: clamp(3.5rem, 10vw, 8rem);
+            line-height: 0.85;
+            margin-bottom: 1.5rem;
+            text-transform: uppercase;
+            font-weight: 700;
+            /* Glitch effect placeholder */
+            position: relative;
+        }
+
+        .hero-desc {
+            font-size: 1.2rem;
+            max-width: 500px;
+            border-left: var(--border-thick);
+            padding-left: 1rem;
+            color: var(--text-grey);
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .hero-visual {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        /* Profile Image Styling */
+        .profile-frame {
+            width: 280px;
+            height: 350px;
+            border: var(--border-thick);
+            background: var(--text-black);
+            /* Fallback */
+            position: relative;
+            box-shadow: 15px 15px 0px var(--accent-orange);
+            transition: transform 0.3s ease;
+            overflow: hidden;
+        }
+
+        .profile-frame:hover {
+            transform: scale(1.02) rotate(1deg);
+        }
+
+        .profile-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            filter: grayscale(100%) contrast(1.2);
+            transition: filter 0.3s;
+        }
+
+        .profile-frame:hover .profile-img {
+            filter: grayscale(0%) contrast(1);
+        }
+
+        /* Decorative background elements */
+        .bg-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image:
+                linear-gradient(var(--text-black) 1px, transparent 1px),
+                linear-gradient(90deg, var(--text-black) 1px, transparent 1px);
+            background-size: 60px 60px;
+            opacity: 0.05;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* --- 6. MARQUEE --- */
+        .marquee-section {
+            border-bottom: var(--border-thick);
+            background: var(--text-black);
+            color: var(--bg-cream);
+            padding: 1rem 0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .marquee-track {
+            display: flex;
+            white-space: nowrap;
+            animation: marquee 25s linear infinite;
+        }
+
+        .marquee-item {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            font-weight: 700;
+            padding: 0 2rem;
+            text-transform: uppercase;
+        }
+
+        .marquee-item span {
+            color: var(--accent-orange);
+            margin-right: 1rem;
+        }
+
+        @keyframes marquee {
+            0% {
+                transform: translateX(0);
+            }
+
+            100% {
+                transform: translateX(-50%);
+            }
+        }
+
+        /* --- 7. CONTENT GRID --- */
+        .content-section {
+            padding: 6rem 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .section-header {
+            margin-bottom: 4rem;
+            display: flex;
+            align-items: flex-end;
+            gap: 1rem;
+            border-bottom: var(--border-thin);
+            padding-bottom: 1rem;
+        }
+
+        .section-title {
+            font-family: var(--font-display);
+            font-size: 4rem;
+            line-height: 0.8;
+            font-weight: 700;
+        }
+
+        .section-sub {
+            font-size: 1.2rem;
+            color: var(--accent-orange);
+            font-weight: bold;
+            padding-bottom: 0.5rem;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 3rem;
+        }
+
+        .card {
+            background: var(--bg-cream);
+            border: var(--border-thick);
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 320px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: var(--accent-orange);
+            transform: translateY(-5px);
+            box-shadow: 10px 10px 0px var(--text-black);
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            border-top: 4px solid var(--text-black);
+            border-right: 4px solid var(--text-black);
+            opacity: 0.2;
+            transition: opacity 0.3s;
+        }
+
+        .card:hover::before {
+            opacity: 1;
+            border-color: var(--accent-orange);
+        }
+
+        .card-id {
+            font-family: var(--font-display);
+            font-size: 3rem;
+            color: transparent;
+            -webkit-text-stroke: 2px var(--text-black);
+            position: absolute;
+            top: 1rem;
+            right: 1.5rem;
+            font-weight: 700;
+            z-index: 0;
+            user-select: none;
+        }
+
+        .card-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .card h3 {
+            font-family: var(--font-display);
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            line-height: 1;
+            text-transform: uppercase;
+        }
+
+        .card p {
+            color: var(--text-grey);
+            font-size: 1rem;
+            margin-bottom: 2rem;
+            border-left: 2px solid var(--accent-orange);
+            padding-left: 1rem;
+        }
+
+        .card-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            padding: 1rem;
+            background: var(--text-black);
+            color: var(--bg-cream);
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .card-btn:hover {
+            background: var(--bg-cream);
+            color: var(--text-black);
+            border: 2px solid var(--text-black);
+        }
+
+        .card-btn i {
+            margin-left: 0.5rem;
+            transition: transform 0.2s;
+        }
+
+        .card-btn:hover i {
+            transform: translateX(5px);
+        }
+
+        /* --- 8. FULL SCREEN MENU --- */
+        .menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100vh;
+            background: var(--bg-cream);
+            z-index: 2000;
+            transform: translateX(100%);
+            /* Slide from right */
+            transition: transform 0.5s cubic-bezier(0.77, 0, 0.175, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .menu-overlay.active {
+            transform: translateX(0);
+        }
+
+        .close-menu-btn {
+            position: absolute;
+            top: 2rem;
+            right: 2rem;
+            background: transparent;
+            border: none;
+            font-size: 3rem;
+            cursor: pointer;
+            color: var(--text-black);
+            transition: transform 0.3s;
+        }
+
+        .close-menu-btn:hover {
+            transform: rotate(90deg) scale(1.1);
+            color: var(--accent-orange);
+        }
+
+        .menu-links-container {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            width: 100%;
+            max-width: 600px;
+            padding: 0 2rem;
+        }
+
+        .menu-link {
+            font-family: var(--font-display);
+            font-size: 4rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            border-bottom: 4px solid transparent;
+            padding: 0.5rem 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s;
+        }
+
+        .menu-link:hover {
+            border-bottom: 4px solid var(--text-black);
+            padding-left: 2rem;
+            background: rgba(255, 69, 0, 0.1);
+            /* Accent tint */
+        }
+
+        .menu-link span {
+            font-size: 1.5rem;
+            opacity: 0;
+            transform: translateX(-20px);
+            transition: all 0.3s;
+        }
+
+        .menu-link:hover span {
+            opacity: 1;
+            transform: translateX(0);
+            color: var(--accent-orange);
+        }
+
+        /* --- 9. FOOTER --- */
+        footer {
+            border-top: var(--border-thick);
+            padding: 4rem 2rem;
+            background: var(--text-black);
+            color: var(--bg-cream);
+            text-align: center;
+        }
+
+        .footer-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 3rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: left;
+        }
+
+        .footer-col h4 {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            color: var(--accent-orange);
+        }
+
+        .footer-col p {
+            opacity: 0.8;
+            margin-bottom: 1rem;
+        }
+
+        .social-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .social-links a {
+            font-size: 1.5rem;
+            transition: color 0.3s;
+        }
+
+        .social-links a:hover {
+            color: var(--accent-orange);
+        }
+
+        .footer-bottom {
+            margin-top: 4rem;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 0.9rem;
+            opacity: 0.6;
+        }
+
+        /* --- RESPONSIVE ADJUSTMENTS --- */
+        @media (max-width: 768px) {
+            .section-title {
+                font-size: 2.5rem;
+            }
+
+            .menu-link {
+                font-size: 2.5rem;
+            }
+
+            .hero {
+                padding-top: 7rem;
+            }
+
+            .profile-frame {
+                width: 200px;
+                height: 250px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- LOADING SCREEN -->
+    <div class="loader-overlay" id="loader">
+        <div class="loader-text">Loading...</div>
+        <div class="loader-bar">
+            <div class="loader-progress" id="progress"></div>
+        </div>
+    </div>
+
+    <!-- NAVIGATION -->
+    <nav class="navbar" id="navbar">
+        <a href="#" class="brand">Modding Hub</a>
+        <div class="nav-controls">
+            <!-- Removed theme toggle to strictly enforce the Cream Theme as requested -->
+            <button id="menuToggle" class="control-btn" aria-label="Open Menu">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- FULL SCREEN MENU -->
+    <div class="menu-overlay" id="menuOverlay">
+        <button class="close-menu-btn" id="closeMenuBtn">
+            <i class="fas fa-times"></i>
+        </button>
+        <div class="menu-links-container">
+            <a href="weapons/weapons.html" class="menu-link">
+                Weapons Info <span>-></span>
+            </a>
+            <!-- Added Home Link for convenience inside the menu -->
+            <a href="#" class="menu-link" onclick="closeMenu(); return false;">
+                Home <span>-></span>
+            </a>
+        </div>
+    </div>
+
+    <!-- HERO SECTION -->
+    <header class="hero">
+        <div class="bg-grid"></div>
+
+        <div class="hero-content">
+            <div class="hero-tag">Official Hub</div>
+            <h1>Modding<br>Hub</h1>
+            <div class="hero-desc">
+                <p>Archive of weapons, 3D models, source code, and modification guides. Access the repository to view
+                    available resources and documentation.</p>
+            </div>
+        </div>
+
+        <div class="hero-visual">
+            <div class="profile-frame">
+                <!-- Fallback styling added in case pfp.png is missing -->
+                <img src="pfp.png" alt="Profile" class="profile-img"
+                    onerror="this.style.display='none'; this.parentElement.style.backgroundColor='var(--accent-orange)';">
+            </div>
+        </div>
+    </header>
+
+    <!-- MARQUEE -->
+    <section class="marquee-section">
+        <div class="marquee-track">
+            <!-- Duplicate content for seamless loop -->
+            <div class="marquee-item">RESOURCES <span>/</span> DOCUMENTATION <span>/</span> TOOLS <span>/</span> ASSETS
+                <span>/</span> GUIDES <span>/</span>
+            </div>
+            <div class="marquee-item">RESOURCES <span>/</span> DOCUMENTATION <span>/</span> TOOLS <span>/</span> ASSETS
+                <span>/</span> GUIDES <span>/</span>
+            </div>
+            <div class="marquee-item">RESOURCES <span>/</span> DOCUMENTATION <span>/</span> TOOLS <span>/</span> ASSETS
+                <span>/</span> GUIDES <span>/</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- MAIN CONTENT GRID -->
+    <main class="content-section">
+        <div class="section-header">
+            <h2 class="section-title">Select<br>Module</h2>
+            <span class="section-sub">RESOURCES</span>
+        </div>
+
+        <div class="grid-container">
+
+            <!-- CARD 01: Repository -->
+            <div class="card brutal-box">
+                <span class="card-id">01</span>
+                <div class="card-content">
+                    <h3>Repository</h3>
+                    <p>Access the comprehensive collection of modding resources and archived tools.</p>
+                </div>
+                <a href="Modding Repository V2 (Official)/index.html" class="card-btn">
+                    Access <i class="fas fa-chevron-right"></i>
+                </a>
+            </div>
+
+            <!-- CARD 02: GLB Viewer -->
+            <div class="card brutal-box">
+                <span class="card-id">02</span>
+                <div class="card-content">
+                    <h3>3D Models</h3>
+                    <p>Real-time .glb model viewer and the master list of extracted game assets.</p>
+                </div>
+                <a href=".glb Viewer Site/.glb-Viewer/index.html" class="card-btn">
+                    Launch <i class="fas fa-cube"></i>
+                </a>
+            </div>
+
+            <!-- CARD 03: Modding Guide -->
+            <div class="card brutal-box">
+                <span class="card-id">03</span>
+                <div class="card-content">
+                    <h3>Guides</h3>
+                    <p>Step-by-step documentation on how to create, compile, and install mods.</p>
+                </div>
+                <a href="makeamod/makeamod.html" class="card-btn">
+                    Read Docs <i class="fas fa-book"></i>
+                </a>
+            </div>
+
+            <!-- CARD 04: CSS/JS Code -->
+            <div class="card brutal-box">
+                <span class="card-id">04</span>
+                <div class="card-content">
+                    <h3>Source Code</h3>
+                    <p>CSS and JS snippets to alter the visual engine and game interface.</p>
+                </div>
+                <a href="jscss/jscss.html" class="card-btn">
+                    View Code <i class="fas fa-code"></i>
+                </a>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer>
+        <div class="footer-grid">
+            <div class="footer-col">
+                <h4>Modding Hub</h4>
+                <p>The only modding hub for Venge.io.</p>
+            </div>
+            <div class="footer-col">
+                <h4>Socials</h4>
+                <div class="social-links">
+                    <a href="https://discord.gg/jpKwHAZkEm" target="_blank" aria-label="Discord"><i
+                            class="fab fa-discord"></i></a>
+                    <a href="#" target="_blank" aria-label="Github"><i class="fab fa-github"></i></a>
+                </div>
+            </div>
+            <div class="footer-col">
+                <h4>Status</h4>
+                <p><i class="fas fa-circle" style="color: var(--accent-orange); font-size: 0.8rem;"></i> Operational
+                </p>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <p class="uppercase">Copyright © 2025 Charm</p>
+        </div>
+    </footer>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- References ---
+            const loader = document.getElementById('loader');
+            const progress = document.getElementById('progress');
+            const navbar = document.getElementById('navbar');
+            const menuToggle = document.getElementById('menuToggle');
+            const closeMenuBtn = document.getElementById('closeMenuBtn');
+            const menuOverlay = document.getElementById('menuOverlay');
+
+            // --- 1. Loader Animation Simulation ---
+            // Simulates loading progress for visual effect
+            let width = 0;
+            const interval = setInterval(() => {
+                width += Math.random() * 10;
+                if (width > 100) width = 100;
+                progress.style.width = width + '%';
+
+                if (width === 100) {
+                    clearInterval(interval);
+                    setTimeout(() => {
+                        loader.style.opacity = '0';
+                        setTimeout(() => {
+                            loader.style.display = 'none';
+                            navbar.classList.add('loaded'); // Reveal nav
+                        }, 600);
+                    }, 400);
+                }
+            }, 100);
+
+            // --- 2. Menu Logic ---
+            function toggleMenu() {
+                const isActive = menuOverlay.classList.contains('active');
+
+                if (isActive) {
+                    menuOverlay.classList.remove('active');
+                    document.body.style.overflow = ''; // Restore scrolling
+                    menuToggle.innerHTML = '<i class="fas fa-bars"></i>';
+                } else {
+                    menuOverlay.classList.add('active');
+                    document.body.style.overflow = 'hidden'; // Prevent scrolling
+                    menuToggle.innerHTML = '<i class="fas fa-times"></i>';
+                }
+            }
+
+            menuToggle.addEventListener('click', toggleMenu);
+            closeMenuBtn.addEventListener('click', toggleMenu);
+
+            // Close menu when a link is clicked
+            const menuLinks = document.querySelectorAll('.menu-link');
+            menuLinks.forEach(link => {
+                link.addEventListener('click', () => {
+                    if (menuOverlay.classList.contains('active')) {
+                        toggleMenu();
+                    }
+                });
+            });
+
+            // --- 3. Micro-Interactions (Button Press) ---
+            // Adds a tactile "down" state to buttons using JS for dynamic styles
+            const buttons = document.querySelectorAll('.card-btn, .control-btn');
+            buttons.forEach(btn => {
+                btn.addEventListener('mousedown', () => {
+                    btn.style.transform = 'translate(2px, 2px)';
+                    btn.style.boxShadow = 'none';
+                });
+                btn.addEventListener('mouseup', () => {
+                    btn.style.transform = '';
+                    btn.style.boxShadow = '';
+                });
+                btn.addEventListener('mouseleave', () => {
+                    btn.style.transform = '';
+                    btn.style.boxShadow = '';
+                });
+            });
+
+            // --- 4. Scroll Reveal Effect for Cards ---
+            // Simple Intersection Observer to fade cards in
+            const observerOptions = {
+                threshold: 0.1
+            };
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.style.opacity = '1';
+                        entry.target.style.transform = 'translateY(0)';
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, observerOptions);
+
+            const cards = document.querySelectorAll('.card');
+            cards.forEach((card, index) => {
+                // Set initial state
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(50px)';
+                card.style.transition = `opacity 0.5s ease ${index * 0.1}s, transform 0.5s ease ${index * 0.1}s, box-shadow 0.3s ease`;
+                observer.observe(card);
+            });
+        });
+
+        // Global function for the menu link onclick
+        window.closeMenu = function () {
+            const menuToggle = document.getElementById('menuToggle');
+            const menuOverlay = document.getElementById('menuOverlay');
+            menuOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+            menuToggle.innerHTML = '<i class="fas fa-bars"></i>';
+        };
+    </script>
+</body>
+
+</html>

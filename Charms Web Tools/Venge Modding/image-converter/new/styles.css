@@ -1,0 +1,179 @@
+/* Custom styles to ensure "Inter" font and rounded corners */
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: #f3f4f6; /* Light gray background */
+    display: flex;
+    justify-content: center;
+    align-items: flex-start; /* Align to start to prevent extreme vertical centering issues on small screens */
+    min-height: 100vh;
+    padding: 20px;
+}
+.container {
+    max-width: 95%; /* Responsive width */
+    width: 1200px; /* Max width for desktop */
+    background-color: #ffffff;
+    padding: 32px;
+    border-radius: 16px; /* Rounded corners for the main container */
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    display: flex;
+    flex-direction: column;
+    gap: 24px; /* Space between sections */
+}
+.drop-zone {
+    border: 4px dashed #9ca3af;
+    padding: 40px;
+    text-align: center;
+    font-size: 1.5rem;
+    color: #6b7280;
+    background-color: #f9fafb;
+    border-radius: 12px;
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+}
+.drop-zone.dragover {
+    border-color: #3b82f6;
+    background-color: #e0f2fe;
+    color: #1d4ed8;
+}
+.image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); /* Responsive grid */
+    gap: 24px;
+}
+.image-card {
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.image-card canvas {
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    background-color: #f3f4f6;
+    border: 1px solid #d1d5db;
+}
+.image-card button,
+.image-card select,
+.image-card input[type="number"] {
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: 1px solid #d1d5db;
+    background-color: #ffffff;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+/* Global buttons */
+.global-controls button,
+#convertAllBtn {
+    background-color: #3b82f6;
+    color: white;
+    font-weight: 600;
+    border: none;
+    padding: 12px 20px; /* Larger padding for global buttons */
+    font-size: 1.125rem; /* Larger font size */
+    border-radius: 8px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+.global-controls button:hover,
+#convertAllBtn:hover {
+    background-color: #2563eb;
+}
+
+#exportZipBtn {
+    background-color: #10b981; /* Green for export zip button */
+}
+#exportZipBtn:hover {
+    background-color: #059669;
+}
+
+.image-card .remove-btn {
+    background-color: #ef4444; /* Red for remove button */
+}
+.image-card .remove-btn:hover {
+    background-color: #dc2626;
+}
+input[type="number"][disabled],
+input[type="checkbox"][disabled] + label,
+select[disabled] { /* Added select[disabled] */
+    background-color: #e5e7eb;
+    cursor: not-allowed;
+    color: #9ca3af;
+}
+input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 8px;
+    background: #d1d5db;
+    outline: none;
+    opacity: 0.7;
+    transition: opacity .2s;
+    border-radius: 4px;
+}
+input[type="range"]:hover {
+    opacity: 1;
+}
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: #3b82f6;
+    border-radius: 50%;
+    cursor: grab;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+    transition: background 0.15s ease-in-out;
+}
+input[type="range"]::-webkit-slider-thumb:active {
+    cursor: grabbing;
+}
+input[type="range"]::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    background: #3b82f6;
+    border-radius: 50%;
+    cursor: grab;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+    transition: background 0.15s ease-in-out;
+}
+input[type="range"]::-moz-range-thumb:active {
+    cursor: grabbing;
+}
+.message-box {
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid;
+    display: none;
+    margin-top: 10px;
+}
+.message-box.error {
+    background-color: #fee2e2;
+    color: #ef4444;
+    border-color: #fca5a5;
+}
+.message-box.info {
+    background-color: #e0f2fe;
+    color: #0c6a9b;
+    border-color: #7dd3fc;
+}
+/* Hide default file input button */
+#hiddenFileInput {
+    display: none;
+}
+.global-controls > div {
+    background-color: #f9fafb; /* Lighter background for control groups */
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.global-controls input[type="number"] {
+    cursor: text; /* Allow normal text cursor for number inputs */
+}

@@ -1,0 +1,1496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-File Converter & Exporter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        /* Custom styles to ensure "Inter" font and rounded corners */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Light gray background */
+            display: flex;
+            justify-content: center;
+            align-items: flex-start; /* Align to start to prevent extreme vertical centering issues on small screens */
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 95%; /* Responsive width */
+            width: 1200px; /* Max width for desktop */
+            background-color: #ffffff;
+            padding: 32px;
+            border-radius: 16px; /* Rounded corners for the main container */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 44px 6px -2px rgba(0, 0, 0, 0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 24px; /* Space between sections */
+        }
+        .drop-zone {
+            border: 4px dashed #9ca3af;
+            padding: 40px;
+            text-align: center;
+            font-size: 1.5rem;
+            color: #6b7280;
+            background-color: #f9fafb;
+            border-radius: 12px;
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+        }
+        .drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: #e0f2fe;
+            color: #1d4ed8;
+        }
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); /* Adjusted for more controls */
+            gap: 16px; /* Smaller gap */
+        }
+        .image-card {
+            background-color: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px; /* Slightly less padding */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            display: flex;
+            flex-direction: column;
+            gap: 12px; /* Smaller gap */
+            position: relative; /* For status message positioning */
+        }
+        .image-card canvas {
+            width: 100%;
+            height: auto;
+            min-height: 150px; /* Ensure a minimum height for canvas */
+            border-radius: 8px;
+            background-color: #f3f4f6;
+            border: 1px solid #d1d5db;
+        }
+        .image-card button,
+        .image-card select,
+        .image-card input[type="number"],
+        .image-card input[type="range"] {
+            padding: 8px 12px; /* More compact inputs/buttons */
+            border-radius: 8px;
+            border: 1px solid #d1d5db;
+            background-color: #ffffff;
+            font-size: 0.9rem; /* Smaller font size */
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+        }
+        .image-card button {
+             cursor: pointer;
+        }
+        .image-card select {
+            width: 100%;
+        }
+
+        /* Global buttons */
+        .global-controls button,
+        #convertAllBtn,
+        #exportZipBtn,
+        #clearAllBtn { /* Include specific IDs for global buttons */
+            background-color: #3b82f6;
+            color: white;
+            font-weight: 600;
+            border: none;
+            padding: 10px 16px; /* Standardize padding for all global buttons */
+            font-size: 1rem; /* Standardize font size */
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            width: fit-content; /* Adjust width to content */
+        }
+        .global-controls button:hover,
+        #convertAllBtn:hover,
+        #exportZipBtn:hover,
+        #clearAllBtn:hover {
+            background-color: #2563eb;
+        }
+
+        #exportZipBtn {
+            background-color: #10b981; /* Green for export zip button */
+        }
+        #exportZipBtn:hover {
+            background-color: #059669;
+        }
+        #clearAllBtn {
+            background-color: #f59e0b; /* Amber for clear all button */
+        }
+        #clearAllBtn:hover {
+            background-color: #d97706;
+        }
+
+
+        .image-card .remove-btn {
+            background-color: #ef4444; /* Red for remove button */
+        }
+        .image-card .remove-btn:hover {
+            background-color: #dc2626;
+        }
+        input[type="number"][disabled],
+        input[type="checkbox"][disabled] + label,
+        select[disabled],
+        input[type="range"][disabled] { /* Added range[disabled] */
+            background-color: #e5e7eb;
+            cursor: not-allowed;
+            color: #9ca3af;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 8px;
+            background: #d1d5db;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+            border-radius: 4px;
+        }
+        input[type="range"]:hover {
+            opacity: 1;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+            transition: background 0.15s ease-in-out;
+        }
+        input[type="range"]::-webkit-slider-thumb:active {
+            cursor: grabbing;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #3b82f6;
+            border-radius: 50%;
+            cursor: grab;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+            transition: background 0.15s ease-in-out;
+        }
+        input[type="range"]::-moz-range-thumb:active {
+            cursor: grabbing;
+        }
+        .message-box {
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid;
+            display: none;
+            margin-top: 10px;
+        }
+        .message-box.error {
+            background-color: #fee2e2;
+            color: #ef4444;
+            border-color: #fca5a5;
+        }
+        .message-box.info {
+            background-color: #e0f2fe;
+            color: #0c6a9b;
+            border-color: #7dd3fc;
+        }
+        /* Hide default file input button */
+        #hiddenFileInput {
+            display: none;
+        }
+        .global-controls {
+            display: flex;
+            flex-direction: row; /* Make it a row for compactness */
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+            gap: 16px; /* Space between control groups */
+            justify-content: center; /* Center the control groups */
+        }
+        .global-controls > div {
+            background-color: #f9fafb; /* Lighter background for control groups */
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            flex: 1 1 300px; /* Allow items to grow/shrink, with a base of 300px */
+            min-width: 280px; /* Smaller min-width for better wrapping */
+        }
+        .global-controls input[type="number"] {
+            cursor: text; /* Allow normal text cursor for number inputs */
+        }
+        /* Further compacting adjustments */
+        .global-controls h2 {
+            width: 100%; /* Ensure heading takes full width in the row layout */
+            text-align: center;
+            margin-bottom: 8px; /* Reduce margin */
+        }
+        .global-buttons-group {
+            display: flex;
+            flex-direction: column; /* Stack buttons vertically within their group */
+            gap: 12px;
+            flex: 1 1 auto; /* Take available space */
+            align-items: center; /* Center buttons */
+            padding: 16px;
+            background-color: #f9fafb;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+        }
+
+        /* Specific adjustments for input groups */
+        .global-controls > div label.block {
+            margin-bottom: 8px; /* Reduce space below labels */
+        }
+        .global-controls .flex-col.md\\:flex-row {
+            flex-direction: column; /* Force column for inputs even on md, makes it cleaner */
+        }
+        .global-controls .flex-col.md\\:flex-row > div {
+            flex: none; /* Prevent flex-1 behavior that stretches inputs */
+            width: 100%; /* Full width for inputs */
+        }
+
+        /* Styles for individual card adjustments */
+        .image-card .individual-adjustments {
+            display: flex;
+            flex-direction: column;
+            gap: 8px; /* Smaller gap for individual controls */
+            border-top: 1px solid #e5e7eb;
+            padding-top: 12px;
+            margin-top: 12px;
+        }
+        .image-card .individual-adjustments .flex {
+            align-items: center;
+        }
+        .image-card .individual-adjustments label {
+            font-size: 0.85rem;
+            color: #555;
+        }
+        .image-card .individual-adjustments input[type="range"] {
+            padding: 0; /* Remove padding from range for compactness */
+        }
+        .image-card .individual-adjustments input[type="number"] {
+            width: 100%; /* Make number inputs take full width */
+        }
+        .image-card .status-message {
+            font-size: 0.8rem;
+            color: #4b5563;
+            text-align: center;
+            padding: 4px 0;
+            margin-top: 8px;
+            background-color: #f3f4f6;
+            border-radius: 4px;
+        }
+        .status-message.error { color: #ef4444; }
+        .status-message.success { color: #10b981; }
+        .status-message.info { color: #3b82f6; }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-3xl font-bold text-center text-gray-800 rounded-lg p-2">Multi-File Converter & Exporter</h1>
+
+        <div id="dropZone" class="drop-zone">
+            Drag & Drop Files or Folders Here or Click to Upload
+        </div>
+        <input type="file" id="hiddenFileInput" multiple webkitdirectory directory>
+
+        <div id="loadingBarContainer" class="hidden w-full bg-gray-200 rounded-full h-4 mt-4 relative">
+            <div id="loadingBar" class="bg-blue-600 h-4 rounded-full transition-all duration-100 ease-out" style="width: 0%;"></div>
+            <div id="loadingText" class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white">0%</div>
+        </div>
+
+        <div id="generalMessageBox" class="message-box hidden rounded-lg"></div>
+
+        <div class="global-controls">
+            <h2 class="text-2xl font-bold text-gray-800">Global Image Adjustments</h2>
+
+            <div>
+                <label class="text-lg font-medium text-gray-700 mb-2 block">Upload Options:</label>
+                <div class="flex items-center gap-4">
+                    <input type="checkbox" id="disablePreviewsCheckbox" class="form-checkbox h-5 w-5 text-blue-600 rounded" checked>
+                    <label for="disablePreviewsCheckbox" class="text-gray-700">Disable Image Previews when Uploading</label>
+                </div>
+            </div>
+
+            <div>
+                <label class="text-lg font-medium text-gray-700 mb-2 block">Visual Adjustments (Images Only):</label>
+                <div class="flex items-center gap-4">
+                    <input type="checkbox" id="globalInvertColors" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <label for="globalInvertColors" class="text-gray-700">Invert Colors</label>
+                </div>
+                <div class="flex flex-col gap-2 mt-4">
+                    <label for="globalSaturation" class="text-gray-700">Saturation: <span id="globalSaturationValue">100</span>%</label>
+                    <input type="range" id="globalSaturation" min="0" max="200" value="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <div class="flex flex-col gap-2 mt-4">
+                    <label for="globalBrightness" class="text-gray-700">Brightness: <span id="globalBrightnessValue">100</span>%</label>
+                    <input type="range" id="globalBrightness" min="0" max="200" value="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                </div>
+                <div class="flex flex-col gap-2 mt-4">
+                    <label for="globalContrast" class="text-gray-700">Contrast: <span id="globalContrastValue">100</span>%</label>
+                    <input type="range" id="globalContrast" min="0" max="200" value="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                </div>
+            </div>
+
+            <div>
+                <label class="text-lg font-medium text-gray-700 mb-2 block">Scaling Options (Images Only):</label>
+                <div class="flex items-center gap-4">
+                    <input type="checkbox" id="globalEnableScaling" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <label for="globalEnableScaling" class="text-gray-700">Enable Scaling</label>
+                </div>
+                <div class="flex flex-col gap-4 mt-4">
+                    <div class="flex flex-col">
+                        <label for="globalScaleWidth" class="text-gray-700 mb-1">Width (px):</label>
+                        <input type="number" id="globalScaleWidth" min="1" placeholder="Original Width" class="p-2 border rounded-md" disabled>
+                    </div>
+                    <div class="flex flex-col">
+                        <label for="globalScaleHeight" class="text-gray-700 mb-1">Height (px):</label>
+                        <input type="number" id="globalScaleHeight" min="1" placeholder="Original Height" class="p-2 border rounded-md" disabled>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 mt-4">
+                    <input type="checkbox" id="globalMaintainAspectRatio" class="form-checkbox h-5 w-5 text-blue-600 rounded" disabled>
+                    <label for="globalMaintainAspectRatio" class="text-gray-700">Maintain Aspect Ratio</label>
+                </div>
+            </div>
+
+            <div>
+                <label for="globalOutputFormat" class="text-lg font-medium text-gray-700 mb-2 block">Convert To (Images Only):</label>
+                <select id="globalOutputFormat" class="rounded-lg p-2 w-full">
+                    <option value="image/png">PNG (Lossless)</option>
+                    <option value="image/jpeg">JPG (Highest Quality)</option>
+                    <option value="image/webp">WEBP (Highest Quality)</option>
+                    <option value="image/avif">AVIF (Limited Browser Support)</option>
+                    <option value="image/tiff">TIFF (Limited Browser Support)</option>
+                </select>
+                <div class="flex items-center gap-2 mt-4">
+                    <input type="checkbox" id="keepOriginalTypeCheckbox" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <label for="keepOriginalTypeCheckbox" class="text-gray-700">Keep Original File Type (for Export All Images)</label>
+                </div>
+            </div>
+
+            <div class="global-buttons-group">
+                <button id="convertAllBtn">
+                    Convert All Images & Download
+                </button>
+                <button id="exportZipBtn">
+                    Export All Files as Zip
+                </button>
+                <button id="clearAllBtn" class="bg-amber-500 hover:bg-amber-600">
+                    Clear All Files
+                </button>
+            </div>
+        </div>
+
+        <div id="imageGrid" class="image-grid">
+        </div>
+
+        <p class="text-sm text-gray-600 mt-2 rounded-lg p-2 bg-blue-50">
+            <strong>Note:</strong> This tool can process various file types.
+            <br>
+            For <strong>image files</strong> (PNG, JPG, WEBP), visual adjustments and scaling can be applied. If "Keep Original File Type" is selected for ZIP export, these images will retain their format after adjustments. AVIF and TIFF images are supported for input and can be included in the ZIP, but visual adjustments cannot be applied to them via browser canvas; they will be exported as their original raw files (without adjustments) when "Keep Original File Type" is enabled, or if selected as the target conversion format.
+            <br>
+            <strong>Non-image files</strong> will always be included in the ZIP archive in their original form without any processing or conversion.
+        </p>
+    </div>
+
+    <script>
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const hiddenFileInput = document.getElementById('hiddenFileInput');
+        const imageGrid = document.getElementById('imageGrid');
+        const generalMessageBox = document.getElementById('generalMessageBox');
+
+        // New elements for loading bar and preview control
+        const disablePreviewsCheckbox = document.getElementById('disablePreviewsCheckbox');
+        const loadingBarContainer = document.getElementById('loadingBarContainer');
+        const loadingBar = document.getElementById('loadingBar');
+        const loadingText = document.getElementById('loadingText');
+
+        // Global adjustment elements
+        const globalInvertColorsCheckbox = document.getElementById('globalInvertColors');
+        const globalSaturationSlider = document.getElementById('globalSaturation');
+        const globalSaturationValueSpan = document.getElementById('globalSaturationValue');
+        const globalBrightnessSlider = document.getElementById('globalBrightness'); // New
+        const globalBrightnessValueSpan = document.getElementById('globalBrightnessValue'); // New
+        const globalContrastSlider = document.getElementById('globalContrast'); // New
+        const globalContrastValueSpan = document.getElementById('globalContrastValue'); // New
+        const globalEnableScalingCheckbox = document.getElementById('globalEnableScaling');
+        const globalScaleWidthInput = document.getElementById('globalScaleWidth');
+        const globalScaleHeightInput = document.getElementById('globalScaleHeight');
+        const globalMaintainAspectRatioCheckbox = document.getElementById('globalMaintainAspectRatio');
+        const globalOutputFormatSelect = document.getElementById('globalOutputFormat');
+        const keepOriginalTypeCheckbox = document.getElementById('keepOriginalTypeCheckbox');
+        const convertAllBtn = document.getElementById('convertAllBtn');
+        const exportZipBtn = document.getElementById('exportZipBtn');
+        const clearAllBtn = document.getElementById('clearAllBtn'); // New
+
+        // Map to store state for each file, keyed by a unique ID
+        const imageStates = new Map();
+
+        // Global state for adjustments and scaling
+        const globalSettings = {
+            invertColors: false,
+            saturation: 100,
+            brightness: 100, // New
+            contrast: 100,   // New
+            enableScaling: false,
+            scaleWidth: null,
+            scaleHeight: null,
+            maintainAspectRatio: false,
+            outputFormat: 'image/png',
+            keepOriginalType: false,
+            displayPreviews: false // New setting, default to false (meaning previews are disabled by default)
+        };
+
+        // Counters for loading progress
+        let totalFilesToLoad = 0;
+        let filesLoadedCount = 0;
+
+        // Utility to generate unique IDs
+        const generateUniqueId = () => `file-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+        // Function to display general messages
+        function showGeneralMessage(message, type) {
+            generalMessageBox.textContent = message;
+            generalMessageBox.className = `message-box ${type} block`;
+        }
+
+        // Function to update loading bar progress
+        function updateLoadingProgress() {
+            if (totalFilesToLoad === 0) {
+                loadingBarContainer.classList.add('hidden');
+                return;
+            }
+            const progress = (filesLoadedCount / totalFilesToLoad) * 100;
+            loadingBar.style.width = `${progress}%`;
+            loadingText.textContent = `${Math.round(progress)}%`;
+
+            if (filesLoadedCount === totalFilesToLoad) {
+                // Delay hiding for a smoother transition and to ensure "All files loaded" message is seen
+                setTimeout(() => {
+                    loadingBarContainer.classList.add('hidden');
+                    // Only show "All files loaded" if there were actually files
+                    if (totalFilesToLoad > 0) {
+                        showGeneralMessage('All files loaded.', 'info');
+                    }
+                }, 500);
+            }
+        }
+
+        // Function to draw an image onto its canvas with applied global or individual filters and scaling
+        function drawImageWithFiltersAndScale(cardId) {
+            const fileState = imageStates.get(cardId);
+            if (!fileState || !fileState.isImage || !fileState.originalImage || !fileState.canvas || !fileState.ctx) {
+                return; // Only draw if it's an image and image data is loaded and has a canvas
+            }
+
+            const { originalImage, canvas, ctx } = fileState;
+
+            // Determine which settings to use: individual overrides global
+            const invertColors = fileState.individualInvertColors !== undefined ? fileState.individualInvertColors : globalSettings.invertColors;
+            const saturation = fileState.individualSaturation !== undefined ? fileState.individualSaturation : globalSettings.saturation;
+            const brightness = fileState.individualBrightness !== undefined ? fileState.individualBrightness : globalSettings.brightness;
+            const contrast = fileState.individualContrast !== undefined ? fileState.individualContrast : globalSettings.contrast;
+            const enableScaling = fileState.individualEnableScaling !== undefined ? fileState.individualEnableScaling : globalSettings.enableScaling;
+            const scaleWidth = fileState.individualScaleWidth !== undefined ? fileState.individualScaleWidth : globalSettings.scaleWidth;
+            const scaleHeight = fileState.individualScaleHeight !== undefined ? fileState.individualScaleHeight : globalSettings.scaleHeight;
+            const maintainAspectRatio = fileState.individualMaintainAspectRatio !== undefined ? fileState.individualMaintainAspectRatio : globalSettings.maintainAspectRatio;
+
+
+            let finalWidth = originalImage.width;
+            let finalHeight = originalImage.height;
+
+            // Scaling logic
+            if (enableScaling) {
+                let inputWidth = parseInt(scaleWidth);
+                let inputHeight = parseInt(scaleHeight);
+
+                const isValidWidth = !isNaN(inputWidth) && inputWidth > 0;
+                const isValidHeight = !isNaN(inputHeight) && inputHeight > 0;
+
+                const originalAspectRatio = originalImage.width / originalImage.height;
+
+                if (maintainAspectRatio) {
+                    if (isValidWidth && !isValidHeight) {
+                        finalWidth = inputWidth;
+                        finalHeight = Math.round(inputWidth / originalAspectRatio);
+                    } else if (!isValidWidth && isValidHeight) {
+                        finalHeight = inputHeight;
+                        finalWidth = Math.round(inputHeight * originalAspectRatio);
+                    } else if (isValidWidth && isValidHeight) {
+                        const ratioW = inputWidth / originalImage.width;
+                        const ratioH = inputHeight / originalImage.height;
+                        const ratio = Math.min(ratioW, ratioH);
+                        finalWidth = Math.round(originalImage.width * ratio);
+                        finalHeight = Math.round(originalImage.height * ratio);
+                    } else {
+                         // No valid dimensions for aspect ratio scaling, use original
+                         finalWidth = originalImage.width;
+                         finalHeight = originalImage.height;
+                    }
+                } else {
+                    if (isValidWidth) {
+                        finalWidth = inputWidth;
+                    }
+                    if (isValidHeight) {
+                        finalHeight = inputHeight;
+                    }
+                }
+            }
+
+            // Set canvas dimensions
+            canvas.width = finalWidth;
+            canvas.height = finalHeight;
+
+            // Apply filters to the canvas context
+            let filterString = '';
+            if (invertColors) {
+                filterString += 'invert(100%) ';
+            }
+            filterString += `saturate(${saturation}%) `;
+            filterString += `brightness(${brightness}%) `; // New filter
+            filterString += `contrast(${contrast}%)`;     // New filter
+            ctx.filter = filterString.trim();
+
+            // Clear canvas and draw image
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear before drawing
+            ctx.drawImage(originalImage, 0, 0, finalWidth, finalHeight);
+
+            // Reset filter to avoid affecting subsequent draws of other images if this context is reused (important for future potential features)
+            ctx.filter = 'none';
+        }
+
+        // Function to update all image previews based on global settings
+        function updateAllPreviews(sourceGlobalUpdate = true) {
+            imageStates.forEach((fileState, key) => {
+                // If this update is from a global setting change
+                if (sourceGlobalUpdate) {
+                    // Only update images that *do not* have individual overrides for the changed setting
+                    // For simplicity, we just redraw all images here. If specific global-only updates are needed,
+                    // individual states for each setting (e.g., individualInvertColorsActive) would be needed.
+                    // For now, individual settings always override global.
+                    if (fileState.isImage && fileState.originalImage) {
+                         drawImageWithFiltersAndScale(key);
+                    }
+                } else { // This is likely an individual card update
+                    if (fileState.isImage && fileState.originalImage) {
+                        drawImageWithFiltersAndScale(key);
+                    }
+                }
+            });
+        }
+
+        // Function to toggle disabled state of individual scaling inputs
+        function toggleIndividualScalingInputs(cardId) {
+            const fileState = imageStates.get(cardId);
+            if (!fileState) return;
+
+            const isDisabled = !fileState.individualEnableScaling;
+            document.getElementById(`scaleWidth-${cardId}`).disabled = isDisabled;
+            document.getElementById(`scaleHeight-${cardId}`).disabled = isDisabled;
+            document.getElementById(`maintainAspectRatio-${cardId}`).disabled = isDisabled;
+
+            if (isDisabled) {
+                document.getElementById(`scaleWidth-${cardId}`).value = '';
+                document.getElementById(`scaleHeight-${cardId}`).value = '';
+                document.getElementById(`maintainAspectRatio-${cardId}`).checked = false;
+                fileState.individualScaleWidth = null;
+                fileState.individualScaleHeight = null;
+                fileState.individualMaintainAspectRatio = false;
+            } else {
+                // Set placeholders to original dimensions
+                if (fileState.originalImage) {
+                    document.getElementById(`scaleWidth-${cardId}`).placeholder = `Orig: ${fileState.originalImage.width}px`;
+                    document.getElementById(`scaleHeight-${cardId}`).placeholder = `Orig: ${fileState.originalImage.height}px`;
+                    // Pre-fill with original dimensions when enabled
+                    fileState.individualScaleWidth = fileState.originalImage.width;
+                    fileState.individualScaleHeight = fileState.originalImage.height;
+                    document.getElementById(`scaleWidth-${cardId}`).value = fileState.originalImage.width;
+                    document.getElementById(`scaleHeight-${cardId}`).value = fileState.originalImage.height;
+                } else {
+                    document.getElementById(`scaleWidth-${cardId}`).placeholder = `Original Width`;
+                    document.getElementById(`scaleHeight-${cardId}`).placeholder = `Original Height`;
+                }
+            }
+            drawImageWithFiltersAndScale(cardId);
+        }
+
+        // Function to create and append a file card to the grid
+        function addOrUpdateFileCard(cardId, file, originalImage, relativePath, isImage, statusMessage = '') {
+            const existingCard = document.getElementById(`card-${cardId}`);
+            if (existingCard) {
+                existingCard.remove(); // Remove existing card if re-adding
+            }
+
+            const displayName = relativePath && relativePath.length > 0 ? relativePath : file.name;
+
+            let cardContentHtml;
+            let canvas = null;
+            let ctx = null;
+
+            let individualControlsHtml = '';
+
+            if (isImage && globalSettings.displayPreviews && originalImage) { // Only create canvas if it's an image AND originalImage is loaded AND previews enabled
+                cardContentHtml = `
+                    <canvas id="canvas-${cardId}" class="w-full h-auto rounded-lg shadow-md"></canvas>
+                `;
+                // Add individual controls for images
+                individualControlsHtml = `
+                    <div class="individual-adjustments">
+                        <h4 class="font-medium text-gray-700">Individual Adjustments:</h4>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" id="invert-${cardId}" class="form-checkbox h-4 w-4 text-blue-600 rounded">
+                            <label for="invert-${cardId}">Invert</label>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label for="saturation-${cardId}">Saturation: <span id="saturationValue-${cardId}">100</span>%</label>
+                            <input type="range" id="saturation-${cardId}" min="0" max="200" value="100">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label for="brightness-${cardId}">Brightness: <span id="brightnessValue-${cardId}">100</span>%</label>
+                            <input type="range" id="brightness-${cardId}" min="0" max="200" value="100">
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label for="contrast-${cardId}">Contrast: <span id="contrastValue-${cardId}">100</span>%</label>
+                            <input type="range" id="contrast-${cardId}" min="0" max="200" value="100">
+                        </div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <input type="checkbox" id="enableScaling-${cardId}" class="form-checkbox h-4 w-4 text-blue-600 rounded">
+                            <label for="enableScaling-${cardId}">Enable Scaling</label>
+                        </div>
+                        <div class="flex gap-2 mt-1">
+                            <div class="flex flex-col flex-1">
+                                <label for="scaleWidth-${cardId}" class="text-xs">W (px):</label>
+                                <input type="number" id="scaleWidth-${cardId}" min="1" placeholder="Orig W" disabled>
+                            </div>
+                            <div class="flex flex-col flex-1">
+                                <label for="scaleHeight-${cardId}" class="text-xs">H (px):</label>
+                                <input type="number" id="scaleHeight-${cardId}" min="1" placeholder="Orig H" disabled>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 mt-2">
+                            <input type="checkbox" id="maintainAspectRatio-${cardId}" class="form-checkbox h-4 w-4 text-blue-600 rounded" disabled>
+                            <label for="maintainAspectRatio-${cardId}">Maintain Aspect Ratio</label>
+                        </div>
+                    </div>
+                `;
+            } else {
+                cardContentHtml = `
+                    <div class="p-4 bg-gray-100 rounded-lg text-gray-700 text-sm">
+                        <p><strong>Type:</strong> ${file.type || 'Unknown'}</p>
+                        <p><strong>Size:</strong> ${(file.size / 1024).toFixed(2)} KB</p>
+                        ${statusMessage ? `<p class="text-red-500">${statusMessage}</p>` : ''}
+                    </div>
+                `;
+            }
+
+            const cardHtml = `
+                <div id="card-${cardId}" class="image-card">
+                    <h3 class="text-xl font-semibold text-gray-800 break-words">${displayName}</h3>
+                    ${cardContentHtml}
+                    ${individualControlsHtml}
+                    <div id="status-${cardId}" class="status-message info">Pending...</div>
+                    <button id="removeBtn-${cardId}" class="remove-btn bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg shadow-md transition duration-200 ease-in-out">
+                        Remove File
+                    </button>
+                </div>
+            `;
+            imageGrid.insertAdjacentHTML('beforeend', cardHtml);
+
+            if (isImage && globalSettings.displayPreviews && originalImage) {
+                canvas = document.getElementById(`canvas-${cardId}`);
+                ctx = canvas.getContext('2d');
+            }
+
+            // Initialize file state (always initialize with global defaults)
+            const initialState = {
+                file: file,
+                originalImage: originalImage,
+                canvas: canvas,
+                ctx: ctx,
+                relativePath: relativePath,
+                isImage: isImage,
+                status: 'Pending...', // New status field
+                // Individual settings - initially undefined so global applies, or set to global default if you want to explicitly copy
+                individualInvertColors: undefined,
+                individualSaturation: undefined,
+                individualBrightness: undefined,
+                individualContrast: undefined,
+                individualEnableScaling: undefined,
+                individualScaleWidth: undefined,
+                individualScaleHeight: undefined,
+                individualMaintainAspectRatio: undefined,
+            };
+            imageStates.set(cardId, initialState);
+
+            const removeBtn = document.getElementById(`removeBtn-${cardId}`);
+            const statusDiv = document.getElementById(`status-${cardId}`);
+
+            // If it's an image AND originalImage is loaded (i.e., previews enabled and loaded successfully), perform initial draw and add individual listeners
+            if (isImage && globalSettings.displayPreviews && originalImage) {
+                drawImageWithFiltersAndScale(cardId);
+
+                // Add individual event listeners
+                const invertCheckbox = document.getElementById(`invert-${cardId}`);
+                const saturationSlider = document.getElementById(`saturation-${cardId}`);
+                const saturationValueSpan = document.getElementById(`saturationValue-${cardId}`);
+                const brightnessSlider = document.getElementById(`brightness-${cardId}`);
+                const brightnessValueSpan = document.getElementById(`brightnessValue-${cardId}`);
+                const contrastSlider = document.getElementById(`contrast-${cardId}`);
+                const contrastValueSpan = document.getElementById(`contrastValue-${cardId}`);
+                const enableScalingCheckbox = document.getElementById(`enableScaling-${cardId}`);
+                const scaleWidthInput = document.getElementById(`scaleWidth-${cardId}`);
+                const scaleHeightInput = document.getElementById(`scaleHeight-${cardId}`);
+                const maintainAspectRatioCheckbox = document.getElementById(`maintainAspectRatio-${cardId}`);
+
+                // Set initial values from global for card controls
+                invertCheckbox.checked = globalSettings.invertColors;
+                saturationSlider.value = globalSettings.saturation;
+                saturationValueSpan.textContent = globalSettings.saturation;
+                brightnessSlider.value = globalSettings.brightness;
+                brightnessValueSpan.textContent = globalSettings.brightness;
+                contrastSlider.value = globalSettings.contrast;
+                contrastValueSpan.textContent = globalSettings.contrast;
+                enableScalingCheckbox.checked = globalSettings.enableScaling;
+                // Don't set scaleWidth/Height values, let toggleIndividualScalingInputs handle it
+
+                // Update individual state to reflect global defaults initially (so overrides work later)
+                initialState.individualInvertColors = globalSettings.invertColors;
+                initialState.individualSaturation = globalSettings.saturation;
+                initialState.individualBrightness = globalSettings.brightness;
+                initialState.individualContrast = globalSettings.contrast;
+                initialState.individualEnableScaling = globalSettings.enableScaling;
+                initialState.individualMaintainAspectRatio = globalSettings.maintainAspectRatio;
+                initialState.individualScaleWidth = globalSettings.scaleWidth; // Will be null or actual value
+                initialState.individualScaleHeight = globalSettings.scaleHeight; // Will be null or actual value
+
+
+                // Call toggle for initial state of scaling inputs
+                toggleIndividualScalingInputs(cardId);
+
+
+                invertCheckbox.addEventListener('change', () => {
+                    fileState.individualInvertColors = invertCheckbox.checked;
+                    drawImageWithFiltersAndScale(cardId);
+                });
+                saturationSlider.addEventListener('input', () => {
+                    fileState.individualSaturation = parseInt(saturationSlider.value);
+                    saturationValueSpan.textContent = fileState.individualSaturation;
+                    drawImageWithFiltersAndScale(cardId);
+                });
+                brightnessSlider.addEventListener('input', () => {
+                    fileState.individualBrightness = parseInt(brightnessSlider.value);
+                    brightnessValueSpan.textContent = fileState.individualBrightness;
+                    drawImageWithFiltersAndScale(cardId);
+                });
+                contrastSlider.addEventListener('input', () => {
+                    fileState.individualContrast = parseInt(contrastSlider.value);
+                    contrastValueSpan.textContent = fileState.individualContrast;
+                    drawImageWithFiltersAndScale(cardId);
+                });
+                enableScalingCheckbox.addEventListener('change', () => {
+                    fileState.individualEnableScaling = enableScalingCheckbox.checked;
+                    toggleIndividualScalingInputs(cardId);
+                });
+                scaleWidthInput.addEventListener('input', () => {
+                    fileState.individualScaleWidth = scaleWidthInput.value;
+                    if (fileState.individualMaintainAspectRatio && scaleWidthInput.value) {
+                         const originalAspectRatio = originalImage.width / originalImage.height;
+                         const newHeight = Math.round(parseInt(scaleWidthInput.value) / originalAspectRatio);
+                         if (!isNaN(newHeight)) {
+                            scaleHeightInput.value = newHeight;
+                            fileState.individualScaleHeight = newHeight;
+                         }
+                    }
+                    drawImageWithFiltersAndScale(cardId);
+                });
+                scaleHeightInput.addEventListener('input', () => {
+                    fileState.individualScaleHeight = scaleHeightInput.value;
+                    if (fileState.individualMaintainAspectRatio && scaleHeightInput.value) {
+                         const originalAspectRatio = originalImage.width / originalImage.height;
+                         const newWidth = Math.round(parseInt(scaleHeightInput.value) * originalAspectRatio);
+                         if (!isNaN(newWidth)) {
+                            scaleWidthInput.value = newWidth;
+                            fileState.individualScaleWidth = newWidth;
+                         }
+                    }
+                    drawImageWithFiltersAndScale(cardId);
+                });
+                maintainAspectRatioCheckbox.addEventListener('change', () => {
+                    fileState.individualMaintainAspectRatio = maintainAspectRatioCheckbox.checked;
+                    // Recalculate dimensions if aspect ratio is now maintained and one dimension is set
+                    if (fileState.individualMaintainAspectRatio) {
+                        const originalAspectRatio = originalImage.width / originalImage.height;
+                        if (scaleWidthInput.value && !scaleHeightInput.value) {
+                             const newHeight = Math.round(parseInt(scaleWidthInput.value) / originalAspectRatio);
+                             if (!isNaN(newHeight)) {
+                                scaleHeightInput.value = newHeight;
+                                fileState.individualScaleHeight = newHeight;
+                             }
+                        } else if (scaleHeightInput.value && !scaleWidthInput.value) {
+                            const newWidth = Math.round(parseInt(scaleHeightInput.value) * originalAspectRatio);
+                            if (!isNaN(newWidth)) {
+                                scaleWidthInput.value = newWidth;
+                                fileState.individualScaleWidth = newWidth;
+                            }
+                        } else if (scaleWidthInput.value && scaleHeightInput.value) {
+                            const inputWidth = parseInt(scaleWidthInput.value);
+                            const inputHeight = parseInt(scaleHeightInput.value);
+                            const ratioW = inputWidth / originalImage.width;
+                            const ratioH = inputHeight / originalImage.height;
+                            const ratio = Math.min(ratioW, ratioH);
+                            const finalWidth = Math.round(originalImage.width * ratio);
+                            const finalHeight = Math.round(originalImage.height * ratio);
+                            scaleWidthInput.value = finalWidth;
+                            scaleHeightInput.value = finalHeight;
+                            fileState.individualScaleWidth = finalWidth;
+                            fileState.individualScaleHeight = finalHeight;
+                        }
+                    }
+                    drawImageWithFiltersAndScale(cardId);
+                });
+            } else {
+                // If not an image preview, ensure initial status is set
+                statusDiv.textContent = statusMessage || 'Ready';
+            }
+
+
+            // Add Event Listeners for this card's elements
+            removeBtn.addEventListener('click', () => {
+                imageStates.delete(cardId);
+                document.getElementById(`card-${cardId}`).remove();
+                showGeneralMessage(`Removed "${displayName}".`, 'info');
+            });
+        }
+
+        // Handle files from drag-and-drop or file input
+        function handleFiles(files) {
+            showGeneralMessage('', ''); // Clear general messages
+            imageGrid.innerHTML = ''; // Clear existing files when new ones are loaded
+
+            totalFilesToLoad = 0;
+            filesLoadedCount = 0;
+            imageStates.clear(); // Clear existing image states
+
+            const filesArray = Array.from(files).filter(file => {
+                // Filter out directories (folders themselves, not their contents)
+                return !(file.type === '' && file.size === 0 && file.webkitRelativePath.endsWith('/'));
+            });
+
+            totalFilesToLoad = filesArray.length;
+            if (totalFilesToLoad === 0) {
+                showGeneralMessage('No files found to load.', 'info');
+                return;
+            }
+
+            loadingBarContainer.classList.remove('hidden');
+            updateLoadingProgress(); // Initialize loading bar
+
+            filesArray.forEach(file => {
+                const relativePath = file.webkitRelativePath || '';
+                const cardId = generateUniqueId();
+                const displayName = relativePath && relativePath.length > 0 ? relativePath : file.name;
+
+                const imageMimeTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/avif', 'image/tiff'];
+                const isSupportedImageType = imageMimeTypes.includes(file.type);
+
+                if (isSupportedImageType && globalSettings.displayPreviews) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = new Image();
+                        img.onload = function() {
+                            addOrUpdateFileCard(cardId, file, img, relativePath, true);
+                            filesLoadedCount++;
+                            updateLoadingProgress();
+                        };
+                        img.onerror = function() {
+                            showGeneralMessage(`Error loading image "${displayName}". It might be corrupted or an unsupported image format for display. Adding as non-previewable file.`, 'error');
+                            addOrUpdateFileCard(cardId, file, null, relativePath, false, `(Image preview failed)`); // Mark as not image for preview, but retain original type
+                            filesLoadedCount++;
+                            updateLoadingProgress();
+                        };
+                        img.src = e.target.result;
+                    };
+                    reader.onerror = function() {
+                        showGeneralMessage(`Error reading file "${displayName}". Adding as non-previewable file.`, 'error');
+                        addOrUpdateFileCard(cardId, file, null, relativePath, false, `(File read failed)`); // Mark as not image for preview, but retain original type
+                        filesLoadedCount++;
+                        updateLoadingProgress();
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    // This is a non-image file, or previews are disabled
+                    // isImage parameter indicates if the file *is* an image type, even if we're not showing a preview
+                    addOrUpdateFileCard(cardId, file, null, relativePath, isSupportedImageType, `(No preview: ${globalSettings.displayPreviews ? 'Non-image' : 'Previews disabled'})`);
+                    filesLoadedCount++;
+                    updateLoadingProgress();
+                }
+            });
+        }
+
+        // Global Event Listeners for adjustments
+        globalInvertColorsCheckbox.addEventListener('change', () => {
+            globalSettings.invertColors = globalInvertColorsCheckbox.checked;
+            updateAllPreviews(true);
+        });
+
+        globalSaturationSlider.addEventListener('input', () => {
+            globalSettings.saturation = parseInt(globalSaturationSlider.value);
+            globalSaturationValueSpan.textContent = globalSettings.saturation;
+            updateAllPreviews(true);
+        });
+
+        globalBrightnessSlider.addEventListener('input', () => {
+            globalSettings.brightness = parseInt(globalBrightnessSlider.value);
+            globalBrightnessValueSpan.textContent = globalSettings.brightness;
+            updateAllPreviews(true);
+        });
+
+        globalContrastSlider.addEventListener('input', () => {
+            globalSettings.contrast = parseInt(globalContrastSlider.value);
+            globalContrastValueSpan.textContent = globalSettings.contrast;
+            updateAllPreviews(true);
+        });
+
+
+        globalEnableScalingCheckbox.addEventListener('change', () => {
+            globalSettings.enableScaling = globalEnableScalingCheckbox.checked;
+            toggleGlobalScalingInputs();
+        });
+
+        globalScaleWidthInput.addEventListener('input', () => {
+            globalSettings.scaleWidth = globalScaleWidthInput.value;
+            if (globalSettings.maintainAspectRatio && globalScaleWidthInput.value) {
+                // Get original dimensions from the first *image* with a loaded preview for aspect ratio calculation
+                let firstImageState = null;
+                for (const fileState of imageStates.values()) {
+                    if (fileState.isImage && fileState.originalImage) {
+                        firstImageState = fileState;
+                        break;
+                    }
+                }
+                if (firstImageState && firstImageState.originalImage) {
+                    const originalAspectRatio = firstImageState.originalImage.width / firstImageState.originalImage.height;
+                    const newHeight = Math.round(parseInt(globalScaleWidthInput.value) / originalAspectRatio);
+                    if (!isNaN(newHeight)) {
+                        globalScaleHeightInput.value = newHeight;
+                        globalSettings.scaleHeight = newHeight;
+                    }
+                }
+            }
+            updateAllPreviews(true);
+        });
+
+        globalScaleHeightInput.addEventListener('input', () => {
+            globalSettings.scaleHeight = globalScaleHeightInput.value;
+            if (globalSettings.maintainAspectRatio && globalScaleHeightInput.value) {
+                // Get original dimensions from the first *image* with a loaded preview for aspect ratio calculation
+                let firstImageState = null;
+                for (const fileState of imageStates.values()) {
+                    if (fileState.isImage && fileState.originalImage) {
+                        firstImageState = fileState;
+                        break;
+                    }
+                }
+                if (firstImageState && firstImageState.originalImage) {
+                    const originalAspectRatio = firstImageState.originalImage.width / firstImageState.originalImage.height;
+                    const newWidth = Math.round(parseInt(globalScaleHeightInput.value) * originalAspectRatio);
+                    if (!isNaN(newWidth)) {
+                        globalScaleWidthInput.value = newWidth;
+                        globalSettings.scaleWidth = newWidth;
+                    }
+                }
+            }
+            updateAllPreviews(true);
+        });
+
+        globalMaintainAspectRatioCheckbox.addEventListener('change', () => {
+            globalSettings.maintainAspectRatio = globalMaintainAspectRatioCheckbox.checked;
+            // If aspect ratio is now maintained, update the other dimension if one is set
+            if (globalSettings.maintainAspectRatio) {
+                let firstImageState = null;
+                for (const fileState of imageStates.values()) {
+                    if (fileState.isImage && fileState.originalImage) {
+                        firstImageState = fileState;
+                        break;
+                    }
+                }
+                if (firstImageState && firstImageState.originalImage) {
+                    const originalAspectRatio = firstImageState.originalImage.width / firstImageState.originalImage.height;
+                    if (globalScaleWidthInput.value && !globalScaleHeightInput.value) {
+                         const newHeight = Math.round(parseInt(globalScaleWidthInput.value) / originalAspectRatio);
+                         if (!isNaN(newHeight)) {
+                            globalScaleHeightInput.value = newHeight;
+                            globalSettings.scaleHeight = newHeight;
+                         }
+                    } else if (globalScaleHeightInput.value && !globalScaleWidthInput.value) {
+                        const newWidth = Math.round(parseInt(globalScaleHeightInput.value) * originalAspectRatio);
+                        if (!isNaN(newWidth)) {
+                            globalScaleWidthInput.value = newWidth;
+                            globalSettings.scaleWidth = newWidth;
+                        }
+                    } else if (globalScaleWidthInput.value && globalScaleHeightInput.value) {
+                        // Re-calculate to fit within bounding box if both are set
+                        const inputWidth = parseInt(globalScaleWidthInput.value);
+                        const inputHeight = parseInt(globalScaleHeightInput.value);
+                        const ratioW = inputWidth / firstImageState.originalImage.width;
+                        const ratioH = inputHeight / firstImageState.originalImage.height;
+                        const ratio = Math.min(ratioW, ratioH);
+                        const finalWidth = Math.round(firstImageState.originalImage.width * ratio);
+                        const finalHeight = Math.round(firstImageState.originalImage.height * ratio);
+                        globalScaleWidthInput.value = finalWidth;
+                        globalScaleHeightInput.value = finalHeight;
+                        globalSettings.scaleWidth = finalWidth;
+                        globalSettings.scaleHeight = finalHeight;
+                    }
+                }
+            }
+            updateAllPreviews(true);
+        });
+
+        globalOutputFormatSelect.addEventListener('change', () => {
+            globalSettings.outputFormat = globalOutputFormatSelect.value;
+            // When user explicitly selects an output format, it implies they don't want to keep original type for export
+            globalSettings.keepOriginalType = false;
+            keepOriginalTypeCheckbox.checked = false;
+            globalOutputFormatSelect.disabled = false; // Ensure it's enabled
+        });
+
+        // New event listener for the "Keep Original File Type" checkbox
+        keepOriginalTypeCheckbox.addEventListener('change', () => {
+            globalSettings.keepOriginalType = keepOriginalTypeCheckbox.checked;
+            // If "Keep Original Type" is checked, disable and reset output format dropdown
+            globalOutputFormatSelect.disabled = globalSettings.keepOriginalType;
+        });
+
+        // Event listener for the new "Disable Image Previews" checkbox
+        disablePreviewsCheckbox.addEventListener('change', () => {
+            globalSettings.displayPreviews = !disablePreviewsCheckbox.checked; // Invert logic: checked means NO previews
+            imageGrid.innerHTML = ''; // Clear current previews
+            // Re-process existing files based on new preview setting
+            const currentFiles = Array.from(imageStates.values()).map(state => state.file);
+            if (currentFiles.length > 0) {
+                // Clear existing states and re-handle files to apply new preview setting
+                imageStates.clear();
+                handleFiles(currentFiles); // This will re-trigger the loading bar and card creation
+            }
+        });
+
+        // Clear All Files button
+        clearAllBtn.addEventListener('click', () => {
+            if (imageStates.size === 0) {
+                showGeneralMessage('No files to clear.', 'info');
+                return;
+            }
+            imageStates.clear();
+            imageGrid.innerHTML = '';
+            totalFilesToLoad = 0;
+            filesLoadedCount = 0;
+            loadingBarContainer.classList.add('hidden');
+            loadingBar.style.width = '0%';
+            loadingText.textContent = '0%';
+            showGeneralMessage('All files cleared.', 'info');
+        });
+
+        // Function to update individual card status
+        function updateCardStatus(cardId, message, type = 'info') {
+            const statusDiv = document.getElementById(`status-${cardId}`);
+            if (statusDiv) {
+                statusDiv.textContent = message;
+                statusDiv.className = `status-message ${type}`;
+            }
+        }
+
+
+        // Global Convert All & Download Button (Unchanged behavior for now - only processes images)
+        convertAllBtn.addEventListener('click', async () => {
+            if (imageStates.size === 0) {
+                showGeneralMessage('Please load at least one file to convert.', 'error');
+                return;
+            }
+
+            showGeneralMessage('Starting conversion of all images...', 'info');
+            let conversionCount = 0;
+
+            for (const [cardId, fileState] of imageStates.entries()) {
+                const { file, originalImage, relativePath, isImage } = fileState;
+
+                if (!isImage) {
+                    updateCardStatus(cardId, 'Skipped (Non-image)', 'info');
+                    continue;
+                }
+                if (!originalImage) {
+                    updateCardStatus(cardId, 'Skipped (Preview failed)', 'error');
+                    continue;
+                }
+
+                updateCardStatus(cardId, 'Processing...', 'info');
+
+                // Determine which settings to use: individual overrides global
+                const invertColors = fileState.individualInvertColors !== undefined ? fileState.individualInvertColors : globalSettings.invertColors;
+                const saturation = fileState.individualSaturation !== undefined ? fileState.individualSaturation : globalSettings.saturation;
+                const brightness = fileState.individualBrightness !== undefined ? fileState.individualBrightness : globalSettings.brightness;
+                const contrast = fileState.individualContrast !== undefined ? fileState.individualContrast : globalSettings.contrast;
+                const enableScaling = fileState.individualEnableScaling !== undefined ? fileState.individualEnableScaling : globalSettings.enableScaling;
+                const scaleWidth = fileState.individualScaleWidth !== undefined ? fileState.individualScaleWidth : globalSettings.scaleWidth;
+                const scaleHeight = fileState.individualScaleHeight !== undefined ? fileState.individualScaleHeight : globalSettings.scaleHeight;
+                const maintainAspectRatio = fileState.individualMaintainAspectRatio !== undefined ? fileState.individualMaintainAspectRatio : globalSettings.maintainAspectRatio;
+                const outputFormat = globalSettings.outputFormat; // Direct download always uses global output format
+
+
+                let finalWidth = originalImage.width;
+                let finalHeight = originalImage.height;
+
+                // Scaling logic
+                if (enableScaling) {
+                    let inputWidth = parseInt(scaleWidth);
+                    let inputHeight = parseInt(scaleHeight);
+
+                    const isValidWidth = !isNaN(inputWidth) && inputWidth > 0;
+                    const isValidHeight = !isNaN(inputHeight) && inputHeight > 0;
+
+                    const originalAspectRatio = originalImage.width / originalImage.height;
+
+                    if (maintainAspectRatio) {
+                        if (isValidWidth && !isValidHeight) {
+                            finalWidth = inputWidth;
+                            finalHeight = Math.round(inputWidth / originalAspectRatio);
+                        } else if (!isValidWidth && isValidHeight) {
+                            finalHeight = inputHeight;
+                            finalWidth = Math.round(inputHeight * originalAspectRatio);
+                        } else if (isValidWidth && isValidHeight) {
+                            const ratioW = inputWidth / originalImage.width;
+                            const ratioH = inputHeight / originalImage.height;
+                            const ratio = Math.min(ratioW, ratioH);
+                            finalWidth = Math.round(originalImage.width * ratio);
+                            finalHeight = Math.round(originalImage.height * ratio);
+                        } else {
+                            finalWidth = originalImage.width;
+                            finalHeight = originalImage.height;
+                        }
+                    } else {
+                        if (isValidWidth) {
+                            finalWidth = inputWidth;
+                        }
+                        if (isValidHeight) {
+                            finalHeight = inputHeight;
+                        }
+                    }
+                }
+
+                const offscreenCanvas = document.createElement('canvas');
+                offscreenCanvas.width = finalWidth;
+                offscreenCanvas.height = finalHeight;
+                const offscreenCtx = offscreenCanvas.getContext('2d');
+
+                let filterString = '';
+                if (invertColors) {
+                    filterString += 'invert(100%) ';
+                }
+                filterString += `saturate(${saturation}%) `;
+                filterString += `brightness(${brightness}%) `;
+                filterString += `contrast(${contrast}%)`;
+                offscreenCtx.filter = filterString.trim();
+
+                offscreenCtx.drawImage(originalImage, 0, 0, finalWidth, finalHeight);
+
+                let outputExtension = '';
+                let skipCanvasDownload = false;
+                switch (outputFormat) {
+                    case 'image/png': outputExtension = 'png'; break;
+                    case 'image/jpeg': outputExtension = 'jpg'; break;
+                    case 'image/webp': outputExtension = 'webp'; break;
+                    case 'image/avif': outputExtension = 'avif'; skipCanvasDownload = true; break; // Browser doesn't natively support toDataURL/toBlob for AVIF
+                    case 'image/tiff': outputExtension = 'tiff'; skipCanvasDownload = true; break; // Browser doesn't natively support toDataURL/toBlob for TIFF
+                    default: outputExtension = 'dat'; skipCanvasDownload = true;
+                }
+
+                // For direct download, we just use the new file name (flattened path)
+                const fileNameWithoutExtension = file.name.split('.').slice(0, -1).join('.');
+                const downloadFileName = `${fileNameWithoutExtension}_converted.${outputExtension}`;
+
+
+                if (!skipCanvasDownload) {
+                    const quality = 1.0;
+                    try {
+                        const imageDataURL = offscreenCanvas.toDataURL(outputFormat, quality);
+                        const a = document.createElement('a');
+                        a.href = imageDataURL;
+                        a.download = downloadFileName;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+
+                        conversionCount++;
+                        updateCardStatus(cardId, 'Done (Downloaded)', 'success');
+                    } catch (e) {
+                        updateCardStatus(cardId, `Error: ${e.message}`, 'error');
+                        showGeneralMessage(`Error converting "${relativePath || file.name}": ${e.message}.`, 'error');
+                    }
+                } else {
+                     updateCardStatus(cardId, `Skipped (Format not downloadable)`, 'error');
+                     showGeneralMessage(
+                        `Conversion for "${relativePath || file.name}" to ${outputExtension.toUpperCase()} is not natively supported by the browser for direct download. Skipping.`,
+                        'error'
+                    );
+                }
+            }
+            if (conversionCount > 0) {
+                showGeneralMessage(`Successfully converted and downloaded ${conversionCount} image(s).`, 'info');
+            } else {
+                showGeneralMessage('No images were successfully converted or downloaded.', 'error');
+            }
+        });
+
+        // Export All Files as Zip Button (Updated with Keep Original File Type logic for images and direct inclusion for non-images)
+        exportZipBtn.addEventListener('click', async () => {
+            if (imageStates.size === 0) {
+                showGeneralMessage('Please load at least one file to export.', 'error');
+                return;
+            }
+
+            showGeneralMessage('Preparing files for ZIP export...', 'info');
+            const zip = new JSZip();
+            let processedCount = 0; // Track successfully processed files for the ZIP
+
+            const blobPromises = [];
+
+            for (const [cardId, fileState] of imageStates.entries()) {
+                const { file, originalImage, relativePath, isImage } = fileState;
+                const { outputFormat, keepOriginalType } = globalSettings; // Global output format and keep original type for ZIP export
+
+                updateCardStatus(cardId, 'Preparing...', 'info');
+
+                // Determine the path and name for the file inside the ZIP
+                let zipFilePath;
+                const originalFileNameWithExt = file.name; // Keep original full name for splitting
+
+                // Determine which settings to use for processing: individual overrides global
+                const invertColors = fileState.individualInvertColors !== undefined ? fileState.individualInvertColors : globalSettings.invertColors;
+                const saturation = fileState.individualSaturation !== undefined ? fileState.individualSaturation : globalSettings.saturation;
+                const brightness = fileState.individualBrightness !== undefined ? fileState.individualBrightness : globalSettings.brightness;
+                const contrast = fileState.individualContrast !== undefined ? fileState.individualContrast : globalSettings.contrast;
+                const enableScaling = fileState.individualEnableScaling !== undefined ? fileState.individualEnableScaling : globalSettings.enableScaling;
+                const scaleWidth = fileState.individualScaleWidth !== undefined ? fileState.individualScaleWidth : globalSettings.scaleWidth;
+                const scaleHeight = fileState.individualScaleHeight !== undefined ? fileState.individualScaleHeight : globalSettings.scaleHeight;
+                const maintainAspectRatio = fileState.individualMaintainAspectRatio !== undefined ? fileState.individualMaintainAspectRatio : globalSettings.maintainAspectRatio;
+
+
+                if (!isImage || !originalImage || (isImage && !globalSettings.displayPreviews && !keepOriginalType)) {
+                    // This block handles:
+                    // 1. Non-image files
+                    // 2. Image files where `originalImage` failed to load (e.g., corrupted, unsupported browser render)
+                    // 3. Image files where `displayPreviews` is false AND `keepOriginalType` is false
+                    //    In this case, if we didn't load the `originalImage` due to previews being disabled,
+                    //    we can't apply adjustments/conversion, so we just add the original file.
+                    zipFilePath = relativePath && relativePath.length > 0 ? relativePath : originalFileNameWithExt;
+                    blobPromises.push(new Promise(resolve => {
+                        zip.file(zipFilePath, file);
+                        processedCount++;
+                        updateCardStatus(cardId, 'Added (Original)', 'success');
+                        resolve();
+                    }));
+                    continue; // Skip image-specific processing for this file
+                }
+
+                // --- Image Processing Logic (only for valid images where originalImage is loaded and previews enabled or keepOriginalType is true) ---
+                let targetMimeType;
+                let targetExtension;
+                let skipCanvasProcessing = false; // Flag for AVIF/TIFF or other non-canvas supported outputs
+
+                if (keepOriginalType) {
+                    targetMimeType = file.type;
+                    switch (file.type) {
+                        case 'image/png': targetExtension = 'png'; break;
+                        case 'image/jpeg': targetExtension = 'jpg'; break; // Normalize .jpeg to .jpg
+                        case 'image/webp': targetExtension = 'webp'; break;
+                        case 'image/avif': targetExtension = 'avif'; skipCanvasProcessing = true; break; // Directly add original blob if original is AVIF
+                        case 'image/tiff': targetExtension = 'tiff'; skipCanvasProcessing = true; break; // Directly add original blob if original is TIFF
+                        default: targetMimeType = 'image/png'; targetExtension = 'png'; // Fallback for unknown original image types (should ideally not happen with previous type check)
+                    }
+                } else {
+                    targetMimeType = outputFormat;
+                    switch (outputFormat) {
+                        case 'image/png': targetExtension = 'png'; break;
+                        case 'image/jpeg': targetExtension = 'jpg'; break;
+                        case 'image/webp': targetExtension = 'webp'; break;
+                        case 'image/avif': targetExtension = 'avif'; skipCanvasProcessing = true; break; // Canvas won't support it for output
+                        case 'image/tiff': targetExtension = 'tiff'; skipCanvasProcessing = true; break; // Canvas won't support it for output
+                        default: targetMimeType = 'image/png'; targetExtension = 'png'; break;
+                    }
+                }
+
+                // If canvas processing is skipped for an image (e.g., AVIF/TIFF, or chosen output not supported by canvas)
+                if (skipCanvasProcessing) {
+                    zipFilePath = relativePath && relativePath.length > 0 ? relativePath : originalFileNameWithExt;
+                    // If it was supposed to be converted but couldn't be by canvas
+                    if (!keepOriginalType) {
+                        const parts = (relativePath || originalFileNameWithExt).split('/');
+                        const namePart = parts.pop().split('.').slice(0, -1).join('.');
+                        parts.push(`${namePart}_converted.${targetExtension}`);
+                        zipFilePath = parts.join('/');
+                        updateCardStatus(cardId, `Added (Adjustments skipped, format not supported)`, 'info');
+                    } else { // original type was unsupported and kept
+                        updateCardStatus(cardId, `Added (Adjustments skipped for original type)`, 'info');
+                    }
+
+                    blobPromises.push(new Promise(resolve => {
+                        zip.file(zipFilePath, file); // Add original file blob directly
+                        processedCount++;
+                        resolve();
+                    }));
+                    continue; // Skip canvas processing for this image
+                }
+
+                // --- Canvas Image Processing ---
+                updateCardStatus(cardId, 'Processing (Canvas)...', 'info');
+                let finalWidth = originalImage.width;
+                let finalHeight = originalImage.height;
+
+                // Scaling logic (same as before)
+                if (enableScaling) {
+                    let inputWidth = parseInt(scaleWidth);
+                    let inputHeight = parseInt(scaleHeight);
+
+                    const isValidWidth = !isNaN(inputWidth) && inputWidth > 0;
+                    const isValidHeight = !isNaN(inputHeight) && inputHeight > 0;
+
+                    const originalAspectRatio = originalImage.width / originalImage.height;
+
+                    if (maintainAspectRatio) {
+                        if (isValidWidth && !isValidHeight) {
+                            finalWidth = inputWidth;
+                            finalHeight = Math.round(inputWidth / originalAspectRatio);
+                        } else if (!isValidWidth && isValidHeight) {
+                            finalHeight = inputHeight;
+                            finalWidth = Math.round(inputHeight * originalAspectRatio);
+                        } else if (isValidWidth && isValidHeight) {
+                            const ratioW = inputWidth / originalImage.width;
+                            const ratioH = inputHeight / originalImage.height;
+                            const ratio = Math.min(ratioW, ratioH);
+                            finalWidth = Math.round(originalImage.width * ratio);
+                            finalHeight = Math.round(originalImage.height * ratio);
+                        } else {
+                            finalWidth = originalImage.width;
+                            finalHeight = originalImage.height;
+                        }
+                    } else {
+                        if (isValidWidth) {
+                            finalWidth = inputWidth;
+                        }
+                        if (isValidHeight) {
+                            finalHeight = inputHeight;
+                        }
+                    }
+                }
+
+                const offscreenCanvas = document.createElement('canvas');
+                offscreenCanvas.width = finalWidth;
+                offscreenCanvas.height = finalHeight;
+                const offscreenCtx = offscreenCanvas.getContext('2d');
+
+                let filterString = '';
+                if (invertColors) {
+                    filterString += 'invert(100%) ';
+                }
+                filterString += `saturate(${saturation}%) `;
+                filterString += `brightness(${brightness}%) `;
+                filterString += `contrast(${contrast}%)`;
+                offscreenCtx.filter = filterString.trim();
+
+                offscreenCtx.drawImage(originalImage, 0, 0, finalWidth, finalHeight);
+
+                // Determine the ZIP file path and name for canvas-processed images
+                if (keepOriginalType) {
+                    // Keep original name/path, but ensure extension matches what toBlob creates (e.g., .jpeg -> .jpg)
+                    const parts = (relativePath || originalFileNameWithExt).split('/');
+                    const namePart = parts.pop().split('.').slice(0, -1).join('.');
+                    parts.push(`${namePart}.${targetExtension}`);
+                    zipFilePath = parts.join('/');
+                } else {
+                    // Add "_converted" suffix and use the chosen output format
+                    const parts = (relativePath || originalFileNameWithExt).split('/');
+                    const namePart = parts.pop().split('.').slice(0, -1).join('.');
+                    parts.push(`${namePart}_converted.${targetExtension}`);
+                    zipFilePath = parts.join('/');
+                }
+
+                // Create a promise for each blob conversion (for canvas-processed images)
+                blobPromises.push(new Promise((resolve, reject) => {
+                    offscreenCanvas.toBlob(function(blob) {
+                        if (blob) {
+                            zip.file(zipFilePath, blob);
+                            processedCount++;
+                            updateCardStatus(cardId, 'Done', 'success');
+                            resolve();
+                        } else {
+                            updateCardStatus(cardId, `Error: Failed to create blob`, 'error');
+                            showGeneralMessage(`Failed to create blob for "${relativePath || file.name}".`, 'error');
+                            reject(new Error(`Failed to create blob for ${relativePath || file.name}`));
+                        }
+                    }, targetMimeType, 1.0); // Use 1.0 quality for best result
+                }));
+            }
+
+            Promise.all(blobPromises)
+                .then(() => {
+                    if (processedCount > 0) {
+                        showGeneralMessage('Generating ZIP file...', 'info');
+                        zip.generateAsync({ type: "blob" })
+                            .then(function(content) {
+                                saveAs(content, "exported_files.zip"); // Changed zip name to be more general
+                                showGeneralMessage(`Successfully exported ${processedCount} file(s) to "exported_files.zip".`, 'info');
+                            })
+                            .catch(function(error) {
+                                showGeneralMessage(`Error creating ZIP file: ${error.message}.`, 'error');
+                            });
+                    } else {
+                        showGeneralMessage('No files were successfully added to the ZIP.', 'error');
+                    }
+                })
+                .catch(error => {
+                    showGeneralMessage(`An error occurred during file processing for ZIP: ${error.message}`, 'error');
+                });
+        });
+
+
+        // Drag and Drop Event Listeners
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('dragover');
+            e.dataTransfer.dropEffect = 'copy';
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFiles(files);
+            }
+        });
+
+        // Click to Upload functionality
+        dropZone.addEventListener('click', () => {
+            hiddenFileInput.click();
+        });
+
+        hiddenFileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFiles(e.target.files);
+                e.target.value = ''; // Clear the input so same file can be selected again
+            }
+        });
+    </script>
+</body>
+</html>

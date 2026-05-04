@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-File Converter & Exporter</title>
+    <link href="styles.css" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-3xl font-bold text-center text-gray-800 rounded-lg p-2">Multi-File Converter & Exporter</h1>
+
+        <div id="dropZone" class="drop-zone">
+            Drag & Drop Files or Folders Here or Click to Upload
+        </div>
+        <input type="file" id="hiddenFileInput" multiple webkitdirectory directory>
+
+        <div id="loadingBarContainer" class="hidden w-full bg-gray-200 rounded-full h-4 mt-4 relative">
+            <div id="loadingBar" class="bg-blue-600 h-4 rounded-full transition-all duration-100 ease-out" style="width: 0%;"></div>
+            <div id="loadingText" class="absolute inset-0 flex items-center justify-center text-xs font-semibold text-white">0%</div>
+        </div>
+
+        <div id="generalMessageBox" class="message-box hidden rounded-lg"></div>
+
+        <div class="global-controls flex flex-col gap-6">
+            <h2 class="text-2xl font-bold text-gray-800">Global Image Adjustments</h2>
+
+            <div>
+                <label class="text-lg font-medium text-gray-700 mb-2 block">Upload Options:</label>
+                <div class="flex items-center gap-4">
+                    <input type="checkbox" id="disablePreviewsCheckbox" class="form-checkbox h-5 w-5 text-blue-600 rounded" checked>
+                    <label for="disablePreviewsCheckbox" class="text-gray-700">Disable Image Previews when Uploading</label>
+                </div>
+            </div>
+
+            <div>
+                <label class="text-lg font-medium text-gray-700 mb-2 block">Visual Adjustments (Images Only):</label>
+                <div class="flex items-center gap-4">
+                    <input type="checkbox" id="globalInvertColors" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <label for="globalInvertColors" class="text-gray-700">Invert Colors</label>
+                </div>
+                <div class="flex flex-col gap-2 mt-4">
+                    <label for="globalSaturation" class="text-gray-700">Saturation: <span id="globalSaturationValue">100</span>%</label>
+                    <input type="range" id="globalSaturation" min="0" max="200" value="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                </div>
+            </div>
+
+            <div>
+                <label class="text-lg font-medium text-gray-700 mb-2 block">Scaling Options (Images Only):</label>
+                <div class="flex items-center gap-4">
+                    <input type="checkbox" id="globalEnableScaling" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <label for="globalEnableScaling" class="text-gray-700">Enable Scaling</label>
+                </div>
+                <div class="flex flex-col md:flex-row gap-4 mt-4">
+                    <div class="flex flex-col flex-1">
+                        <label for="globalScaleWidth" class="text-gray-700 mb-1">Width (px):</label>
+                        <input type="number" id="globalScaleWidth" min="1" placeholder="Original Width" class="p-2 border rounded-md" disabled>
+                    </div>
+                    <div class="flex flex-col flex-1">
+                        <label for="globalScaleHeight" class="text-gray-700 mb-1">Height (px):</label>
+                        <input type="number" id="globalScaleHeight" min="1" placeholder="Original Height" class="p-2 border rounded-md" disabled>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 mt-4">
+                    <input type="checkbox" id="globalMaintainAspectRatio" class="form-checkbox h-5 w-5 text-blue-600 rounded" disabled>
+                    <label for="globalMaintainAspectRatio" class="text-gray-700">Maintain Aspect Ratio</label>
+                </div>
+            </div>
+
+            <div>
+                <label for="globalOutputFormat" class="text-lg font-medium text-gray-700 mb-2 block">Convert To (Images Only):</label>
+                <select id="globalOutputFormat" class="rounded-lg p-2 w-full">
+                    <option value="image/png">PNG (Lossless)</option>
+                    <option value="image/jpeg">JPG (Highest Quality)</option>
+                    <option value="image/webp">WEBP (Highest Quality)</option>
+                    <option value="image/avif">AVIF (Limited Browser Support)</option>
+                    <option value="image/tiff">TIFF (Limited Browser Support)</option>
+                </select>
+                <div class="flex items-center gap-2 mt-4">
+                    <input type="checkbox" id="keepOriginalTypeCheckbox" class="form-checkbox h-5 w-5 text-blue-600 rounded">
+                    <label for="keepOriginalTypeCheckbox" class="text-gray-700">Keep Original File Type (for Export All Images)</label>
+                </div>
+            </div>
+
+            <button id="convertAllBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-200 ease-in-out">
+                Convert All Images & Download
+            </button>
+            <button id="exportZipBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-200 ease-in-out">
+                Export All Files as Zip
+            </button>
+        </div>
+
+
+        <div id="imageGrid" class="image-grid">
+            </div>
+
+        <p class="text-sm text-gray-600 mt-2 rounded-lg p-2 bg-blue-50">
+            <strong>Note:</strong> This tool can process various file types.
+            <br>
+            For <strong>image files</strong> (PNG, JPG, WEBP), visual adjustments and scaling can be applied. If "Keep Original File Type" is selected for ZIP export, these images will retain their format after adjustments. AVIF and TIFF images are supported for input and can be included in the ZIP, but visual adjustments cannot be applied to them via browser canvas; they will be exported as their original raw files (without adjustments) when "Keep Original File Type" is enabled, or if selected as the target conversion format.
+            <br>
+            <strong>Non-image files</strong> will always be included in the ZIP archive in their original form without any processing or conversion.
+        </p>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

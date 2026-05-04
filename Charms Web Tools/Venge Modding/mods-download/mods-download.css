@@ -1,0 +1,797 @@
+/*
+ * Updated mods-download.css for a Black & White Theme
+ *
+ * This stylesheet defines the visual appearance of the mod download page,
+ * implementing a sleek, monochrome color scheme with translucent,
+ * "glassy" mod cards using glass morphism principles.
+ *
+ * All original functionality styling is retained where possible,
+ * with aesthetic updates to match a black and white reference.
+ *
+ * UPDATED: Color palette shifted to black, white, and various shades of grey.
+ * UPDATED: Mod names on cards remain plain white for consistency.
+ * UPDATED: Background circles and button gradients adjusted for monochrome.
+ */
+
+/* --- Color Palette Definition (Black & White Theme) --- */
+:root {
+    --color-primary-dark: #1A1A1A;     /* Deep dark for backgrounds and base text */
+    --color-background-gradient-start: #0A0A0A; /* Very dark base for subtle depth */
+    --color-background-gradient-end: #000000;   /* Pure black for deepest parts */
+
+    /* Accent colors now subtle shades of grey for visual distinction */
+    --color-accent-light-grey: #BBBBBB; /* Light grey for highlights */
+    --color-accent-medium-grey: #777777; /* Medium grey for subtle accents */
+    --color-accent-dark-grey: #444444;   /* Dark grey for deeper tones */
+    --color-accent-border: #AAAAAA;     /* A slightly lighter grey for borders */
+
+    --color-glass-base: rgba(255, 255, 255, 0.05); /* Very light, very transparent base for glass */
+    --color-glass-border: rgba(255, 255, 255, 0.15); /* Subtle white border for glass */
+    --color-text-light: #F0F0F0;       /* Light text for dark backgrounds */
+    --color-text-medium: #CCCCCC;      /* Medium text for secondary info */
+
+    /* RGB values for rgba() usage */
+    --color-primary-dark-rgb: 26, 26, 26;
+    --color-glass-rgb: 255, 255, 255;
+}
+
+/* --- General Body and Container Styling --- */
+body {
+    font-family: 'Inter', sans-serif;
+    background: linear-gradient(135deg, var(--color-background-gradient-start) 0%, var(--color-background-gradient-end) 100%);
+    color: var(--color-text-light);
+    margin: 0;
+    padding: 20px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    box-sizing: border-box;
+    overflow-y: auto;
+    perspective: 1000px;
+    position: relative;
+    overflow-x: hidden;
+}
+
+.container {
+    width: 100%;
+    padding: 20px;
+    box-sizing: border-box;
+    text-align: center;
+    z-index: 10;
+    position: relative;
+}
+
+/* --- Header Styling --- */
+header {
+    margin-bottom: 40px;
+}
+
+header h1 {
+    font-size: 3.8em;
+    font-weight: 800;
+    color: #FFFFFF; /* Pure white for main title */
+    margin-bottom: 10px;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.4), 0 0 20px rgba(255, 255, 255, 0.2); /* Subtle white glow */
+}
+
+header .subtitle {
+    font-size: 1.3em;
+    color: var(--color-text-medium);
+    margin-top: 0;
+    font-weight: 400;
+}
+
+/* --- Mods Grid Layout --- */
+.mods-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 30px;
+    padding: 20px 0;
+}
+
+/* --- Mod Card Styling (The "Glassy" Effect with Glass Morphism) --- */
+.mod-card {
+    background: var(--color-glass-base);
+    border: 1px solid var(--color-glass-border);
+    box-shadow:
+        0 4px 6px rgba(0, 0, 0, 0.1),
+        0 10px 20px rgba(0, 0, 0, 0.15),
+        0 30px 60px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(10px) saturate(180%);
+    -webkit-backdrop-filter: blur(10px) saturate(180%);
+    border-radius: 16px;
+    padding: 25px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+    clip-path: polygon(
+        0% 20px,
+        20px 0%,
+        calc(100% - 20px) 0%,
+        100% 20px,
+        100% calc(100% - 20px),
+        calc(100% - 20px) 100%,
+        20px 100%,
+        0% calc(100% - 20px)
+    );
+    opacity: 0;
+    transform: translateY(30px) translateZ(0);
+    animation: fadeInSlideUp 0.8s forwards ease-out;
+    transform-style: preserve-3d;
+    position: relative;
+}
+
+/* Keyframe for initial card fade-in animation */
+@keyframes fadeInSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px) translateZ(0);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) translateZ(0);
+    }
+}
+
+/* --- Mod Card Hover Effect --- */
+.mod-card:hover {
+    background: rgba(var(--color-glass-rgb), 0.1); /* Slightly more transparent on hover */
+    box-shadow:
+        0 8px 12px rgba(0, 0, 0, 0.2),
+        0 20px 40px rgba(0, 0, 0, 0.3),
+        0 60px 120px rgba(0, 0, 0, 0.4),
+        0 0 20px var(--color-accent-light-grey); /* Subtle light grey glow */
+    backdrop-filter: blur(15px) saturate(200%);
+    -webkit-backdrop-filter: blur(15px) saturate(200%);
+    transform: translateY(-15px) translateZ(50px) rotateX(2deg) rotateY(-2deg);
+}
+
+/* --- Mod Card Content Styling --- */
+.mod-card h2 {
+    font-size: 2em;
+    margin-bottom: 15px;
+    font-weight: 700;
+    color: white;
+    text-shadow: 0 0 10px rgba(0, 0, 0, 0.6);
+}
+
+.mod-card p {
+    color: var(--color-text-medium);
+    font-size: 1.05em;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+
+.mod-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+/* --- Download Button Styling --- */
+.download-button {
+    background: linear-gradient(45deg, var(--color-accent-dark-grey), var(--color-accent-medium-grey)); /* Grey gradient button */
+    color: white;
+    border: none;
+    padding: 14px 30px;
+    border-radius: 10px;
+    font-size: 1.2em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+    margin-bottom: 15px;
+    outline: none;
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+}
+
+.download-button::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg, var(--color-accent-medium-grey), var(--color-accent-dark-grey)); /* Inverted grey gradient for hover */
+    z-index: -1;
+    transition: transform 0.3s ease;
+    transform: scaleX(0);
+    transform-origin: right;
+}
+
+.download-button:hover::before {
+    transform: scaleX(1);
+    transform-origin: left;
+}
+
+.download-button:hover {
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4), 0 0 20px rgba(255, 255, 255, 0.5); /* Stronger shadow and white glow */
+    transform: translateY(-3px);
+}
+
+.download-button:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+/* Styling for "Coming Soon" button */
+.download-button.coming-soon {
+    background: #333; /* Darker muted grey for coming soon */
+    color: #999;
+    cursor: not-allowed;
+    opacity: 0.8;
+    font-style: italic;
+    box-shadow: none;
+}
+
+.download-button.coming-soon:hover {
+    background: #333;
+    transform: none;
+    box-shadow: none;
+}
+
+.download-button.coming-soon::before {
+    transform: scaleX(0);
+}
+
+/* --- Download Loading Animation --- */
+.download-loading-animation {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: rgba(var(--color-primary-dark-rgb), 0.9);
+    z-index: 10;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    border-radius: 16px;
+    clip-path: polygon(
+        0% 20px,
+        20px 0%,
+        calc(100% - 20px) 0%,
+        100% 20px,
+        100% calc(100% - 20px),
+        calc(100% - 20px) 100%,
+        20px 100%,
+        0% calc(100% - 20px)
+    );
+    overflow: hidden;
+}
+
+.download-loading-animation.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.download-loading-animation h1 {
+    margin: 0;
+    padding: 0;
+    font-family: 'Arial Narrow', sans-serif;
+    font-weight: 100;
+    font-size: 1.2em;
+    text-align: center;
+    width: 100%;
+}
+
+.download-loading-animation h1 span {
+    position: relative;
+    top: 0.63em;
+    display: inline-block;
+    text-transform: uppercase;
+    opacity: 0;
+    transform: rotateX(-90deg);
+}
+
+/* Updated animation delays and colors to match monochrome scheme */
+.download-loading-animation h1 .let1 { animation: drop 1.2s ease-in-out infinite; animation-delay: 0.1s; color: var(--color-accent-light-grey); }
+.download-loading-animation h1 .let2 { animation: drop 1.2s ease-in-out infinite; animation-delay: 0.2s; color: var(--color-accent-medium-grey); }
+.download-loading-animation h1 .let3 { animation: drop 1.2s ease-in-out infinite; animation-delay: 0.3s; color: var(--color-accent-dark-grey); }
+.download-loading-animation h1 .let4 { animation: drop 1.2s ease-in-out infinite; animation-delay: 0.4s; color: var(--color-accent-light-grey); }
+.download-loading-animation h1 .let5 { animation: drop 1.2s ease-in-out infinite; animation-delay: 0.5s; color: var(--color-accent-medium-grey); }
+.download-loading-animation h1 .let6 { animation: drop 1.2s ease-in-out infinite; animation-delay: 0.6s; color: var(--color-accent-dark-grey); }
+.download-loading-animation h1 .let7 { animation: drop 1.2s ease-in-out infinite; animation-delay: 0.7s; color: var(--color-accent-light-grey); }
+
+@keyframes drop {
+    0% {
+        opacity: 0;
+        top: 0.63em;
+        transform: rotateX(-90deg);
+    }
+    10% {
+        opacity: 0.5;
+    }
+    20% {
+        opacity: 1;
+        top: 3.78em;
+        transform: rotateX(-360deg);
+    }
+    80% {
+        opacity: 1;
+        top: 3.78em;
+        transform: rotateX(-360deg);
+    }
+    90% {
+        opacity: 0.5;
+    }
+    100% {
+        opacity: 0;
+        top: 6.94em;
+    }
+}
+
+
+/* --- Mod Tray and Image Grid --- */
+.mod-tray {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease-in-out, padding 0.4s ease-in-out;
+    width: 100%;
+    padding: 0 10px;
+}
+
+.mod-tray.show-images {
+    padding: 20px 10px;
+}
+
+.image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 15px;
+    padding: 10px 0;
+    background-color: rgba(var(--color-primary-dark-rgb), 0.3);
+    border-radius: 12px;
+    padding: 15px;
+    box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.2);
+}
+
+.image-grid img {
+    width: 100%;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 10px;
+    cursor: zoom-in;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.image-grid img:hover {
+    transform: scale(1.08);
+    box-shadow: 0 5px 18px rgba(0, 0, 0, 0.4);
+    border-color: var(--color-accent-light-grey); /* Light grey accent on hover */
+}
+
+/* --- Fullscreen Modal for Images --- */
+.fullscreen-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    display: none;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+}
+
+.fullscreen-modal img {
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+    border: 5px solid var(--color-accent-light-grey); /* Light grey border around the image */
+    border-radius: 16px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(255, 255, 255, 0.4); /* Stronger shadow and white glow */
+}
+
+.fullscreen-modal .close-button {
+    position: absolute;
+    top: 25px;
+    right: 35px;
+    font-size: 3.5em;
+    color: var(--color-text-light);
+    cursor: pointer;
+    font-weight: bold;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.7);
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+
+.fullscreen-modal .close-button:hover {
+    color: var(--color-accent-light-grey); /* Light grey accent on hover */
+    transform: rotate(90deg) scale(1.1);
+}
+
+/* --- Custom Message Modal (for "Coming Soon") --- */
+#messageModal {
+    background-color: rgba(var(--color-primary-dark-rgb), 0.85);
+}
+
+.modal-content {
+    background: linear-gradient(135deg, rgba(var(--color-primary-dark-rgb), 0.9), rgba(var(--color-primary-dark-rgb), 0.7));
+    color: var(--color-text-light);
+    padding: 35px;
+    border-radius: 16px;
+    text-align: center;
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.5);
+    max-width: 450px;
+    width: 90%;
+    transform: translateY(-30px);
+    animation: fadeInSlideDown 0.4s forwards ease-out;
+    border: 1px solid rgba(var(--color-glass-rgb), 0.2);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+@keyframes fadeInSlideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+#modalMessage {
+    font-size: 1.5em;
+    margin-bottom: 30px;
+    font-weight: 600;
+    color: var(--color-accent-light-grey); /* Light grey accent for message */
+}
+
+#modalCloseButton {
+    background: linear-gradient(45deg, var(--color-accent-medium-grey), var(--color-accent-dark-grey)); /* Grey gradient button */
+    color: white;
+    padding: 12px 25px;
+    border-radius: 10px;
+    font-size: 1.1em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+#modalCloseButton:hover {
+    background: linear-gradient(45deg, var(--color-accent-dark-grey), var(--color-accent-medium-grey)); /* Inverted grey gradient on hover */
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3);
+    transform: translateY(-2px);
+}
+
+/* --- Magnetic Button Wrapper --- */
+.magnetic-button-wrapper {
+  position: relative;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  max-width: 450px;
+  margin: 40px auto 20px auto;
+}
+
+/* --- Main Navigation Buttons (Magnetic with Break Effect) --- */
+.main-nav-button.magnetic-button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-decoration: none;
+  color: var(--color-primary-dark);
+  font-weight: 700;
+  font-size: 1.4rem;
+  width: 100%;
+  height: 220px;
+  border-radius: 20px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(15px) saturate(180%);
+  -webkit-backdrop-filter: blur(15px) saturate(180%);
+  transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  transform: translateY(0);
+  text-align: center;
+}
+
+/* --- Sliding Overlay Animation for Main Nav Buttons (::after pseudo-element) --- */
+.main-nav-button.magnetic-button::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(45deg, var(--color-accent-light-grey), var(--color-accent-medium-grey), var(--color-accent-dark-grey)); /* Monochrome gradient */
+  transform: skewX(-45deg);
+  transform-origin: center;
+  transition: left 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  z-index: 1;
+}
+
+/* Moves the gradient overlay into view when the button wrapper is hovered */
+.magnetic-button-wrapper:hover .main-nav-button.magnetic-button::after {
+  left: 0%;
+}
+
+/* --- Text Color Change on Hover for Main Nav Buttons --- */
+.magnetic-button-wrapper:hover .main-nav-button {
+  color: white;
+}
+
+/* --- Button Fragments for Break Effect --- */
+.button-fragments {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.fragment {
+  position: relative;
+  transition: all 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  transform-origin: center;
+  z-index: 2;
+}
+
+.fragment-1 {
+  margin-bottom: 0.6rem;
+}
+
+.fragment-1 span {
+  position: relative;
+  z-index: 2;
+  display: block;
+  font-size: 1.8rem;
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+}
+
+.fragment-2 .nav-description {
+  position: relative;
+  z-index: 2;
+  font-size: 1.1rem;
+  color: var(--color-text-medium);
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* --- Update Description Text Color on Hover --- */
+.magnetic-button-wrapper:hover .fragment-2 .nav-description {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+/* --- Magnetic Hover Effect (Button Transformation) --- */
+.magnetic-button-wrapper:hover .main-nav-button {
+  transform: translateY(-10px) scale(1.05);
+  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.25);
+  border-color: rgba(255, 255, 255, 0.6); /* White border on hover */
+}
+
+/* --- Break Apart Effect on Hover --- */
+.magnetic-button-wrapper:hover .fragment-1 {
+  transform: translateX(-20px) translateY(-8px) rotate(-3deg);
+}
+
+.magnetic-button-wrapper:hover .fragment-2 {
+  transform: translateX(20px) translateY(8px) rotate(3deg);
+}
+
+/* --- Subtle Glow Effect (::before pseudo-element) --- */
+.main-nav-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(45deg, rgba(255, 255, 255, 0.1), rgba(187, 187, 187, 0.1), rgba(119, 119, 119, 0.1)); /* Monochrome gradient glow */
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.magnetic-button-wrapper:hover .main-nav-button::before {
+  opacity: 1;
+}
+
+/* --- Keyframes for the 'fadeInUp' animation --- */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Background Circles for Glass Morphism Effect (Monochrome) --- */
+.background-circle {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--color-accent-light-grey) 0%, rgba(255, 255, 255, 0) 70%); /* Light grey radial gradient */
+    filter: blur(80px);
+    z-index: 1;
+    animation: floatCircles 20s infinite ease-in-out alternate;
+    opacity: 0.15; /* More subtle in monochrome */
+}
+
+/* Specific positioning and sizing for individual circles */
+.background-circle:nth-child(1) {
+    width: 400px;
+    height: 400px;
+    top: 5%;
+    left: -15%;
+    background: radial-gradient(circle, var(--color-accent-dark-grey) 0%, rgba(0, 0, 0, 0) 70%); /* Dark grey circle */
+    animation-delay: 0s;
+}
+
+.background-circle:nth-child(2) {
+    width: 500px;
+    height: 500px;
+    bottom: 0%;
+    right: -20%;
+    background: radial-gradient(circle, var(--color-accent-medium-grey) 0%, rgba(0, 0, 0, 0) 70%); /* Medium grey circle */
+    animation-delay: 5s;
+}
+
+.background-circle:nth-child(3) {
+    width: 350px;
+    height: 350px;
+    top: 40%;
+    left: 10%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, var(--color-accent-light-grey) 0%, rgba(255, 255, 255, 0) 70%); /* Light grey circle */
+    animation-delay: 10s;
+}
+
+.background-circle:nth-child(4) {
+    width: 450px;
+    height: 450px;
+    top: -10%;
+    right: 15%;
+    background: radial-gradient(circle, var(--color-accent-dark-grey) 0%, rgba(0, 0, 0, 0) 70%); /* Dark grey circle */
+    animation-delay: 15s;
+}
+
+/* Keyframe for floating animation */
+@keyframes floatCircles {
+    0% {
+        transform: translateY(0) translateX(0) scale(1) rotate(0deg);
+        opacity: 0.15;
+    }
+    25% {
+        transform: translateY(-25px) translateX(25px) scale(1.03) rotate(5deg);
+        opacity: 0.2;
+    }
+    50% {
+        transform: translateY(-50px) translateX(0) scale(1.05) rotate(10deg);
+        opacity: 0.25;
+    }
+    75% {
+        transform: translateY(-25px) translateX(-25px) scale(1.03) rotate(5deg);
+        opacity: 0.2;
+    }
+    100% {
+        transform: translateY(0) translateX(0) scale(1) rotate(0deg);
+        opacity: 0.15;
+    }
+}
+
+/* --- Responsive Adjustments --- */
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 3em;
+    }
+
+    header .subtitle {
+        font-size: 1.1em;
+    }
+
+    .mods-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mod-card {
+        padding: 20px;
+        clip-path: polygon(
+            0% 15px,
+            15px 0%,
+            calc(100% - 15px) 0%,
+            100% 15px,
+            100% calc(100% - 15px),
+            calc(100% - 15px) 100%,
+            15px 100%,
+            0% calc(100% - 15px)
+        );
+    }
+
+    .mod-card h2 {
+        font-size: 1.8em;
+    }
+
+    .download-button {
+        padding: 12px 25px;
+        font-size: 1.1em;
+    }
+
+    .image-grid {
+        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+        gap: 10px;
+    }
+
+    .image-grid img {
+        height: 80px;
+    }
+
+    .fullscreen-modal .close-button {
+        font-size: 3em;
+        top: 20px;
+        right: 25px;
+    }
+
+    #modalMessage {
+        font-size: 1.3em;
+    }
+
+    #modalCloseButton {
+        font-size: 1em;
+    }
+
+    /* Adjust background circles for smaller screens */
+    .background-circle {
+        filter: blur(50px);
+    }
+    .background-circle:nth-child(1) { width: 250px; height: 250px; top: 0%; left: -10%; }
+    .background-circle:nth-child(2) { width: 350px; height: 350px; bottom: 5%; right: -15%; }
+    .background-circle:nth-child(3) { width: 200px; height: 200px; top: 40%; left: 10%; }
+    .background-circle:nth-child(4) { width: 300px; height: 300px; top: -5%; right: 10%; }
+
+    .main-nav-button.magnetic-button {
+        height: 180px;
+    }
+}
+
+@media (max-width: 480px) {
+    body {
+        padding: 10px;
+    }
+
+    header h1 {
+        font-size: 2.5em;
+    }
+
+    header .subtitle {
+        font-size: 1em;
+    }
+
+    .main-nav-button.magnetic-button {
+        height: 160px;
+        font-size: 1.2rem;
+    }
+
+    .fragment-1 span {
+        font-size: 1.5rem;
+    }
+
+    .fragment-2 .nav-description {
+        font-size: 1rem;
+    }
+}

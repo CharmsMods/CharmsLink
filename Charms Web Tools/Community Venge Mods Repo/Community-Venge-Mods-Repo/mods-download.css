@@ -1,0 +1,356 @@
+:root {
+    --bg-dark: #070709;
+    --card-bg: rgba(255, 255, 255, 0.02);
+    --card-border: rgba(255, 255, 255, 0.05);
+    --text-main: #FFFFFF;
+    --text-muted: #888899;
+
+    --primary: #9d4edd;
+    --primary-glow: rgba(157, 78, 221, 0.5);
+    --secondary: #3a86ff;
+    --secondary-glow: rgba(58, 134, 255, 0.5);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: var(--bg-dark);
+    background-image: url('vengeio.png');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    color: var(--text-main);
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+    padding: 40px 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 1;
+    padding: 0 40px;
+}
+
+.main-layout {
+    display: flex;
+    justify-content: space-between;
+    gap: 60px;
+    margin-top: 40px;
+}
+
+.column {
+    flex: 1;
+    min-width: 0;
+}
+
+header {
+    text-align: left;
+    margin-bottom: 40px;
+    animation: fadeDown 1s ease-out forwards;
+}
+
+header h1 {
+    font-size: 3rem;
+    font-weight: 800;
+    letter-spacing: -1px;
+    background: linear-gradient(to right, #ffffff, #aaaaaa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 10px;
+}
+
+header .subtitle {
+    font-size: 1rem;
+    color: var(--text-muted);
+    font-weight: 300;
+}
+
+.mods-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+/* Mod Card - List Item Style */
+.mod-card {
+    position: relative;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 1px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: fadeUp 0.8s ease-out forwards;
+    opacity: 0;
+    transform: translateY(20px);
+    overflow: hidden;
+    cursor: default;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+
+.mod-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(800px circle at var(--mouse-x, 0) var(--mouse-y, 0), rgba(255, 255, 255, 0.06), transparent 40%);
+    z-index: 0;
+    opacity: 0;
+    transition: opacity 0.5s;
+}
+
+.mod-card:hover::before {
+    opacity: 1;
+}
+
+.mod-card:hover {
+    transform: translateX(10px);
+    border-color: rgba(255, 255, 255, 0.2);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(157, 78, 221, 0.1);
+}
+
+.card-content {
+    background: rgba(15, 15, 20, 0.6);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 11px;
+    padding: 15px 25px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 30px;
+    position: relative;
+    z-index: 1;
+}
+
+.card-content h2 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 0;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 250px;
+}
+
+/* Action Button - Scaled for List */
+.action-button {
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    color: var(--text-main);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    position: relative;
+    overflow: hidden;
+}
+
+.action-button::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.4s ease, height 0.4s ease;
+}
+
+.action-button:hover::after {
+    width: 200px;
+    height: 200px;
+}
+
+.action-button span {
+    position: relative;
+    z-index: 1;
+}
+
+.action-button.download:hover {
+    background: var(--primary);
+    box-shadow: 0 0 15px var(--primary-glow);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.action-button.coming-soon {
+    color: var(--text-muted);
+    border-color: rgba(255, 255, 255, 0.05);
+    cursor: not-allowed;
+    background: transparent;
+}
+
+.action-button.coming-soon:hover::after {
+    display: none;
+}
+
+/* Animations */
+@keyframes fadeDown {
+    from {
+        opacity: 0;
+        transform: translateY(-30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes fadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Loading Animation */
+.download-loading-animation {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    z-index: 2;
+    background: rgba(15, 15, 20, 0.9);
+}
+
+.download-loading-animation.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.loader-ring {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-top-color: var(--secondary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Modal */
+.fullscreen-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.fullscreen-modal.visible {
+    opacity: 1;
+}
+
+.modal-content {
+    background: #111116;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 40px;
+    border-radius: 20px;
+    text-align: center;
+    transform: scale(0.9);
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+
+.fullscreen-modal.visible .modal-content {
+    transform: scale(1);
+}
+
+#modalMessage {
+    font-size: 1.5rem;
+    margin-bottom: 30px;
+    color: var(--text-main);
+}
+
+#modalCloseButton {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px 40px;
+    border-radius: 100px;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-family: inherit;
+    font-weight: 600;
+}
+
+#modalCloseButton:hover {
+    box-shadow: 0 0 20px var(--primary-glow);
+    background: #aa5df0;
+}
+
+@media (max-width: 1000px) {
+    .main-layout {
+        flex-direction: column;
+        align-items: center;
+        gap: 40px;
+    }
+
+    .column {
+        width: 100%;
+        max-width: 450px;
+    }
+
+    header h1 {
+        font-size: 2.5rem;
+    }
+}
+
+@media (max-width: 768px) {
+    header h1 {
+        font-size: 3rem;
+    }
+
+    .mods-grid {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+}

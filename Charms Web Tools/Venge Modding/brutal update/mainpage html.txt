@@ -1,0 +1,126 @@
+<!--
+  Copyright (c) 2025 Charm?
+
+  Licensed under the MIT License. See LICENSE file in the project root for full license information.
+  SPDX-License-Identifier: MIT
+
+  Use of this code requires attribution to the original author.
+
+  This file is the homepage of the site.
+-->
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Modding Hub - Main</title>
+  <link rel="stylesheet" href="mainpage.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-GBBVN8XE1Q"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+
+    gtag('config', 'G-GBBVN8XE1Q');
+  </script>
+</head>
+<body>
+  <div class="menu-icon" id="menuIcon">
+    <div class="bar"></div>
+    <div class="bar"></div>
+    <div class="bar"></div>
+  </div>
+
+  <div class="dropdown-menu" id="dropdownMenu">
+    <a href="leaderboard/leaderboard.html" class="dropdown-item">Clan Leaderboard</a>
+    <a href="weapons/weapons.html" class="dropdown-item">Weapons Info</a>
+    <a href="https://discord.gg/jpKwHAZkEm" class="dropdown-item">My Discord server :)</a>
+    <a href="servers/discord-servers.html" class="dropdown-item">Other Servers</a>
+    <a href="ballgame/ballgame.html" class="dropdown-item">A Cool Physics Game</a>
+    <a href="installation/installation.html" class="dropdown-item">How to Install</a>
+    <a href="how to use the mod site/how to use the site.html" class="dropdown-item">How to install mod on browser vs client</a>
+    <a href="maps/maps.html" class="dropdown-item">Maps</a>
+    <a href="about/index.html" class="dropdown-item">About</a>
+  </div>
+
+  <div class="theme-toggle" id="themeToggle">
+    <i class="fas fa-sun"></i>
+  </div>
+
+  <div class="main-container">
+    <div class="header-section">
+      <img src="pfp.png" class="profile-pic" alt="Profile Picture of Modding Hub owner" />
+      <h1>Modding Hub</h1>
+      <p class="tagline">Your complete modding resource center <br> Choose your adventure below</p>
+    </div>
+
+    <div class="main-nav-container">
+      <div class="magnetic-button-wrapper">
+        <a href="https://charmsmods.github.io/Modding-Repository-V2-Official-/" class="main-nav-button magnetic-button">
+          <div class="button-fragments">
+            <div class="fragment fragment-1"><span>Modding Repository</span></div>
+            <div class="fragment fragment-2"><div class="nav-description">Access our comprehensive collection of modding resources</div></div>
+          </div>
+        </a>
+      </div>
+
+ <div class="magnetic-button-wrapper">
+        <a href="https://charmsmods.github.io/.glb-Viewer/" class="main-nav-button magnetic-button">
+          <div class="button-fragments">
+            <div class="fragment fragment-1"><span>GLB Models and Viewer!</span></div>
+            <div class="fragment fragment-2"><div class="nav-description">A list of all 3D models and a window to view them in!</div></div>
+          </div>
+        </a>
+      </div>
+
+
+<!--
+      <div class="magnetic-button-wrapper">
+        <a href="mods-download/mods-download.html" class="main-nav-button magnetic-button">
+          <div class="button-fragments">
+            <div class="fragment fragment-1"><span>Pre-Made Mods</span></div>
+            <div class="fragment fragment-2"><div class="nav-description">Download ready-to-use modifications and enhancements</div></div>
+          </div>
+        </a>
+      </div>
+-->
+
+
+      <div class="magnetic-button-wrapper">
+        <a href="makeamod/makeamod.html" class="main-nav-button magnetic-button">
+          <div class="button-fragments">
+            <div class="fragment fragment-1"><span>How to Make a Mod</span></div>
+            <div class="fragment fragment-2"><div class="nav-description">Learn the art of modding with our step-by-step guides</div></div>
+          </div>
+        </a>
+      </div>
+
+      <div class="magnetic-button-wrapper">
+        <a href="jscss/jscss.html" class="main-nav-button magnetic-button">
+          <div class="button-fragments">
+            <div class="fragment fragment-1"><span>CSS and JS Code</span></div>
+            <div class="fragment fragment-2"><div class="nav-description">Learn How to use CSS and JS to change the way your game looks</div></div>
+          </div>
+        </a>
+      </div>
+
+    
+<!--
+      <div class="magnetic-button-wrapper">
+        <a href="texture-creation/index.html" class="main-nav-button magnetic-button">
+          <div class="button-fragments">
+            <div class="fragment fragment-1"><span>Texture Creator</span></div>
+            <div class="fragment fragment-2"><div class="nav-description">Create your own textures!</div></div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+-->
+  <script src="script.js"></script>
+</body>
+</html>
