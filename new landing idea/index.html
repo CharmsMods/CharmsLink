@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Charm?</title>
+    <link rel="icon" type="image/png" href="pfp.png">
+    <link rel="stylesheet" href="scrolljack.css">
+</head>
+
+<body>
+    <div class="noise" aria-hidden="true"></div>
+    <div class="cursor" id="cursor" aria-hidden="true"></div>
+
+    <header class="site-chrome">
+        <button class="menu-toggle magnetic" id="menuToggle" aria-label="Open archive menu">
+            <span></span>
+            <span></span>
+            <span></span>
+        </button>
+        <nav class="quick-nav" aria-label="Sections">
+            <a href="#tools">Tools</a>
+            <a href="#story">Story</a>
+            <a href="#modding">Mods</a>
+            <a href="#setup">Setup</a>
+        </nav>
+    </header>
+
+    <div class="archive-menu" id="archiveMenu" aria-hidden="true">
+        <button class="archive-close" id="archiveClose" aria-label="Close archive menu">x</button>
+        <div class="archive-panel">
+            <p class="eyebrow">Archive</p>
+            <h2>Site Index</h2>
+            <a class="archive-link magnetic" href="Tools.html" target="_blank" rel="noopener noreferrer">
+                <span>01</span>
+                <strong>Archived Tools</strong>
+                <small>Open the classic full tools directory</small>
+            </a>
+        </div>
+    </div>
+
+    <aside class="social-rail" aria-label="Social links">
+        <a href="https://discord.com/users/1198452446456983605" target="_blank" rel="noopener noreferrer">Discord</a>
+        <a href="https://www.twitch.tv/xxcharmxxx" target="_blank" rel="noopener noreferrer">Twitch</a>
+        <a href="https://www.instagram.com/itscharmfr?igsh=MTAwMDBobjFxazlkYQ==" target="_blank"
+            rel="noopener noreferrer">Instagram</a>
+    </aside>
+
+    <div class="progress" aria-hidden="true">
+        <span id="progressFill"></span>
+    </div>
+
+    <main class="scroll-stage" id="scrollStage">
+        <section class="panel intro-panel is-active" id="intro" data-theme="cream">
+            <div class="panel-copy">
+                <p class="eyebrow">World / Color / Passion</p>
+                <img class="hero-logo" src="pfp.png" alt="Charm?">
+                <p class="lede">A home base for the tools, game projects, visual experiments, and community links I keep
+                    building and updating.</p>
+                <div class="action-row">
+                    <a class="button primary magnetic" href="#tools">Browse tools</a>
+                </div>
+            </div>
+            <div class="hero-stack" aria-label="Featured project links">
+                <a class="feature-card studio"
+                    href="Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/index.html" target="_blank"
+                    rel="noopener noreferrer">
+                    <span>01</span>
+                    <strong>Studio</strong>
+                    <small>Modular image editor</small>
+                </a>
+                <a class="feature-card file" href="Charms Web Tools/Site Bundler/Current Bundler/v9.html"
+                    target="_blank" rel="noopener noreferrer">
+                    <span>02</span>
+                    <strong>File Manager</strong>
+                    <small>Bundle, organize, operate</small>
+                </a>
+                <a class="feature-card venge" href="Charms Web Tools/Venge Modding/index.html" target="_blank"
+                    rel="noopener noreferrer">
+                    <span>03</span>
+                    <strong>Venge Modding</strong>
+                    <small>Hub and community tools</small>
+                </a>
+            </div>
+        </section>
+
+        <section class="panel tools-panel" id="tools" data-theme="tools">
+            <h2 class="panel-title">Tools</h2>
+            <div class="tool-grid">
+                <a class="tool-card" href="Charms Web Tools/Image Tools/Noise Studio/Modular Studio V2/index.html"
+                    target="_blank" rel="noopener noreferrer">
+                    <img src="2nd Section Images/Image Editor.png" alt="Image Studio preview">
+                    <div>
+                        <span>Image</span>
+                        <h2>Image Studio</h2>
+                        <p>Layered visual experiments, shaders, effects, and export-focused image work.</p>
+                    </div>
+                </a>
+                <a class="tool-card" href="Charms Web Tools/Site Bundler/Current Bundler/v9.html" target="_blank"
+                    rel="noopener noreferrer">
+                    <img src="2nd Section Images/file bundler.png" alt="File Bundler preview">
+                    <div>
+                        <span>Files</span>
+                        <h2>File Manager</h2>
+                        <p>A practical utility surface for moving, packaging, and working with site files.</p>
+                    </div>
+                </a>
+                <a class="tool-card" href="Charms Web Tools/Venge Modding/index.html" target="_blank"
+                    rel="noopener noreferrer">
+                    <img src="2nd Section Images/Venge modding.png" alt="Venge Modding preview">
+                    <div>
+                        <span>Games</span>
+                        <h2>Venge Modding</h2>
+                        <p>The main portal for Venge tools, mods, downloads, and related resources.</p>
+                    </div>
+                </a>
+            </div>
+        </section>
+
+        <section class="panel story-panel" id="story" data-theme="rose">
+            <div class="split-media">
+                <img src="2nd Section Images/vengeio.png" alt="Venge.io gameplay">
+            </div>
+            <div class="panel-copy narrow">
+                <p class="eyebrow">Origin Point</p>
+                <h2>Venge - Repo.</h2>
+                <p>Hey, I'm Darynn, but I go by <a href="https://discord.com/users/1198452446456983605" target="_blank"
+                        rel="noopener noreferrer">Charm?</a> online. You might have seen me on YouTube playing games or
+                    making edits of those games.</p>
+                <p>My journey started when I discovered <a href="https://venge.io/" target="_blank"
+                        rel="noopener noreferrer">Venge.io</a>, a niche browser shooter with a Discord community. I fell
+                    in love with the game and the people around it, and that is where a lot of my site work started.</p>
+            </div>
+        </section>
+
+        <section class="panel modding-panel" id="modding" data-theme="mod">
+            <div class="panel-copy narrow">
+                <p class="eyebrow">Community Work</p>
+                <h2>A Favorite Mod.</h2>
+                <p>I contributed to the community by making a website for automatic Venge modding, where you could
+                    upload assets and textures, make them on the site, and export them as a mod compatible with both
+                    browser and client.</p>
+                <p>I have made several of my own mods, and Cream Mod became a community favorite for its style and
+                    performance. I was also recognized with Verification for my contribution to the game and community.
+                </p>
+                <a class="button ghost magnetic" href="Charms Web Tools/Venge Modding/index.html" target="_blank"
+                    rel="noopener noreferrer">Modding repo</a>
+            </div>
+            <div class="mod-showcase">
+                <img src="2nd Section Images/Muffin.png" alt="Cream Mod muffin preview" class="muffin">
+                <img src="2nd Section Images/Verification.png" alt="Verification badge" class="badge">
+                <div class="gallery-strip">
+                    <button class="gallery-trigger" type="button" aria-label="Open Cream Mod gallery"><img
+                            src="2nd Section Images/g1.png" alt="Cream Mod gallery 1"></button>
+                    <button class="gallery-trigger" type="button" aria-label="Open Cream Mod gallery"><img
+                            src="2nd Section Images/g2.png" alt="Cream Mod gallery 2"></button>
+                    <button class="gallery-trigger" type="button" aria-label="Open Cream Mod gallery"><img
+                            src="2nd Section Images/g3.png" alt="Cream Mod gallery 3"></button>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel games-panel" id="games" data-theme="mint">
+            <div class="image-duo">
+                <img src="2nd Section Images/finals.png" alt="The Finals gameplay">
+                <img src="3rd section images/setup.jpg" alt="Desk setup">
+            </div>
+            <div class="panel-copy narrow">
+                <p class="eyebrow">Now Playing</p>
+                <h2>Passion.</h2>
+                <p>After a while, I moved on from consistently playing Venge and keeping up with the modding site and
+                    community to playing other shooter games. A few that stand out are <a
+                        href="https://store.steampowered.com/app/2073850/THE_FINALS/" target="_blank"
+                        rel="noopener noreferrer">The FINALS</a> and Banana Shooter.</p>
+                <p>Meanwhile, I have grown an online community through YouTube, Instagram, Discord, and more recently
+                    Twitch. I continue to improve my aim, upgrade my setup, and build visual tools that are free, high
+                    quality, and easy to trust.</p>
+            </div>
+        </section>
+
+        <section class="panel setup-panel" id="setup" data-theme="setup">
+            <div class="section-label">Setup Gear</div>
+            <div class="gear-grid">
+                <a href="https://wallhack.com/products/va-005-black" target="_blank" rel="noopener noreferrer"><img
+                        src="3rd section images/va005.webp" alt="Wallhack VA005 Pad"><span>Wallhack VA005</span></a>
+                <a href="https://shop.g-wolves.com/products/g-wolves-fenris-asym-8k-wireless-mouse" target="_blank"
+                    rel="noopener noreferrer"><img src="3rd section images/fenrirasym.webp"
+                        alt="G-Wolves Fenris Asym"><span>G-Wolves Fenris</span></a>
+            </div>
+            <footer class="final-copy">
+                <p>Built with passion. Updated whenever the next experiment starts looking useful.</p>
+                <a class="button primary magnetic" href="#intro">Back to top</a>
+            </footer>
+        </section>
+    </main>
+
+    <div class="modal" id="creamModal" aria-hidden="true" role="dialog" aria-label="Cream Mod gallery">
+        <div class="modal-panel">
+            <button class="modal-close" id="modalClose" aria-label="Close">x</button>
+            <h2>Cream Mod</h2>
+            <div class="modal-grid">
+                <img src="2nd Section Images/g1.png" alt="Cream Mod gallery 1">
+                <img src="2nd Section Images/g2.png" alt="Cream Mod gallery 2">
+                <img src="2nd Section Images/g3.png" alt="Cream Mod gallery 3">
+                <img src="2nd Section Images/g4.png" alt="Cream Mod gallery 4">
+            </div>
+            <a class="button primary" href="Cream Mod.zip" download>Download .ZIP</a>
+        </div>
+    </div>
+
+    <script src="scrolljack.js"></script>
+</body>
+
+</html>
