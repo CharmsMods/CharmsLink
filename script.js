@@ -1,336 +1,213 @@
-// ============================================
-// BRUTALIST LANDING PAGE - JAVASCRIPT
-// ============================================
+const noiseCanvas = document.getElementById("crtNoise");
 
-// Social bar scroll behavior
-const socialBar = document.getElementById('socialBar');
-
-window.addEventListener('scroll', () => {
-    const heroSection = document.getElementById('hero');
-    const heroHeight = heroSection.offsetHeight;
-
-    if (window.scrollY > heroHeight / 2) {
-        socialBar.classList.add('scrolled');
-    } else {
-        socialBar.classList.remove('scrolled');
-    }
-});
-
-// Smooth scroll to bio section
-function scrollToBio() {
-    const bioSection = document.getElementById('bio');
-    bioSection.scrollIntoView({ behavior: 'smooth' });
-}
-
-// ============================================
-// NAVIGATION MENU LOGIC
-// ============================================
-
-const menuToggle = document.getElementById('menuToggle');
-const navOverlay = document.getElementById('navOverlay');
-const navClose = document.getElementById('navClose');
-const navLinkItems = document.querySelectorAll('.nav-link-item');
-
-if (menuToggle && navOverlay) {
-    menuToggle.addEventListener('click', () => {
-        navOverlay.classList.add('active');
-        document.body.style.overflow = 'hidden'; // Prevent scrolling when menu is open
+if (noiseCanvas) {
+    const gl = noiseCanvas.getContext("webgl", {
+        alpha: false,
+        antialias: false,
+        depth: false,
+        stencil: false,
+        preserveDrawingBuffer: false,
     });
 
-    const closeNav = () => {
-        navOverlay.classList.remove('active');
-        document.body.style.overflow = ''; // Restore scrolling
-    };
+    if (gl) {
+        const vertexSource = `
+            attribute vec2 a_position;
 
-    navClose.addEventListener('click', closeNav);
+            void main() {
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
 
-    // Close on link click
-    navLinkItems.forEach(item => {
-        item.addEventListener('click', closeNav);
-    });
+        const fragmentSource = `
+            precision highp float;
 
-    // Handle escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && navOverlay.classList.contains('active')) {
-            closeNav();
+            uniform float u_frame;
+
+            float hash13(vec3 p3) {
+                p3 = fract(p3 * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
+            }
+
+            void main() {
+                vec2 pixel = floor(gl_FragCoord.xy);
+                float grain = hash13(vec3(pixel, u_frame));
+                float luma = 0.232 + (grain - 0.5) * 0.056;
+
+                gl_FragColor = vec4(vec3(luma), 1.0);
+            }
+        `;
+
+        const compileShader = (type, source) => {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.warn(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+
+            return shader;
+        };
+
+        const vertexShader = compileShader(gl.VERTEX_SHADER, vertexSource);
+        const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentSource);
+
+        if (vertexShader && fragmentShader) {
+            const program = gl.createProgram();
+            gl.attachShader(program, vertexShader);
+            gl.attachShader(program, fragmentShader);
+            gl.linkProgram(program);
+
+            if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                const positionLocation = gl.getAttribLocation(program, "a_position");
+                const frameLocation = gl.getUniformLocation(program, "u_frame");
+                const buffer = gl.createBuffer();
+                let frame = 0;
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                gl.bufferData(
+                    gl.ARRAY_BUFFER,
+                    new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+                    gl.STATIC_DRAW
+                );
+
+                const resizeCanvas = () => {
+                    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+                    const width = Math.floor(window.innerWidth * pixelRatio);
+                    const height = Math.floor(window.innerHeight * pixelRatio);
+
+                    if (noiseCanvas.width !== width || noiseCanvas.height !== height) {
+                        noiseCanvas.width = width;
+                        noiseCanvas.height = height;
+                    }
+
+                    gl.viewport(0, 0, noiseCanvas.width, noiseCanvas.height);
+                };
+
+                const render = () => {
+                    resizeCanvas();
+                    gl.useProgram(program);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                    gl.enableVertexAttribArray(positionLocation);
+                    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+                    gl.uniform1f(frameLocation, frame);
+                    gl.drawArrays(gl.TRIANGLES, 0, 6);
+                    frame += 1;
+                    requestAnimationFrame(render);
+                };
+
+                requestAnimationFrame(render);
+            } else {
+                console.warn(gl.getProgramInfoLog(program));
+            }
         }
-    });
-}
-
-
-// ============================================
-// ARCHITECTURE POPUP LOGIC
-// ============================================
-
-const architectureBtn = document.getElementById('architectureBtn');
-const architectureOverlay = document.getElementById('architectureOverlay');
-const closePopup = document.getElementById('closePopup');
-
-if (architectureBtn && architectureOverlay) {
-    architectureBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        architectureOverlay.classList.add('active');
-    });
-
-    closePopup.addEventListener('click', () => {
-        architectureOverlay.classList.remove('active');
-    });
-
-    architectureOverlay.addEventListener('click', (e) => {
-        if (e.target === architectureOverlay) {
-            architectureOverlay.classList.remove('active');
-        }
-    });
-
-    // Handle escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && architectureOverlay.classList.contains('active')) {
-            architectureOverlay.classList.remove('active');
-        }
-    });
-}
-
-// ============================================
-// CUSTOM CURSOR LOGIC
-// ============================================
-
-const cursor = document.getElementById('cursor');
-
-if (cursor) {
-    // Track mouse movement
-    document.addEventListener('mousemove', (e) => {
-        cursor.style.transform = `translate3d(calc(${e.clientX}px - 50%), calc(${e.clientY}px - 50%), 0)`;
-    });
-
-    // Handle hover states for interactive elements
-    const interactiveElements = 'a, button, .project-card, .social-icon, .popup-link, .popup-close, .mod-grid-item, .menu-toggle, .nav-close, .nav-link-item';
-
-    document.addEventListener('mouseover', (e) => {
-        if (e.target.closest(interactiveElements)) {
-            cursor.classList.add('hovered');
-        }
-    });
-
-    document.addEventListener('mouseout', (e) => {
-        if (e.target.closest(interactiveElements)) {
-            cursor.classList.remove('hovered');
-        }
-    });
-}
-
-// ============================================
-// MAGNETIC ELEMENTS LOGIC
-// ============================================
-
-document.addEventListener('mousemove', (e) => {
-    const magneticElements = document.querySelectorAll('.magnetic');
-
-    magneticElements.forEach(el => {
-        const rect = el.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-
-        const deltaX = e.clientX - centerX;
-        const deltaY = e.clientY - centerY;
-        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-
-        const maxDistance = 100; // Pull radius
-        const strength = 15;    // Max pull strength in pixels
-
-        if (distance < maxDistance) {
-            const pullX = (deltaX / maxDistance) * strength;
-            const pullY = (deltaY / maxDistance) * strength;
-            el.style.transform = `translate3d(${pullX}px, ${pullY}px, 0)`;
-        } else {
-            el.style.transform = `translate3d(0, 0, 0)`;
-        }
-    });
-
-    // Parallax Dot Background
-    const body = document.body;
-    const moveX = (e.clientX / window.innerWidth - 0.5) * 20; // max 10px shift
-    const moveY = (e.clientY / window.innerHeight - 0.5) * 20;
-    body.style.backgroundPosition = `calc(50% + ${moveX}px) calc(50% + ${moveY}px)`;
-});
-
-
-// ============================================
-// CREAM MOD POPUP LOGIC
-// ============================================
-
-const creamModOverlay = document.getElementById('creamModOverlay');
-const closeCreamPopup = document.getElementById('closeCreamPopup');
-
-function confirmDownload() {
-    if (creamModOverlay) {
-        creamModOverlay.classList.add('active');
     }
 }
 
-if (closeCreamPopup && creamModOverlay) {
-    closeCreamPopup.addEventListener('click', () => {
-        creamModOverlay.classList.remove('active');
-    });
+const projectPreview = document.querySelector(".project-preview");
+const projectPreviewImages = document.querySelectorAll(".project-preview-image");
+const projectLinks = document.querySelectorAll(".project-link[data-preview]");
+const workSection = document.querySelector(".work-section");
 
-    creamModOverlay.addEventListener('click', (e) => {
-        if (e.target === creamModOverlay) {
-            creamModOverlay.classList.remove('active');
-        }
-    });
+if (projectPreview && projectPreviewImages.length === 2) {
+    let activePreviewIndex = 0;
+    let activePreviewSrc = projectPreviewImages[activePreviewIndex].getAttribute("src");
 
-    // Share escape key logic with Architecture popup
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            creamModOverlay.classList.remove('active');
-        }
-    });
-}
+    const showPreviewImage = (src) => {
+        projectPreview.classList.add("is-visible");
 
-function startDownload() {
-    const url = "Cream Mod.zip";
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = "Cream Mod.zip";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
-// ============================================
-// IMAGE VIEWER LOGIC
-// ============================================
-
-const imageViewerOverlay = document.getElementById('imageViewerOverlay');
-const fullscreenImage = document.getElementById('fullscreenImage');
-const closeImageViewer = document.getElementById('closeImageViewer');
-
-function openFullscreen(src) {
-    if (imageViewerOverlay && fullscreenImage) {
-        fullscreenImage.src = src;
-        imageViewerOverlay.classList.add('active');
-    }
-}
-
-if (closeImageViewer && imageViewerOverlay) {
-    closeImageViewer.addEventListener('click', () => {
-        imageViewerOverlay.classList.remove('active');
-    });
-
-    imageViewerOverlay.addEventListener('click', () => {
-        imageViewerOverlay.classList.remove('active');
-    });
-
-    // Share escape logic
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            imageViewerOverlay.classList.remove('active');
-        }
-    });
-}
-// ============================================
-// CURSOR CONNECTION LINES
-// ============================================
-
-const canvas = document.getElementById('line-canvas');
-const ctx = canvas.getContext('2d');
-let mouseX = 0;
-let mouseY = 0;
-let targetsCached = [];
-
-function resizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-}
-
-function updateTargets() {
-    targetsCached = Array.from(document.querySelectorAll('.highlight, .bordered')).filter(el => {
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-
-        // Skip elements that are effectively invisible or have no size
-        if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity) <= 0) return false;
-        if (rect.width === 0 || rect.height === 0) return false;
-
-        // Skip elements inside inactive popups/overlays
-        const overlay = el.closest('.popup-overlay');
-        if (overlay && !overlay.classList.contains('active')) return false;
-
-        // Ensure it has a valid position in the DOM (unless fixed)
-        if (el.offsetParent === null && style.position !== 'fixed') return false;
-
-        // Ensure it doesn't contain a large image (muffin-image is okay)
-        const images = Array.from(el.getElementsByTagName('img'));
-        const hasLargeImage = images.some(img => !img.classList.contains('muffin-image'));
-
-        return !hasLargeImage && el.tagName !== 'IMG';
-    });
-}
-
-// Initial setup
-window.addEventListener('resize', () => {
-    resizeCanvas();
-    updateTargets();
-});
-
-window.addEventListener('scroll', () => {
-    updateTargets();
-    // Manual redraw trigger for high-frequency scroll events
-    if (targetsCached.length > 0) {
-        drawLines();
-    }
-}, { passive: true });
-
-document.addEventListener('DOMContentLoaded', updateTargets);
-document.addEventListener('mousemove', (e) => {
-    mouseX = e.clientX;
-    mouseY = e.clientY;
-});
-
-// Watch for popup changes
-const observer = new MutationObserver(updateTargets);
-observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class'] });
-
-function drawLines() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Disable lines if any popup overlay is open
-    const anyActivePopup = document.querySelector('.popup-overlay.active');
-    if (anyActivePopup) {
-        requestAnimationFrame(drawLines);
-        return;
-    }
-
-    const threshold = 250;
-
-    targetsCached.forEach(target => {
-        const rect = target.getBoundingClientRect();
-
-        // Skip if the element is completely outside the viewport
-        if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+        if (src === activePreviewSrc) {
             return;
         }
 
-        const targetX = rect.left + rect.width / 2;
-        const targetY = rect.top + rect.height / 2;
+        const nextPreviewIndex = activePreviewIndex === 0 ? 1 : 0;
+        const activeImage = projectPreviewImages[activePreviewIndex];
+        const nextImage = projectPreviewImages[nextPreviewIndex];
 
-        const distance = Math.sqrt(Math.pow(mouseX - targetX, 2) + Math.pow(mouseY - targetY, 2));
+        const activateNextImage = () => {
+            requestAnimationFrame(() => {
+                nextImage.classList.add("is-active");
+                activeImage.classList.remove("is-active");
+                activePreviewIndex = nextPreviewIndex;
+                activePreviewSrc = src;
+            });
+        };
 
-        if (distance < threshold) {
-            ctx.beginPath();
-            ctx.moveTo(mouseX, mouseY);
-            ctx.lineTo(targetX, targetY);
+        nextImage.onload = activateNextImage;
+        nextImage.src = src;
 
-            const opacity = 1 - (distance / threshold);
-            ctx.strokeStyle = `rgba(0, 0, 0, ${opacity * 0.9})`;
-            ctx.lineWidth = 3;
-            ctx.stroke();
+        if (nextImage.complete) {
+            activateNextImage();
         }
+    };
+
+    projectLinks.forEach((link) => {
+        const showPreview = () => {
+            showPreviewImage(link.dataset.preview);
+        };
+
+        link.addEventListener("mouseenter", showPreview);
+        link.addEventListener("focus", showPreview);
+        link.addEventListener("blur", () => {
+            projectPreview.classList.remove("is-visible");
+        });
     });
 
-    requestAnimationFrame(drawLines);
+    if (workSection) {
+        workSection.addEventListener("mouseleave", () => {
+            projectPreview.classList.remove("is-visible");
+        });
+    }
 }
 
-// Kick off
-resizeCanvas();
-updateTargets();
-drawLines();
+const vengeModalTrigger = document.querySelector("[data-venge-modal]");
+const vengeModal = document.getElementById("vengeLinks");
+
+const closeVengeModal = () => {
+    if (vengeModal) {
+        vengeModal.classList.remove("is-open");
+        vengeModal.setAttribute("aria-hidden", "true");
+        document.body.classList.remove("is-modal-open");
+    }
+};
+
+if (vengeModalTrigger && vengeModal) {
+    vengeModalTrigger.addEventListener("click", (event) => {
+        event.preventDefault();
+        vengeModal.classList.add("is-open");
+        vengeModal.setAttribute("aria-hidden", "false");
+        document.body.classList.add("is-modal-open");
+    });
+
+    vengeModal.addEventListener("click", (event) => {
+        if (event.target === vengeModal) {
+            closeVengeModal();
+        }
+    });
+}
+
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+        closeVengeModal();
+    }
+});
+
+document.querySelectorAll('a[href^="#"]').forEach((link) => {
+    link.addEventListener("click", (event) => {
+        if (event.defaultPrevented) {
+            return;
+        }
+
+        const target = document.querySelector(link.getAttribute("href"));
+
+        if (!target) {
+            return;
+        }
+
+        event.preventDefault();
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+});
