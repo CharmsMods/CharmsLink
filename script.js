@@ -21,7 +21,9 @@ if (noiseCanvas) {
         const fragmentSource = `
             precision highp float;
 
-            uniform float u_frame;
+            uniform float u_seed;
+            uniform float u_nextSeed;
+            uniform float u_blend;
 
             float hash13(vec3 p3) {
                 p3 = fract(p3 * 0.1031);
@@ -31,7 +33,9 @@ if (noiseCanvas) {
 
             void main() {
                 vec2 pixel = floor(gl_FragCoord.xy);
-                float grain = hash13(vec3(pixel, u_frame));
+                float grainA = hash13(vec3(pixel, u_seed));
+                float grainB = hash13(vec3(pixel, u_nextSeed));
+                float grain = mix(grainA, grainB, smoothstep(0.0, 1.0, u_blend));
                 float luma = 0.232 + (grain - 0.5) * 0.056;
 
                 gl_FragColor = vec4(vec3(luma), 1.0);
@@ -63,9 +67,18 @@ if (noiseCanvas) {
 
             if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
                 const positionLocation = gl.getAttribLocation(program, "a_position");
-                const frameLocation = gl.getUniformLocation(program, "u_frame");
+                const seedLocation = gl.getUniformLocation(program, "u_seed");
+                const nextSeedLocation = gl.getUniformLocation(program, "u_nextSeed");
+                const blendLocation = gl.getUniformLocation(program, "u_blend");
                 const buffer = gl.createBuffer();
-                let frame = 0;
+                let seed = 0;
+                let nextSeed = 1;
+                let blend = 0;
+                let mouseSpeed = 0;
+                let lastMouseX = null;
+                let lastMouseY = null;
+                let lastMouseTime = performance.now();
+                let lastRenderTime = performance.now();
 
                 gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
                 gl.bufferData(
@@ -87,15 +100,49 @@ if (noiseCanvas) {
                     gl.viewport(0, 0, noiseCanvas.width, noiseCanvas.height);
                 };
 
-                const render = () => {
+                window.addEventListener(
+                    "pointermove",
+                    (event) => {
+                        const now = performance.now();
+
+                        if (lastMouseX !== null && lastMouseY !== null) {
+                            const deltaX = event.clientX - lastMouseX;
+                            const deltaY = event.clientY - lastMouseY;
+                            const deltaTime = Math.max(now - lastMouseTime, 16);
+                            const pixelsPerSecond = (Math.hypot(deltaX, deltaY) / deltaTime) * 1000;
+
+                            mouseSpeed = Math.min(1, Math.max(mouseSpeed, pixelsPerSecond / 420));
+                        }
+
+                        lastMouseX = event.clientX;
+                        lastMouseY = event.clientY;
+                        lastMouseTime = now;
+                    },
+                    { passive: true }
+                );
+
+                const render = (now) => {
                     resizeCanvas();
+
+                    const deltaSeconds = Math.min((now - lastRenderTime) / 1000, 0.08);
+                    lastRenderTime = now;
+                    mouseSpeed = Math.max(0, mouseSpeed - deltaSeconds * 2.8);
+                    blend += deltaSeconds * (8.5 + mouseSpeed * 30);
+
+                    while (blend >= 1) {
+                        seed = nextSeed;
+                        nextSeed += 1;
+                        blend -= 1;
+                    }
+
                     gl.useProgram(program);
                     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
                     gl.enableVertexAttribArray(positionLocation);
                     gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
-                    gl.uniform1f(frameLocation, frame);
+                    gl.uniform1f(seedLocation, seed);
+                    gl.uniform1f(nextSeedLocation, nextSeed);
+                    gl.uniform1f(blendLocation, blend);
                     gl.drawArrays(gl.TRIANGLES, 0, 6);
-                    frame += 1;
                     requestAnimationFrame(render);
                 };
 

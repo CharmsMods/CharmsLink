@@ -1324,9 +1324,12 @@
 
       const { used, unused } = summarizeAssetUsage(scan, entryHtmlId);
       const forcedExcludeIds = entryHtmlId ? htmlAssets.filter(a => a.id !== entryHtmlId).map(a => a.id) : [];
-      const excludedIds = Array.from(new Set([...unused.map(u => u.id), ...forcedExcludeIds]));
-
-      return { used, unused, excludedIds, entryHtmlId };
+      // Reference detection cannot prove that an asset is unused (for example, an
+      // entry script can be loaded dynamically or be the only imported asset).
+      // Keep unreferenced assets by default so the review step never turns a
+      // valid project into an empty build.
+      const defaultExcludedIds = Array.from(new Set(forcedExcludeIds));
+      return { used, unused, excludedIds: defaultExcludedIds, entryHtmlId };
     };
 
     modalCancel.onclick = () => {
@@ -1339,7 +1342,7 @@
       if (!pendingBuildContext) return;
       const excludedCount = pendingBuildContext.excludedIds.length;
       if (excludedCount) {
-        log(`<span class="text-[#FF3366] font-bold">Excluding ${excludedCount} unused asset(s) from output.</span>`);
+        log(`<span class="text-[#FF3366] font-bold">Excluding ${excludedCount} non-entry HTML asset(s) from this build.</span>`);
       }
       executeBuild(pendingBuildContext.excludedIds, pendingBuildContext.entryHtmlId);
       pendingBuildContext = null;
@@ -1550,6 +1553,8 @@
         minifyHTML: document.getElementById("optMinifyHTML").checked,
         minifyCSS: document.getElementById("optMinifyCSS").checked,
         minifyJS: document.getElementById("optMinifyJS").checked,
+        mangleJS: document.getElementById("optMangleJS").checked,
+        mangleTopLevel: document.getElementById("optMangleTopLevel").checked,
         comments: document.getElementById("optComments").checked,
         console: document.getElementById("optConsole").checked,
         useCDN: isCDN,
@@ -1851,7 +1856,8 @@
                 let content = asset.content;
                 const minifyJS = self.Terser && self.Terser.minify;
                 if (config.minifyJS && minifyJS) {
-                  content = (await minifyJS(content, { compress: { drop_console: config.console } })).code;
+                  const mangle = config.mangleJS ? { toplevel: config.mangleTopLevel } : false;
+                  content = (await minifyJS(content, { compress: { drop_console: config.console }, mangle })).code;
                 } else if ((config.comments || config.console) && minifyJS) {
                   const opts = { compress: { drop_console: config.console, defaults: false }, mangle: false, format: { beautify: true, comments: !config.comments } };
                   content = (await minifyJS(content, opts)).code;
@@ -1863,7 +1869,12 @@
                 const minifyHTML = self.HTMLMinifier && self.HTMLMinifier.minify;
                 const shouldRun = config.minifyHTML || config.minifyCSS || config.minifyJS || config.comments;
                 if (shouldRun && minifyHTML) {
-                  const jsOpts = config.minifyJS ? { compress: { drop_console: config.console } } : false;
+                  const jsOpts = config.minifyJS
+                    ? {
+                      compress: { drop_console: config.console },
+                      mangle: config.mangleJS ? { toplevel: config.mangleTopLevel } : false
+                    }
+                    : false;
                   const cssOpts = config.minifyCSS ? { level: 1, rebase: false } : false;
                   try {
                     content = await minifyHTML(content, {
@@ -2086,7 +2097,12 @@
             loadingSubtext.innerText = "Performing final HTML optimization pass...";
             await new Promise(r => setTimeout(r, 10));
 
-            const jsOpts = config.minifyJS ? { compress: { drop_console: config.console } } : false;
+            const jsOpts = config.minifyJS
+              ? {
+                compress: { drop_console: config.console },
+                mangle: config.mangleJS ? { toplevel: config.mangleTopLevel } : false
+              }
+              : false;
             const cssOpts = config.minifyCSS ? { level: 1, rebase: false } : false;
             try {
               baseHTML = await _minifyHTML(baseHTML, {
@@ -2732,6 +2748,8 @@
         if (session.config.minifyHTML !== undefined) document.getElementById("optMinifyHTML").checked = session.config.minifyHTML;
         if (session.config.minifyCSS !== undefined) document.getElementById("optMinifyCSS").checked = session.config.minifyCSS;
         if (session.config.minifyJS !== undefined) document.getElementById("optMinifyJS").checked = session.config.minifyJS;
+        if (session.config.mangleJS !== undefined) document.getElementById("optMangleJS").checked = session.config.mangleJS;
+        if (session.config.mangleTopLevel !== undefined) document.getElementById("optMangleTopLevel").checked = session.config.mangleTopLevel;
         if (session.config.comments !== undefined) document.getElementById("optComments").checked = session.config.comments;
         if (session.config.console !== undefined) document.getElementById("optConsole").checked = session.config.console;
         if (session.config.useCDN !== undefined) document.getElementById("optCDN").checked = session.config.useCDN;
